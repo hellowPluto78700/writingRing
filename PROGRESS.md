@@ -1,81 +1,210 @@
-# Data-format inspection progress
+# Progress
 
-The durable findings are documented in [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md).
+The upstream format reference remains in
+[docs/DATA_FORMAT.md](docs/DATA_FORMAT.md).
 
-## Inspection status
+## Completed phases
 
-- [x] Read `AGENTS.md`, `TASK.md`, `PROGRESS.md`, and
-  `docs/DATA_FORMAT_TASK.md`.
-- [x] Read all required upstream files:
-  `ring_plot.py`, `board_plot.py`, `core/imu_data.py`, `core/window.py`, and
-  `core/sensel_lib/frame_data.py`.
-- [x] Read the additional upstream board writer and Sensel binding files needed
-  to trace timestamps, chunking, coordinates, force, and contact fields:
-  `core/sensel_lib/board.py`, `sensel.py`, and `sensel_register_map.py`.
-- [x] Listed and categorized every file under
-  `data_sample/data/user_0/0`.
-- [x] Inspected `ring_0` with the author's exact
-  `np.fromfile(..., dtype=np.float64).reshape(-1, 7)` method.
-- [x] Inspected `ring_1` with the same shape interpretation for comparison
-  only.
-- [x] Loaded `board_0`, `board_1`, consecutive chunks, and all sample chunk
-  boundaries with the author's `compress_pickle.load` method.
-- [x] Recorded actual top-level, frame, force-array, contact-container, and
-  contact types and fields.
-- [x] Confirmed ring column order from `ring_plot.py` and `IMUData`.
-- [x] Confirmed the stored and display board coordinate transformations.
-- [x] Inspected all four `timestamp.txt` files and traced both upstream uses.
-- [x] Compared root and vendor `core` directories.
-- [x] Verified numerical versus lexical board ordering.
-- [x] Confirmed that unknown units and clock/synchronization questions remain
-  explicitly unresolved.
-- [x] Created `docs/DATA_FORMAT.md`.
-- [x] No loader, plotter, CLI, notebook, or test implementation was added.
+- [x] Upstream data-format inspection
+- [x] Recording discovery
+- [x] Ring loading and validation
+- [x] Board loading and validation
+- [ ] Matplotlib plotting
+- [ ] Remaining CLI scripts
+- [ ] Jupyter notebook
+- [ ] Full workflow documentation and acceptance run
 
-## Commands run and results
+## Files created or changed
 
-- `conda run -n writingring-viz python --version`
-  - Result: Python 3.11.15.
-- `diff -qr core vendor/WritingRing/core`
-  - Result: only `core/sensel_lib/__pycache__` differs; source files match.
-- `find data_sample/data/user_0/0 ...`
-  - Result: four dataset IDs, eight ring binaries, four timestamp files, and
-    39 board chunks were categorized.
-- Author-equivalent NumPy ring inspection in the `writingring-viz` environment
-  - Result: all files reshape to seven float64 columns; `ring_0` rates are
-    approximately 200.8-201.1 Hz under the microsecond interpretation;
-    timestamps are nondecreasing with duplicates.
-- `file`, `xxd`, `gzip -t`, gzip-prefix inspection, and
-  `compress_pickle.load`
-  - Result: board files are valid gzip-compressed protocol-4 pickles; the
-    loaded object is a list of official `FrameData` objects.
-- Numeric all-boundary board inspection
-  - Result: datasets 1-3 are chronological after an empty chunk 0; dataset 0
-    jumps backward 387,876,490 µs between chunks 6 and 7.
-- SHA-256 aggregate checks of `vendor/WritingRing` and `data_sample`
-  - Baseline results:
-    `315cc77dee0a30cb23750bb0a61804b165eb388080e6d659b10a867902dd5cd8`
-    and
-    `9cdc8a0c34bc955270ab282220b7fbd9e64edfe3a38bbe58601b2d297e0e9ff8`.
+- Created `src/writingring/board_loader.py`.
+- Created `tests/test_board_loader.py`.
+- Updated `src/writingring/__init__.py` to export the board API.
+- Updated `pyproject.toml` to declare the required `compress-pickle`
+  dependency.
+- Updated `PROGRESS.md`.
+- Kept `src/writingring/discovery.py`,
+  `src/writingring/ring_loader.py`, and their existing tests unchanged.
+- Did not change `docs/DATA_FORMAT.md`; implementation confirmed the existing
+  board format and dataset `0` anomaly without revealing a conflict.
+- Did not change `vendor/WritingRing` or `data_sample`.
+
+## API implemented
+
+```python
+load_board(
+    source: Recording | str | Path | Sequence[str | Path],
+) -> BoardData
+```
+
+- A `Recording` contributes its `board_chunk_paths` exactly in discovery
+  order.
+- Explicit paths are also consumed exactly as supplied.
+- Paths must have one dataset ID and nondecreasing numeric chunk indices.
+- Timestamp values are never used to sort, split, repair, or discard chunks.
+- Before deserialization, `FrameData` and `ContactData` are imported from
+  `core.sensel_lib.frame_data`.
+- Every chunk is loaded with the author's operation:
+
+  ```python
+  frames = compress_pickle.load(path)
+  ```
+
+- `BoardData` contains:
+  - the source recording, when supplied;
+  - the exact chunk paths;
+  - one structured `BoardChunkReport` per successful chunk;
+  - frame-level and contact-level Pandas DataFrames;
+  - `BoardValidationReport`;
+  - aggregate warnings.
+
+The frame DataFrame retains every frame, including frames with no contacts.
+It records dataset/chunk indices, frame index within the chunk, global frame
+index, raw frame timestamp, contact count, and force-array shape/dtype
+metadata.
+
+The contact DataFrame records confirmed contact fields. Stored `y` is retained
+as `y_raw`; `y_display = 1.0 - y_raw` is added only as the confirmed upstream
+display transformation. No physical units are assigned.
+
+## Validation policy
+
+Path-level errors:
+
+- `MissingBoardChunksError` when no chunk paths are supplied;
+- `BoardPathError` for missing/non-regular files, malformed board filenames,
+  mixed dataset IDs, or decreasing numeric chunk order;
+- `BoardClassImportError` when the official pickle classes are unavailable.
+
+Chunk-level failures raise a `BoardChunkError` subtype that carries the failed
+chunk's structured report:
+
+- `EmptyBoardChunkFileError` for a zero-byte file;
+- `BoardDeserializationError` for invalid gzip/pickle content;
+- `UnexpectedBoardContainerError` for a non-list top-level object;
+- `UnexpectedBoardObjectError` for unexpected frame/contact/container types or
+  nonnumeric required values;
+- `MissingBoardAttributeError` for missing confirmed frame/contact fields.
+
+Successfully deserialized `[]` is not an error. It is retained as an empty
+chunk and warned. No failed, empty, duplicate, old, or anomalous chunk is
+silently skipped.
+
+The aggregate report includes:
+
+- chunk, frame, contact, and contact-free-frame counts;
+- missing, duplicate, empty, and empty-leading chunk indices;
+- numeric-order first/last frame timestamps;
+- within-chunk duplicate/backward timestamp checks;
+- timestamp boundary reports for every adjacent supplied path;
+- explicit cross-chunk backward-boundary reports;
+- finite x, raw-y, and force ranges and non-finite counts;
+- warnings.
+
+## Commands run and exact results
+
+- Focused board tests:
+
+  ```bash
+  conda run --no-capture-output -n writingring-viz \
+      python -m pytest tests/test_board_loader.py -q
+  ```
+
+  Exact final result: `21 passed in 0.43s`.
+
+- Full suite:
+
+  ```bash
+  conda run --no-capture-output -n writingring-viz \
+      python -m pytest -q
+  ```
+
+  Exact final result: `59 passed in 0.24s`.
+
+- Reusable-API real-data inspection with payload-call tracking:
+
+  ```bash
+  PYTHONPATH=src conda run --no-capture-output \
+      -n writingring-viz python -
+  ```
+
+  Result: four recordings loaded. Exactly 39 board paths were passed to
+  `compress_pickle.load`, in discovery order. No ring payload, including
+  `ring_1`, was opened.
+
+## Real-data results
+
+| Dataset | Chunks | Empty | Frames | Contacts | First timestamp in numeric order | Last timestamp in numeric order | Within-chunk backward steps | Cross-chunk backward boundaries | Missing indices |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 0 | 16 | 0 | 14365 | 5800 | 1720476262355268 | 1720475983195457 | 0 | `6->7`, delta `-387876490` | none |
+| 1 | 8 | 0 | 6724 | 3414 | 1720476340060284 | 1720476391394439 | 0 | none | none |
+| 2 | 7 | 0 | 5631 | 3001 | 1720476425943282 | 1720476469056724 | 0 | none | none |
+| 3 | 8 | 0 | 6612 | 3396 | 1720476502079573 | 1720476552609021 | 0 | none | none |
+
+Finite contact ranges:
+
+| Dataset | x range | raw y range | force range |
+| ---: | --- | --- | --- |
+| 0 | 0.3011548913043478 to 0.7125339673913044 | 0.13278245192307692 to 0.8388221153846154 | 3.0 to 280.875 |
+| 1 | 0.3413722826086957 to 0.7802479619565217 | 0.1739783653846154 to 0.9256911057692307 | 3.0 to 183.75 |
+| 2 | 0.34110054347826085 to 0.7793817934782609 | 0.13221153846153846 to 0.8595252403846154 | 3.0 to 269.375 |
+| 3 | 0.24500679347826088 to 0.7327615489130435 | 0.1390925480769231 to 0.8790264423076923 | 3.0 to 211.875 |
+
+Warnings:
+
+- Dataset 0:
+  - empty chunk `0` retained;
+  - empty leading chunk `0` retained;
+  - 8,654 frames contain no contacts;
+  - backward boundary `6->7`, delta `-387876490`.
+- Dataset 1:
+  - empty/leading chunk `0` retained;
+  - 3,383 frames contain no contacts.
+- Dataset 2:
+  - empty/leading chunk `0` retained;
+  - 2,658 frames contain no contacts.
+- Dataset 3:
+  - empty/leading chunk `0` retained;
+  - 3,318 frames contain no contacts.
+
+No non-finite x, raw-y, or force values and no within-chunk backward timestamp
+steps were observed.
+
+## Dataset 0 anomaly
+
+The returned chunk indices are exactly:
+
+```text
+0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+```
+
+All chunks, including empty chunk `0` and older chunks `7` through `15`, are
+retained. The boundary report records:
+
+```text
+previous chunk: 6
+next chunk: 7
+previous last timestamp: 1720476305908521
+next first timestamp: 1720475918032031
+delta: -387876490
+```
+
+No timestamp reordering, repair, automatic split, or data removal occurred.
 
 ## Unresolved issues
 
-- Ring index physical meanings and why `ring_1` is omitted upstream.
-- Ring byte-order contract, independent timestamp clock source, nominal sample
-  rate, and physical signal units.
-- Physical units for board coordinates, force, force arrays, area, axes, and
-  deltas.
-- Exact synchronization guarantees among ring, board, and marker timestamps.
-- Cause and desired handling of the empty chunk-zero files, delayed board
-  starts, and dataset `0`'s older chunks `7..15`.
-- Action-ID semantics.
-- Upstream inconsistencies: `FrameData` mentions `perf_counter` while the
-  writer uses `time.time`; `Board.FPS` is 50 while sample frame timing is about
-  131 Hz.
+- The reason every recording has an empty initial chunk remains unknown.
+- Dataset `0`'s older chunk tail is retained; any later user-facing treatment
+  remains a plotting/product decision, not a loader correction.
+- Physical units for contact positions, force, area, axes, deltas, and force
+  arrays remain undocumented.
+- Ring/board synchronization guarantees remain unknown and were not
+  implemented.
+- The official pickle classes currently rely on the repository-level `core`
+  namespace being importable.
 
-## Next step
+## Next recommended phase
 
-Implement recording discovery only, using user/action/dataset membership,
-`ring_0`, and numeric board-chunk parsing. Keep parsing separate from loading,
-and preserve the documented dataset `0` anomaly for later validation-policy
-work.
+Implement only reusable Matplotlib plotting from the already loaded ring and
+board tables. Preserve raw/inferred distinctions, show contact-free recordings
+gracefully, and make dataset `0`'s validation warnings visible. Do not add
+synchronization, CLI expansion, or notebook work unless separately requested.
