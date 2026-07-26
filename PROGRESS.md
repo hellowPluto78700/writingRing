@@ -10,8 +10,8 @@ The upstream format reference remains in
 - [x] Ring loading and validation
 - [x] Board loading and validation
 - [x] Matplotlib plotting
-- [ ] Remaining CLI scripts
-- [ ] Jupyter notebook
+- [x] Remaining CLI scripts
+- [x] Jupyter notebook
 - [ ] Full workflow documentation and acceptance run
 
 ## Board loading phase
@@ -425,3 +425,448 @@ Implement only the next explicitly requested workflow phase, likely the
 remaining inspection CLI surface. Reuse these plotting APIs and preserve their
 raw/inferred distinctions. Do not add synchronization or a notebook until
 those phases are separately requested.
+
+## Command-line inspection and plotting phase
+
+### Files created or modified
+
+- Created `src/writingring/selection.py` with exact recording selection and
+  typed selection errors.
+- Created `src/writingring/inspection.py` with the common structured summary,
+  readable text formatting, strict JSON conversion, and JSON writing.
+- Created `scripts/inspect_recording.py`.
+- Created `scripts/plot_recording.py`.
+- Created `tests/test_selection.py`.
+- Created `tests/test_cli.py`.
+- Updated `src/writingring/__init__.py` to export the selection and inspection
+  helpers.
+- Updated `pyproject.toml` only as needed to include the official repository
+  `core` and `core.sensel_lib` namespaces in an editable installation.
+- Updated `PROGRESS.md`.
+- Generated verification outputs under `outputs/cli_verification/dataset_0`
+  through `dataset_3`.
+- Kept `src/writingring/discovery.py`, `ring_loader.py`, `board_loader.py`,
+  and `plotting.py` unchanged.
+- Kept all preexisting scripts and tests unchanged.
+- Did not update `docs/DATA_FORMAT.md`; the CLI phase revealed no new format
+  evidence.
+- Did not modify `vendor/WritingRing` or `data_sample`.
+
+### Reusable selection and summary APIs
+
+```python
+select_recording(
+    recordings: Iterable[Recording],
+    *,
+    user: str,
+    action: str,
+    dataset_id: int,
+) -> Recording
+```
+
+Selection is exact and does not change discovery behavior. Empty user/action
+values and negative or non-integer dataset IDs raise
+`InvalidRecordingSelectorError`; zero matches raise
+`RecordingNotFoundError`; unexpected duplicate identities raise
+`MultipleRecordingsMatchedError`.
+
+```python
+build_recording_summary(
+    recording: Recording,
+    ring_data: RingData,
+    board_data: BoardData,
+) -> dict[str, Any]
+```
+
+Both CLIs use this single summary source. `to_jsonable` recursively converts
+dataclasses, Paths, enums, NumPy arrays/scalars, mappings, and sequences.
+Non-finite floating-point values become explicit JSON strings (`NaN`,
+`Infinity`, or `-Infinity`) so `write_json` can enforce `allow_nan=False`.
+
+### CLI usage
+
+Readable inspection:
+
+```bash
+python scripts/inspect_recording.py \
+    --data-root data_sample/data \
+    --user user_0 \
+    --action 0 \
+    --dataset-id 0
+```
+
+Add `--json-output PATH` to write the same structured information as strict
+JSON.
+
+Plot generation:
+
+```bash
+python scripts/plot_recording.py \
+    --data-root data_sample/data \
+    --user user_0 \
+    --action 0 \
+    --dataset-id 0 \
+    --output-dir outputs/cli_verification/dataset_0 \
+    --no-show
+```
+
+Plotting options:
+
+- `--ring-time-axis`: `sample_index` or `inferred_time`; default
+  `inferred_time`.
+- `--board-time-axis`: `frame_index` or `raw_timestamp`; default
+  `frame_index`.
+- `--show` / `--no-show`; default is `--show`.
+
+The choices and defaults are imported directly from
+`writingring.plotting`. In `--no-show` mode the script selects Agg before
+importing pyplot-dependent project code and closes every returned figure.
+Interactive mode preserves the plotting API's existing show behavior and does
+not close figures prematurely.
+
+The plotting CLI creates the requested output directory and writes:
+
+```text
+ring_imu.png
+touch_trajectory.png
+board_force_time.png
+summary.json
+```
+
+Reusing an explicitly selected output directory may replace only those four
+expected paths. Unrelated files are left untouched; this policy is documented
+in CLI help and `summary.json`.
+
+### Error handling
+
+Both CLIs use concise `error: ...` messages and return status `2` for expected
+discovery, selection, Ring-loading, Board-loading, plotting, output, and JSON
+failures. Standard argparse errors handle malformed numeric selectors with
+status `2`. Expected failures do not print tracebacks.
+
+### Editable installation
+
+The required command was run:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pip install -e .
+```
+
+The first sandboxed attempt could not download isolated build metadata and
+could not write Conda site-packages. The approved external rerun succeeded.
+
+The first real inspection then revealed that the initial `src`-only package
+configuration did not expose the official pickle classes when a script was
+launched from `scripts/`. It failed clearly with:
+
+```text
+error: official pickle classes are not importable from
+core.sensel_lib.frame_data
+```
+
+The minimum packaging fix explicitly included `writingring`, `core`, and
+`core.sensel_lib`. Reinstalling editably succeeded. From `/tmp`, without a
+`PYTHONPATH` setting, both imports resolve to the project:
+
+```text
+/home/ted/project/writingring-viz/src/writingring/__init__.py
+/home/ted/project/writingring-viz/core/sensel_lib/frame_data.py
+```
+
+No loader code was changed to obtain this result.
+
+### Tests and exact results
+
+Focused command:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pytest tests/test_selection.py tests/test_cli.py -q
+```
+
+Initial implemented result: `15 passed in 1.43s`.
+
+After adding explicit nonexistent-root and process-level malformed-selector
+coverage, exact final result: `17 passed in 1.46s`.
+
+Full suite:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pytest -q
+```
+
+Exact result: `91 passed in 1.64s`.
+
+Focused tests cover:
+
+- exact, missing, duplicate, and malformed selection;
+- inspection text and strict JSON;
+- nonexistent roots and loader failure;
+- plotting output generation and valid summary JSON;
+- Agg/no-show behavior and figure closure;
+- exact Ring and Board time-axis forwarding;
+- Dataset `0`-style `6->7` warnings;
+- concise plotting failures and output-directory failures;
+- primary `ring_0`-only payload access;
+- complete numeric Board path order with no dropping.
+
+The existing listing command was rerun after installation and still reported
+the same four recordings:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python scripts/list_recordings.py --data-root data_sample/data
+```
+
+### Real-data command results
+
+The requested Dataset `0` inspection succeeded after the packaging fix:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python scripts/inspect_recording.py \
+    --data-root data_sample/data \
+    --user user_0 \
+    --action 0 \
+    --dataset-id 0
+```
+
+It reported:
+
+- Ring shape `(10247, 7)` and 10,247 samples;
+- 7,148 duplicate and zero backward Ring timestamp steps;
+- 51.003585 inferred seconds and 200.88783955088647 inferred Hz;
+- 16 Board chunks with indices `0..15`;
+- empty chunk `0`;
+- 14,365 frames, 5,800 contacts, and 8,654 contact-free frames;
+- Board boundary `6->7`, delta `-387876490.0`;
+- no missing Board chunk indices.
+
+The plotting command was run separately for datasets `0`, `1`, `2`, and `3`
+with `--no-show`. All returned status `0` and printed their four output paths.
+
+A tracked reusable-CLI verification then asserted:
+
+- only `0_ring_0.bin` through `3_ring_0.bin` were passed to `numpy.fromfile`;
+- no `ring_1` payload was opened;
+- all 39 Board paths were passed to `compress_pickle.load` in exact discovery
+  order;
+- summary chunk sequences are `0..15`, `0..7`, `0..6`, and `0..7`;
+- Dataset `0` JSON contains the `6->7` boundary;
+- all JSON files parse;
+- every expected output is nonempty;
+- every summary explicitly states that Ring and Board are not assumed
+  synchronized.
+
+Visual inspection of
+`outputs/cli_verification/dataset_0/touch_trajectory.png` confirmed its
+warning footer visibly includes:
+
+```text
+Backward timestamp boundary 6->7 (delta=-387876490.0); order retained
+```
+
+### Generated verification outputs
+
+| Dataset | File | Bytes |
+| ---: | --- | ---: |
+| 0 | `ring_imu.png` | 147703 |
+| 0 | `touch_trajectory.png` | 219289 |
+| 0 | `board_force_time.png` | 128803 |
+| 0 | `summary.json` | 5984 |
+| 1 | `ring_imu.png` | 175315 |
+| 1 | `touch_trajectory.png` | 211472 |
+| 1 | `board_force_time.png` | 115601 |
+| 1 | `summary.json` | 4613 |
+| 2 | `ring_imu.png` | 143163 |
+| 2 | `touch_trajectory.png` | 208214 |
+| 2 | `board_force_time.png` | 98323 |
+| 2 | `summary.json` | 4493 |
+| 3 | `ring_imu.png` | 169497 |
+| 3 | `touch_trajectory.png` | 218722 |
+| 3 | `board_force_time.png` | 111629 |
+| 3 | `summary.json` | 4605 |
+
+The read-only tree hashes remained identical before and after the CLI runs:
+
+```text
+data_sample:        9cdc8a0c34bc955270ab282220b7fbd9e64edfe3a38bbe58601b2d297e0e9ff8
+vendor/WritingRing: 315cc77dee0a30cb23750bb0a61804b165eb388080e6d659b10a867902dd5cd8
+```
+
+### Unresolved issues
+
+- Dataset `0`'s older Board tail remains retained and disclosed; the CLI does
+  not choose a product policy for it.
+- Physical units remain undocumented.
+- The Ring timestamp microsecond interpretation remains inferred rather than
+  a confirmed upstream contract.
+- Ring–Board synchronization guarantees remain unknown and no synchronization
+  was performed.
+- Dense figures retain all points and may overplot, consistent with the
+  plotting API.
+
+### Next recommended phase
+
+This phase's recommended Jupyter notebook follow-up is completed in the
+subsequent section.
+
+## Jupyter notebook phase
+
+### Files created or changed
+
+- Created `notebooks/explore_recording.ipynb`.
+- Created the notebook verification figures under
+  `outputs/notebook_exploration/`.
+- Updated `PROGRESS.md`.
+- Did not change discovery, selection, loader, inspection-summary, plotting,
+  or CLI code.
+- Did not change `docs/DATA_FORMAT.md`; notebook execution revealed no new
+  format evidence or conflict.
+
+### Notebook sections
+
+The notebook:
+
+1. imports only public APIs from the editably installed `writingring`
+   package;
+2. resolves the project data and notebook-output directories without setting
+   `PYTHONPATH`;
+3. discovers all recordings and displays a concise Pandas discovery table;
+4. selects `user_0`, action `0`, dataset `0` through `select_recording`;
+5. loads the primary Ring payload and all Board chunks through `load_ring`
+   and `load_board`;
+6. builds and prints the shared `build_recording_summary` result;
+7. previews the Ring, Board-frame, and Board-contact tables with `.head()`;
+8. displays structured Ring validation, channel statistics, Board validation,
+   and chunk reports;
+9. creates and saves Ring inferred-time and sample-index plots, the touch
+   trajectory, and Board-force plots using frame index and raw timestamp;
+10. demonstrates independent Board numeric-chunk filtering and Ring
+    sample-index slicing without modifying the loaded data;
+11. runs explicit output and anomaly checks; and
+12. ends with the known timestamp, empty-chunk, physical-unit, and
+    synchronization limitations.
+
+The Board and Ring filtering examples explicitly state that separate filters
+do not establish synchronization.
+
+### Structure and execution verification
+
+`nbformat`, `nbconvert`, and `ipykernel` were installed into the existing
+`writingring-viz` Conda environment because they were not initially present.
+No project dependency or packaging metadata was changed for this
+environment-only verification.
+
+Programmatic validation used `nbformat.validate`, parsed every code cell with
+`ast.parse`, and checked the required public API calls and limitation text.
+Exact result:
+
+```text
+valid notebook: 30 cells, 16 code cells, 14 markdown cells
+```
+
+The editable import check, with no `PYTHONPATH` setting, resolved to:
+
+```text
+/home/ted/project/writingring-viz/src/writingring/__init__.py
+```
+
+Jupyter configuration, runtime files, IPython state, and Matplotlib caches
+were directed to `/tmp` because the home directory is read-only. The final
+execution command was:
+
+```bash
+env \
+  JUPYTER_CONFIG_DIR=/tmp/writingring-jupyter-config \
+  JUPYTER_DATA_DIR=/tmp/writingring-jupyter-data \
+  JUPYTER_RUNTIME_DIR=/tmp/writingring-jupyter-runtime \
+  IPYTHONDIR=/tmp/writingring-ipython \
+  MPLCONFIGDIR=/tmp/writingring-matplotlib \
+  XDG_CACHE_HOME=/tmp/writingring-cache \
+  MPLBACKEND=Agg \
+  conda run --no-capture-output -n writingring-viz \
+  jupyter nbconvert \
+    --to notebook \
+    --execute notebooks/explore_recording.ipynb \
+    --output explore_recording.executed.ipynb \
+    --output-dir /tmp/writingring-notebook-execution \
+    --ExecutePreprocessor.timeout=300
+```
+
+The sandboxed first attempt could not create Jupyter's localhost kernel
+socket. The approved execution completed successfully and wrote:
+
+```text
+/tmp/writingring-notebook-execution/explore_recording.executed.ipynb
+```
+
+The executed artifact passed schema validation with all 16 code cells
+executed and zero error outputs. Its checks confirmed:
+
+- primary payload `0_ring_0.bin` was loaded; Ring 1 remained metadata only;
+- all 16 Board chunks remained in numeric order with indices `0..15`;
+- the visible Dataset `0` warning was
+  `backward timestamp boundary 6->7: delta=-387876490.0`;
+- no timestamp repair or Ring–Board synchronization was applied; and
+- every expected saved figure existed and was nonempty.
+
+Two pre-final execution runs exposed notebook-only naming mistakes
+(`frame_count` versus summary wording and the named `sample_index` index
+versus a column). The notebook was corrected to use the existing public data
+representations; no reusable API semantics changed.
+
+### Generated output files
+
+| File | Bytes |
+| --- | ---: |
+| `outputs/notebook_exploration/ring_imu_inferred_time.png` | 147703 |
+| `outputs/notebook_exploration/ring_imu_sample_index.png` | 157730 |
+| `outputs/notebook_exploration/touch_trajectory.png` | 219289 |
+| `outputs/notebook_exploration/board_force_frame_index.png` | 128803 |
+| `outputs/notebook_exploration/board_force_raw_timestamp.png` | 101862 |
+
+The read-only tree hashes were identical before and after execution:
+
+```text
+data_sample:        9cdc8a0c34bc955270ab282220b7fbd9e64edfe3a38bbe58601b2d297e0e9ff8
+vendor/WritingRing: 315cc77dee0a30cb23750bb0a61804b165eb388080e6d659b10a867902dd5cd8
+```
+
+### Full test result
+
+Command:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pytest -q
+```
+
+Exact result:
+
+```text
+91 passed in 1.73s
+```
+
+### Limitations
+
+- Dataset `0`'s `6->7` backward Board timestamp boundary remains retained and
+  disclosed; no timestamp was repaired and no chunk was dropped, reordered,
+  or split.
+- Empty leading Board chunk `0` remains represented and disclosed.
+- The Ring microsecond interpretation remains inferred, not a confirmed
+  upstream timestamp contract.
+- Ring signal and Board coordinate/force physical units remain undocumented.
+- Ring–Board synchronization remains unconfirmed and was not implemented or
+  implied by the independent filtering examples.
+- The notebook intentionally uses concise previews rather than embedding
+  complete large DataFrames.
+
+### Next recommended phase
+
+The next separately authorized phase is final workflow documentation and the
+acceptance run. It should verify the installed-package workflow and existing
+artifacts without adding synchronization or changing discovery, loader,
+plotting, selection, or CLI semantics.
