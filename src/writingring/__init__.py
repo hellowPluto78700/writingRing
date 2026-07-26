@@ -49,6 +49,19 @@ from writingring.plotting import (
     plot_ring_imu,
     plot_touch_trajectory,
 )
+from writingring.inspection import (
+    build_recording_summary,
+    format_recording_summary,
+    to_jsonable,
+    write_json,
+)
+from writingring.selection import (
+    InvalidRecordingSelectorError,
+    MultipleRecordingsMatchedError,
+    RecordingNotFoundError,
+    RecordingSelectionError,
+    select_recording,
+)
 
 __all__ = [
     "BoardClassImportError",
@@ -85,11 +98,20 @@ __all__ = [
     "discover_recordings",
     "concise_warning_text",
     "InferredTimeUnavailableError",
+    "InvalidRecordingSelectorError",
     "MalformedPlotDataError",
+    "MultipleRecordingsMatchedError",
+    "RecordingNotFoundError",
+    "RecordingSelectionError",
+    "build_recording_summary",
+    "format_recording_summary",
     "load_board",
     "load_ring",
     "parse_recording_filename",
     "plot_board_force_over_time",
     "plot_ring_imu",
     "plot_touch_trajectory",
+    "select_recording",
+    "to_jsonable",
+    "write_json",
 ]
