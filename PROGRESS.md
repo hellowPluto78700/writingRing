@@ -1328,3 +1328,213 @@ The project report is complete and serves both as a new-developer
 architecture guide and as a technical appendix for later research. This
 phase added no implementation feature and did not begin synchronization,
 segmentation, force-array analysis, or machine-learning work.
+
+## Vendor windowing investigation
+
+- [x] Completed the source- and sample-backed investigation requested in
+  `docs/WINDOWING_ANALYSIS_TASK.md`.
+- Created the complete report at
+  `docs/VENDOR_WINDOWING_REPORT.md`.
+- Analyzed `vendor/WritingRing/board_plot.py`, `ring_plot.py`,
+  `core/window.py`, `core/imu_data.py`, and the relevant Sensel Board,
+  frame-data, binding, and register-map modules.
+- Main finding: the vendor defines a list-backed bounded FIFO rolling-buffer
+  class, but no vendor call site imports or instantiates it. The actual Ring
+  and Board plotting paths do not implement true fixed-length sliding-window
+  segmentation. Board files are persistence chunks, and adjacent marker
+  intervals are variable-duration timestamp filters.
+- Unresolved questions include the Ring `0`/`1` meanings and Ring clock
+  contract, a guaranteed Ring–Board synchronization relationship, the cause
+  of empty initial Board chunks and dataset `0`'s older tail, and whether the
+  unpopulated `Board.frames` history was an omission or intentional.
+- No implementation, vendor source, or sample-data file was changed.
+
+## Ring acceleration windowed PSD phase
+
+### Files added or changed
+
+- Added `src/writingring/spectral.py` with reusable numerical windowing,
+  one-sided PSD calculation, aggregation, validation, and combined plotting.
+- Added `scripts/plot_ring_accel_spectrum.py` as a thin discovery, selection,
+  Ring-loading, plotting, and reporting adapter.
+- Added `tests/test_spectral.py` and `tests/test_spectral_cli.py`.
+- Updated `src/writingring/__init__.py` with the stable spectral API.
+- Updated `README.md` with the PSD workflow, interpretation, CLI usage, and
+  non-goals.
+- Updated `PROGRESS.md`.
+- Generated the sample verification image at
+  `outputs/dataset_0/ring_accel_psd_overlay.png`.
+- Kept all existing discovery, selection, Ring-loading, and plotting behavior
+  unchanged. Did not modify `vendor/WritingRing`, `data_sample`, Board
+  loading, marker handling, synchronization, timestamp handling, or
+  resampling behavior.
+
+### Public API and implementation decisions
+
+The exported API is:
+
+```python
+WindowedPSD
+SpectralAnalysisError
+InsufficientSpectralSamplesError
+InvalidFrequencyRangeError
+UnsupportedAggregateError
+SpectralPlotError
+compute_windowed_psd
+plot_ring_acceleration_psd_overlay
+```
+
+- `compute_windowed_psd` accepts one finite one-dimensional signal, calculates
+  `round(sampling_rate_hz * window_seconds)` samples per window and
+  `round(window_size * (1 - overlap_ratio))` samples per hop, and emits only
+  complete windows at the specified starts. It drops the incomplete tail
+  without padding.
+- Each segment is copied to float64, mean-detrended, multiplied by
+  `numpy.hanning`, transformed with `numpy.fft.rfft`, and normalized by
+  `sampling_rate_hz * sum(hann**2)`.
+- One-sided scaling doubles interior bins only: `1:-1` for even lengths and
+  `1:` for odd lengths, preserving DC and the even-length Nyquist bin.
+- Mean and median aggregation are calculated independently at each frequency
+  bin. Result arrays are read-only, and neither the input array nor the loaded
+  Ring DataFrame is modified.
+- Plotting analyzes exactly `acc_x`, `acc_y`, and `acc_z`. It creates one
+  three-row, one-column figure with shared frequency axes, shared logarithmic
+  y limits, gray complete-window curves, and a blue selected-aggregate curve.
+- Exact PSD zeros are replaced only in temporary display arrays with a floor
+  derived from the smallest positive selected PSD. Stored PSD values remain
+  unchanged.
+- The default 200 Hz rate is explicitly labeled nominal. Acceleration PSD
+  units are labeled `raw acceleration units²/Hz`.
+- The CLI reuses `discover_recordings`, `select_recording`, and `load_ring`.
+  It imports plotting code only after selecting Agg for `--no-show`, never
+  loads Board data, and refuses to replace an existing output unless
+  `--overwrite` is supplied.
+
+### Commands executed and results
+
+Focused tests:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pytest tests/test_spectral.py tests/test_spectral_cli.py -q
+```
+
+Initial result after the first test-helper correction cycle:
+`1 failed, 36 passed`. The remaining failure was a frequency-validation
+subclass mismatch; finite-range conversion errors were then consistently
+wrapped as `InvalidFrequencyRangeError`.
+
+Exact final focused result:
+
+```text
+37 passed in 1.43s
+```
+
+Complete suite:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python -m pytest -q
+```
+
+Exact result:
+
+```text
+128 passed in 2.72s
+```
+
+Sample-data CLI verification:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+    python scripts/plot_ring_accel_spectrum.py \
+    --data-root data_sample/data \
+    --user user_0 \
+    --action 0 \
+    --dataset-id 0 \
+    --output outputs/dataset_0/ring_accel_psd_overlay.png \
+    --no-show \
+    --overwrite
+```
+
+Calculated summary:
+
+```text
+Samples: 10247
+Nominal sampling rate: 200 Hz
+Window duration: 1 s
+Window size: 200 samples
+Overlap: 50%
+Hop size: 100 samples
+Windows: 101
+Frequency resolution: 1 Hz
+Displayed range: 0–30 Hz
+Aggregate: mean
+```
+
+The output is one nonempty 313,582-byte PNG at 1,100 × 1,000 pixels.
+Programmatic figure verification found exactly three axes titled Acceleration
+X, Y, and Z; 102 lines per axis (101 gray window curves plus one aggregate);
+logarithmic y scales; shared x axes; and common 0–30 Hz limits. Visual
+inspection confirmed the required vertically stacked layout, correct order,
+visible per-window overlays, highlighted mean curves, neutral units, and
+readable title/labels.
+
+### Unresolved limitations
+
+- The nominal 200 Hz analysis rate remains a processing assumption; the
+  upstream Ring writer and a confirmed sampling-rate contract are unavailable.
+- Acceleration physical units remain undocumented.
+- Fixed sample windows do not compensate for timestamp duplicates, sampling
+  jitter, gaps, drift, or recording-specific effective rate.
+- The complete recording is analyzed without marker segmentation.
+- Ring and Board remain unsynchronized; Board data is not loaded.
+- No resampling, interpolation, zero-padding, timestamp repair, gyroscope
+  analysis, spectrogram, or machine-learning export was added.
+
+## Frequency-support dry run
+
+Experiment command:
+
+```bash
+conda run --no-capture-output -n writingring-viz \
+  python scripts/plot_ring_accel_spectrum.py \
+  --data-root data_sample/data \
+  --user user_0 \
+  --action 0 \
+  --dataset-id 0 \
+  --plot-mode support \
+  --sampling-rate 200 \
+  --window-seconds 1 \
+  --overlap 0.5 \
+  --frequency-min 1 \
+  --frequency-max 100 \
+  --high-power-quantile 0.90 \
+  --minimum-support 20 \
+  --frequency-smoothing-bins 3 \
+  --top-k-labels 5 \
+  --output outputs/dataset_0/ring_accel_frequency_support.png \
+  --no-show \
+  --overwrite
+```
+
+Output: `outputs/dataset_0/ring_accel_frequency_support.png` (115,778-byte,
+1,100 × 1,000 PNG). The run analyzed 10,247 samples as 101 complete
+200-sample windows with a 100-sample hop and 1 Hz frequency resolution.
+
+Top results, ranked by support percentage and then conditional median
+relative-power strength:
+
+- X: 2 Hz (100.00%, 0.279526), 1 Hz (100.00%, 0.247421), 3 Hz
+  (99.01%, 0.145219), 4 Hz (94.06%, 0.060683), 5 Hz (84.16%, 0.034496).
+- Y: 2 Hz (97.03%, 0.196745), 3 Hz (96.04%, 0.129158), 4 Hz
+  (96.04%, 0.069669), 1 Hz (95.05%, 0.157494), 5 Hz (79.21%, 0.037473).
+- Z: 3 Hz (91.09%, 0.110451), 2 Hz (90.10%, 0.129282), 4 Hz
+  (85.15%, 0.068298), 1 Hz (77.23%, 0.091631), 5 Hz (72.28%, 0.050389).
+
+No experiment runtime problem occurred. Direct assertions confirmed normalized
+relative-power rows, support counts matching the Boolean masks, bounded
+percentages, and exactly three linear scatter-only axes with 0–100% y-limits.
+The complete suite passed: `130 passed in 2.91s`. Interpretation remains
+limited by the nominal 200 Hz assumption, fixed sample windows, undocumented
+acceleration units, and this single-recording exploratory scope.

@@ -62,6 +62,16 @@ from writingring.selection import (
     RecordingSelectionError,
     select_recording,
 )
+from writingring.spectral import (
+    InsufficientSpectralSamplesError,
+    InvalidFrequencyRangeError,
+    SpectralAnalysisError,
+    SpectralPlotError,
+    UnsupportedAggregateError,
+    WindowedPSD,
+    compute_windowed_psd,
+    plot_ring_acceleration_psd_overlay,
+)
 
 __all__ = [
     "BoardClassImportError",
@@ -91,13 +101,18 @@ __all__ = [
     "RingLoadError",
     "RingPathError",
     "RingValidationReport",
+    "SpectralAnalysisError",
+    "SpectralPlotError",
     "TimestampInterpretation",
+    "UnsupportedAggregateError",
     "UnsupportedTimeAxisError",
     "UnexpectedBoardContainerError",
     "UnexpectedBoardObjectError",
     "discover_recordings",
     "concise_warning_text",
     "InferredTimeUnavailableError",
+    "InsufficientSpectralSamplesError",
+    "InvalidFrequencyRangeError",
     "InvalidRecordingSelectorError",
     "MalformedPlotDataError",
     "MultipleRecordingsMatchedError",
@@ -113,5 +128,8 @@ __all__ = [
     "plot_touch_trajectory",
     "select_recording",
     "to_jsonable",
+    "WindowedPSD",
+    "compute_windowed_psd",
+    "plot_ring_acceleration_psd_overlay",
     "write_json",
 ]

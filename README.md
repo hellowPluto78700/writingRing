@@ -162,6 +162,42 @@ Select them with `--board-time-axis frame_index` or
 `--board-time-axis raw_timestamp`. Neither mode claims synchronization with
 the Ring stream.
 
+## Ring acceleration PSD comparison
+
+Generate one combined windowed power-spectral-density figure for a selected
+primary Ring recording:
+
+```bash
+python scripts/plot_ring_accel_spectrum.py \
+  --data-root data_sample/data \
+  --user user_0 \
+  --action 0 \
+  --dataset-id 0 \
+  --sampling-rate 200 \
+  --window-seconds 1 \
+  --overlap 0.5 \
+  --aggregate mean \
+  --frequency-min 0 \
+  --frequency-max 30 \
+  --output outputs/dataset_0/ring_accel_psd_overlay.png \
+  --no-show
+```
+
+The figure analyzes the complete selected `ring_0` stream and contains three
+vertically stacked panels for acceleration X, Y, and Z. Gray curves are the
+PSDs of individual complete windows; the highlighted curve is the selected
+mean or median PSD. Defaults use a nominal 200 Hz analysis rate, one-second
+windows, 50% overlap, and therefore 200-sample windows, 100-sample hops, and
+1 Hz frequency resolution. An incomplete final tail is dropped without
+padding.
+
+The 200 Hz rate is an explicit processing assumption, not a confirmed
+upstream sampling-rate contract. Acceleration physical units are undocumented,
+so PSD values are labeled in raw acceleration units²/Hz. This whole-recording
+analysis does not use marker intervals, load Board data, synchronize Ring and
+Board, repair timestamps, or resample the signal. Use `--overwrite` to replace
+an existing output file explicitly.
+
 ## Notebook usage
 
 Install the notebook extra and register the active Conda environment as a
@@ -232,13 +268,13 @@ Install the test extra and run:
 python -m pytest -q
 ```
 
-The final acceptance run verified an expected result of `91 passed`.
+The latest complete acceptance run verified `128 passed`.
 
 ## Project structure
 
 ```text
 src/writingring/       reusable discovery, loading, validation, summaries,
-                       selection, and Matplotlib plotting
+                       selection, spectral analysis, and Matplotlib plotting
 scripts/               command-line entry scripts
 tests/                 focused unit and workflow tests
 notebooks/             installed-package interactive exploration
