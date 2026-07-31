@@ -55,6 +55,27 @@ def _args(root: Path, output: Path) -> list[str]:
     ]
 
 
+def _stationary_data_root(tmp_path: Path) -> Path:
+    root = tmp_path / "gravity_data"
+    action = root / "writer_a" / "letters"
+    action.mkdir(parents=True)
+    sample_count = 400
+    time = np.arange(sample_count, dtype=np.float64) / 200.0
+    acceleration = np.tile([0.0, 0.0, 9.80665], (sample_count, 1))
+    acceleration[100:, 0] += np.sin(2 * np.pi * 5 * time[100:])
+    acceleration[100:, 1] += np.sin(2 * np.pi * 10 * time[100:])
+    acceleration[100:, 2] += np.sin(2 * np.pi * 20 * time[100:])
+    rows = np.column_stack(
+        (
+            acceleration,
+            np.zeros((sample_count, 3)),
+            1_000_000.0 + np.arange(sample_count) * 5_000.0,
+        )
+    )
+    rows.astype(np.float64).tofile(action / "0_ring_0.bin")
+    return root
+
+
 def test_cli_uses_primary_ring_only_and_never_loads_board(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -199,3 +220,94 @@ def test_success_summary_uses_calculated_metadata(
     assert "Frequency resolution: 2 Hz" in captured.out
     assert "Displayed range: 0–40 Hz" in captured.out
     assert "Aggregate: median" in captured.out
+
+
+@pytest.mark.parametrize("plot_mode", ("psd", "support"))
+def test_remove_gravity_uses_automatic_stationary_calibration(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    plot_mode: str,
+) -> None:
+    root = _stationary_data_root(tmp_path)
+    output = tmp_path / f"linear-{plot_mode}.png"
+
+    result = plot_ring_accel_spectrum.main(
+        [
+            *_args(root, output),
+            "--remove-gravity",
+            "--plot-mode",
+            plot_mode,
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert output.is_file() and output.stat().st_size > 0
+    assert "Analysis input: linear acceleration" in captured.out
+    assert "Automatic stationary search: 0:20" in captured.out
+    assert "Calibration: 0:20 (passed)" in captured.out
+
+
+def test_remove_gravity_manual_interval_overrides_search(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _stationary_data_root(tmp_path)
+
+    result = plot_ring_accel_spectrum.main(
+        [
+            *_args(root, tmp_path / "manual.png"),
+            "--remove-gravity",
+            "--calibration-start",
+            "20",
+            "--calibration-stop",
+            "40",
+            "--no-auto-calibration",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert "Calibration selection: manual interval" in captured.out
+    assert "Automatic stationary search" not in captured.out
+
+
+def test_remove_gravity_requires_automatic_or_manual_calibration(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _stationary_data_root(tmp_path)
+
+    result = plot_ring_accel_spectrum.main(
+        [
+            *_args(root, tmp_path / "disabled.png"),
+            "--remove-gravity",
+            "--no-auto-calibration",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "automatic calibration is disabled" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_remove_gravity_upstream_profile_requires_manual_interval(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = _stationary_data_root(tmp_path)
+
+    result = plot_ring_accel_spectrum.main(
+        [
+            *_args(root, tmp_path / "upstream.png"),
+            "--remove-gravity",
+            "--profile",
+            "upstream_suggested",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "manual calibration" in captured.err
+    assert "Traceback" not in captured.err

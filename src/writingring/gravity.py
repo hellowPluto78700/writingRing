@@ -29,6 +29,11 @@ import numpy as np
 import pandas as pd
 
 from writingring.ring_loader import RingData
+from writingring.stationary import (
+    StationarySearchConfig,
+    StationarySearchResult,
+    find_stationary_interval,
+)
 
 
 IDENTITY_AXIS_TRANSFORM: Final[
@@ -80,12 +85,12 @@ class GravityCalibrationError(GravityRemovalError):
 class GravityRemovalConfig:
     """Explicit processing, calibration, and confidence-gate configuration."""
 
-    sampling_rate_hz: float
-    gyro_scale_to_rad_s: float
-    calibration_start_sample: int
-    calibration_stop_sample: int
+    sampling_rate_hz: float = 200.0
+    gyro_scale_to_rad_s: float = 1.0
+    calibration_start_sample: int | None = None
+    calibration_stop_sample: int | None = None
     acceleration_scale_to_working_units: float = 1.0
-    acceleration_unit_label: str = "raw acceleration units"
+    acceleration_unit_label: str = "m/s^2"
     axis_transform: tuple[tuple[float, float, float], ...] = (
         IDENTITY_AXIS_TRANSFORM
     )
@@ -121,6 +126,7 @@ class GravityCalibration:
     gravity_magnitude_source: str
     gyro_bias_source: str
     warnings: tuple[str, ...]
+    stationary_search: StationarySearchResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,8 +209,8 @@ class GravityRemovalResult:
 def upstream_suggested_config(
     *,
     sampling_rate_hz: float,
-    calibration_start_sample: int,
-    calibration_stop_sample: int,
+    calibration_start_sample: int | None = None,
+    calibration_stop_sample: int | None = None,
     strict_calibration: bool = True,
     **overrides: object,
 ) -> GravityRemovalConfig:
@@ -373,6 +379,95 @@ def calibrate_gravity_removal(
         gravity_magnitude_source=magnitude_source,
         gyro_bias_source=bias_source,
         warnings=tuple(warnings),
+    )
+
+
+def auto_calibrate_gravity_removal(
+    acceleration: np.ndarray,
+    gyroscope: np.ndarray,
+    *,
+    gravity_config: GravityRemovalConfig,
+    search_config: StationarySearchConfig | None = None,
+    gravity_magnitude: float | None = None,
+    gyro_bias_rad_s: Sequence[float] | None = None,
+) -> GravityCalibration:
+    """Find a stationary interval, then apply the existing calibration checks.
+
+    Automatic search is defined for acceleration in m/s^2 and gyroscope data
+    in rad/s. Non-default acceleration scaling profiles must instead supply a
+    manual interval so their physical-unit assumptions remain explicit.
+    """
+
+    validated_config, transform = _validate_config(gravity_config)
+    _require_automatic_search_units(validated_config)
+    acceleration_values, gyroscope_values = _validated_input_pair(
+        acceleration,
+        gyroscope,
+    )
+    effective_search_config = (
+        StationarySearchConfig(
+            sampling_rate_hz=validated_config.sampling_rate_hz
+        )
+        if search_config is None
+        else search_config
+    )
+    if not math.isclose(
+        effective_search_config.sampling_rate_hz,
+        validated_config.sampling_rate_hz,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise GravityCalibrationError(
+            "stationary-search sampling_rate_hz must match gravity "
+            "sampling_rate_hz"
+        )
+    acceleration_body, angular_velocity = _configure_inputs(
+        acceleration_values,
+        gyroscope_values,
+        config=validated_config,
+        transform=transform,
+    )
+    search_result = find_stationary_interval(
+        np.column_stack((acceleration_body, angular_velocity)),
+        config=effective_search_config,
+    )
+    selected_config = replace(
+        validated_config,
+        calibration_start_sample=search_result.start_index,
+        calibration_stop_sample=search_result.stop_index,
+    )
+    if not search_result.passed and selected_config.strict_calibration:
+        failed_checks = ", ".join(search_result.failed_checks)
+        raise GravityCalibrationError(
+            "automatic stationary calibration found no passing interval; "
+            f"best candidate {search_result.start_index}:"
+            f"{search_result.stop_index} failed {failed_checks}"
+        )
+    calibration = calibrate_gravity_removal(
+        acceleration_values,
+        gyroscope_values,
+        config=selected_config,
+        gravity_magnitude=gravity_magnitude,
+        gyro_bias_rad_s=gyro_bias_rad_s,
+    )
+    warnings = list(calibration.warnings)
+    if not search_result.passed:
+        warnings.insert(
+            0,
+            "automatic stationary search found no passing interval; "
+            "best candidate is provisional (failed: "
+            + ", ".join(search_result.failed_checks)
+            + ")",
+        )
+    else:
+        warnings.append(
+            "calibration interval selected by automatic stationary search"
+        )
+    return replace(
+        calibration,
+        passed=calibration.passed and search_result.passed,
+        warnings=tuple(dict.fromkeys(warnings)),
+        stationary_search=search_result,
     )
 
 
@@ -564,6 +659,7 @@ def process_ring_gravity(
     calibration: GravityCalibration | None = None,
     gravity_magnitude: float | None = None,
     gyro_bias_rad_s: Sequence[float] | None = None,
+    stationary_search_config: StationarySearchConfig | None = None,
 ) -> GravityRemovalResult:
     """Calibrate and process a loaded primary Ring stream without mutation."""
 
@@ -587,15 +683,26 @@ def process_ring_gravity(
     gyroscope = ring_data.dataframe.loc[
         :, list(_GYROSCOPE_COLUMNS)
     ].to_numpy(copy=True)
+    validated_config, _ = _validate_config(config)
     effective_calibration = calibration
     if effective_calibration is None:
-        effective_calibration = calibrate_gravity_removal(
-            acceleration,
-            gyroscope,
-            config=config,
-            gravity_magnitude=gravity_magnitude,
-            gyro_bias_rad_s=gyro_bias_rad_s,
-        )
+        if _has_manual_calibration_bounds(validated_config):
+            effective_calibration = calibrate_gravity_removal(
+                acceleration,
+                gyroscope,
+                config=validated_config,
+                gravity_magnitude=gravity_magnitude,
+                gyro_bias_rad_s=gyro_bias_rad_s,
+            )
+        else:
+            effective_calibration = auto_calibrate_gravity_removal(
+                acceleration,
+                gyroscope,
+                gravity_config=validated_config,
+                search_config=stationary_search_config,
+                gravity_magnitude=gravity_magnitude,
+                gyro_bias_rad_s=gyro_bias_rad_s,
+            )
     elif gravity_magnitude is not None or gyro_bias_rad_s is not None:
         raise GravityCalibrationError(
             "gravity_magnitude and gyro_bias_rad_s cannot be supplied with "
@@ -604,7 +711,7 @@ def process_ring_gravity(
     return remove_gravity_in_body_frame(
         acceleration,
         gyroscope,
-        config=config,
+        config=effective_calibration.config,
         calibration=effective_calibration,
     )
 
@@ -752,6 +859,11 @@ def _validate_calibration_bounds(
 ) -> tuple[int, int]:
     start = config.calibration_start_sample
     stop = config.calibration_stop_sample
+    if start is None and stop is None:
+        raise GravityCalibrationError(
+            "manual calibration bounds are unavailable; use automatic "
+            "calibration or supply both bounds"
+        )
     if (
         isinstance(start, bool)
         or not isinstance(start, int)
@@ -772,6 +884,30 @@ def _validate_calibration_bounds(
             f"calibration_min_samples={config.calibration_min_samples}"
         )
     return start, stop
+
+
+def _has_manual_calibration_bounds(config: GravityRemovalConfig) -> bool:
+    start = config.calibration_start_sample
+    stop = config.calibration_stop_sample
+    if (start is None) != (stop is None):
+        raise InvalidGravityConfigError(
+            "calibration_start_sample and calibration_stop_sample must be "
+            "provided together"
+        )
+    return start is not None and stop is not None
+
+
+def _require_automatic_search_units(config: GravityRemovalConfig) -> None:
+    if not math.isclose(
+        config.acceleration_scale_to_working_units,
+        1.0,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise GravityCalibrationError(
+            "automatic stationary calibration requires acceleration in m/s^2 "
+            "without scaling; supply manual calibration bounds for this profile"
+        )
 
 
 def _configure_inputs(

@@ -371,7 +371,7 @@ def plot_ring_acceleration_psd_overlay(
     output_path: str | Path | None = None,
     show: bool = False,
 ) -> Figure:
-    """Plot complete-window acceleration PSDs in one three-row figure."""
+    """Plot complete-window raw Ring-acceleration PSDs in three panels."""
 
     if not isinstance(ring_data, RingData):
         raise SpectralAnalysisError(
@@ -393,6 +393,52 @@ def plot_ring_acceleration_psd_overlay(
             f"{SUPPORTED_AGGREGATES[0]!r} or {SUPPORTED_AGGREGATES[1]!r}"
         )
 
+    return plot_acceleration_psd_overlay(
+        ring_data.dataframe.loc[:, ACCELERATION_COLUMNS].to_numpy(copy=True),
+        identity=_ring_identity(ring_data),
+        source_label="Acceleration",
+        psd_unit_label="raw acceleration units²/Hz",
+        sampling_rate_hz=sampling_rate_hz,
+        window_seconds=window_seconds,
+        overlap_ratio=overlap_ratio,
+        aggregate=aggregate,
+        frequency_min_hz=frequency_min_hz,
+        frequency_max_hz=frequency_max_hz,
+        output_path=output_path,
+        show=show,
+    )
+
+
+def plot_acceleration_psd_overlay(
+    acceleration: np.ndarray,
+    *,
+    identity: str,
+    source_label: str,
+    psd_unit_label: str,
+    sampling_rate_hz: float = 200.0,
+    window_seconds: float = 1.0,
+    overlap_ratio: float = 0.5,
+    aggregate: str = "mean",
+    frequency_min_hz: float = 0.0,
+    frequency_max_hz: float = 30.0,
+    output_path: str | Path | None = None,
+    show: bool = False,
+) -> Figure:
+    """Plot PSD overlays for an explicit finite ``(N, 3)`` acceleration array."""
+
+    acceleration_values = _validated_acceleration_matrix(acceleration)
+    if not isinstance(identity, str):
+        raise SpectralAnalysisError("PSD identity must be a string")
+    if not isinstance(source_label, str) or not source_label:
+        raise SpectralAnalysisError("PSD source label must be a nonempty string")
+    if not isinstance(psd_unit_label, str) or not psd_unit_label:
+        raise SpectralAnalysisError("PSD unit label must be a nonempty string")
+    if aggregate not in SUPPORTED_AGGREGATES:
+        raise UnsupportedAggregateError(
+            f"unsupported PSD aggregate {aggregate!r}; expected "
+            f"{SUPPORTED_AGGREGATES[0]!r} or {SUPPORTED_AGGREGATES[1]!r}"
+        )
+
     sampling_rate = _finite_float(
         sampling_rate_hz,
         name="sampling rate",
@@ -406,9 +452,9 @@ def plot_ring_acceleration_psd_overlay(
 
     results: list[WindowedPSD] = []
     aggregates: list[np.ndarray] = []
-    for column in ACCELERATION_COLUMNS:
+    for axis_index in range(3):
         result = compute_windowed_psd(
-            ring_data.dataframe[column].to_numpy(copy=True),
+            acceleration_values[:, axis_index],
             sampling_rate_hz=sampling_rate,
             window_seconds=window_seconds,
             overlap_ratio=overlap_ratio,
@@ -457,7 +503,7 @@ def plot_ring_acceleration_psd_overlay(
         figsize=(11, 10),
         layout="constrained",
     )
-    titles = ("Acceleration X", "Acceleration Y", "Acceleration Z")
+    titles = tuple(f"{source_label} {axis}" for axis in ("X", "Y", "Z"))
     selected_frequencies = results[0].frequencies_hz[frequency_mask]
     try:
         for axis, title, result, aggregate_values in zip(
@@ -486,7 +532,7 @@ def plot_ring_acceleration_psd_overlay(
                 label=f"{aggregate.capitalize()} PSD",
             )
             axis.set_title(title)
-            axis.set_ylabel("PSD (raw acceleration units²/Hz)")
+            axis.set_ylabel(f"PSD ({psd_unit_label})")
             axis.set_yscale("log")
             axis.set_xlim(frequency_min, frequency_max)
             axis.set_ylim(y_min, y_max)
@@ -495,9 +541,8 @@ def plot_ring_acceleration_psd_overlay(
         axes[-1].set_xlabel("Frequency (Hz)")
 
         first_result = results[0]
-        identity = _ring_identity(ring_data)
         figure.suptitle(
-            "WritingRing acceleration PSD comparison"
+            f"WritingRing {source_label.lower()} PSD comparison"
             f"{identity}\n"
             f"nominal rate={sampling_rate:g} Hz; "
             f"window={float(window_seconds):g} s; "
@@ -519,6 +564,7 @@ def plot_ring_acceleration_frequency_support(
     supports: dict[str, FrequencySupport],
     *,
     identity: str,
+    source_label: str = "Acceleration",
     sampling_rate_hz: float,
     window_seconds: float,
     overlap_ratio: float,
@@ -533,6 +579,10 @@ def plot_ring_acceleration_frequency_support(
         raise SpectralAnalysisError(
             "frequency-support plotting requires acc_x, acc_y, and acc_z "
             "in that order"
+        )
+    if not isinstance(source_label, str) or not source_label:
+        raise SpectralAnalysisError(
+            "frequency-support source label must be a nonempty string"
         )
     minimum_support = _finite_float(
         minimum_support_percent,
@@ -558,7 +608,7 @@ def plot_ring_acceleration_frequency_support(
         figsize=(11, 10),
         layout="constrained",
     )
-    titles = ("Acceleration X", "Acceleration Y", "Acceleration Z")
+    titles = tuple(f"{source_label} {axis}" for axis in ("X", "Y", "Z"))
     try:
         for axis, title, column in zip(
             axes,
@@ -630,7 +680,8 @@ def plot_ring_acceleration_frequency_support(
 
         first_support = supports[ACCELERATION_COLUMNS[0]]
         figure.suptitle(
-            f"WritingRing acceleration frequency support — {identity}\n"
+            f"WritingRing {source_label.lower()} frequency support — "
+            f"{identity}\n"
             f"{float(sampling_rate_hz):g} Hz nominal; "
             f"{float(window_seconds):g} s windows; "
             f"{float(overlap_ratio) * 100:g}% overlap; "
@@ -645,6 +696,31 @@ def plot_ring_acceleration_frequency_support(
         plt.close(figure)
         raise
     return figure
+
+
+def _validated_acceleration_matrix(acceleration: np.ndarray) -> np.ndarray:
+    """Return a finite floating-point acceleration matrix without aliasing input."""
+
+    try:
+        values = np.asarray(acceleration, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise SpectralAnalysisError(
+            "PSD acceleration must be convertible to a numeric (N, 3) array"
+        ) from error
+    if values.ndim != 2 or values.shape[1] != len(ACCELERATION_COLUMNS):
+        raise SpectralAnalysisError(
+            "PSD acceleration must have shape (N, 3), "
+            f"got {values.shape}"
+        )
+    if values.shape[0] == 0:
+        raise SpectralAnalysisError(
+            "PSD acceleration must contain at least one sample"
+        )
+    if not np.isfinite(values).all():
+        raise SpectralAnalysisError(
+            "PSD acceleration must contain only finite values"
+        )
+    return np.array(values, dtype=np.float64, copy=True)
 
 
 def _top_support_indices(

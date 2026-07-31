@@ -591,10 +591,13 @@ gravity_correction_used
 gravity_correction_confidence
 ```
 
-The transformation requires an explicit nominal processing rate, gyroscope
-scale to radians/second, acceleration scale/label, right-handed axis
-transform, and stationary calibration interval. The identity transform means
-raw Ring sensor axes; a physical sensor-to-ring mounting transform remains
+The default transformation assumes a nominal 200 Hz rate, acceleration in
+`m/s^2`, gyroscope values in `rad/s`, the identity axis transform, and
+expected gravity of `9.80665 m/s^2`. It automatically proposes the best
+passing 1.0-second stationary interval from robust acceleration and gyro
+metrics, then passes that interval through gravity calibration. Callers may
+override it with explicit manual bounds. The identity transform means raw Ring
+sensor axes; a physical sensor-to-ring mounting transform remains
 undocumented.
 
 The opt-in `upstream_suggested` profile is based on

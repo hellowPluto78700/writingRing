@@ -60,10 +60,17 @@ from writingring.gravity import (
     GravityRemovalResult,
     InvalidGravityConfigError,
     InvalidGravityInputError,
+    auto_calibrate_gravity_removal,
     calibrate_gravity_removal,
     process_ring_gravity,
     remove_gravity_in_body_frame,
     upstream_suggested_config,
+)
+from writingring.stationary import (
+    StationarySearchConfig,
+    StationarySearchError,
+    StationarySearchResult,
+    find_stationary_interval,
 )
 from writingring.inspection import (
     build_recording_summary,
@@ -86,6 +93,7 @@ from writingring.spectral import (
     UnsupportedAggregateError,
     WindowedPSD,
     compute_windowed_psd,
+    plot_acceleration_psd_overlay,
     plot_ring_acceleration_psd_overlay,
 )
 
@@ -110,6 +118,9 @@ __all__ = [
     "GravityRemovalDiagnostics",
     "GravityRemovalError",
     "GravityRemovalResult",
+    "StationarySearchConfig",
+    "StationarySearchError",
+    "StationarySearchResult",
     "ChannelStatistics",
     "EmptyRingFileError",
     "MalformedRingFileError",
@@ -144,8 +155,10 @@ __all__ = [
     "RecordingNotFoundError",
     "RecordingSelectionError",
     "build_recording_summary",
+    "auto_calibrate_gravity_removal",
     "calibrate_gravity_removal",
     "format_recording_summary",
+    "find_stationary_interval",
     "load_board",
     "load_ring",
     "parse_recording_filename",
@@ -159,6 +172,7 @@ __all__ = [
     "to_jsonable",
     "WindowedPSD",
     "compute_windowed_psd",
+    "plot_acceleration_psd_overlay",
     "plot_ring_acceleration_psd_overlay",
     "upstream_suggested_config",
     "write_json",

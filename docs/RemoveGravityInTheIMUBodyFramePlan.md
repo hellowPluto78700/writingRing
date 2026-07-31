@@ -5,17 +5,18 @@
 Implemented in:
 
 - `src/writingring/gravity.py`;
+- `src/writingring/stationary.py`;
 - `src/writingring/plotting.py`;
 - `scripts/plot_ring_linear_acceleration.py`;
 - public exports from `src/writingring/__init__.py`;
-- `tests/test_gravity.py`, `tests/test_gravity_plotting.py`, and
-  `tests/test_gravity_cli.py`; and
+- `tests/test_gravity.py`, `tests/test_gravity_plotting.py`,
+  `tests/test_gravity_cli.py`, and `tests/test_stationary.py`; and
 - `README.md`, `docs/DATA_FORMAT.md`, and `docs/PROJECT_REPORT.md`.
 
 The completed implementation follows the offline bidirectional estimator,
 strict/provisional calibration policy, raw-data preservation, assumed-profile
 labeling, and acceptance criteria below. The complete suite passes with
-`158 passed`.
+`174 passed`.
 
 ## 1. Objective
 
@@ -526,3 +527,292 @@ as processing assumptions:
 If those facts remain unavailable, the implementation should still be useful
 for controlled experiments, but its public language must remain “estimated,”
 “configured,” and “provisional.”
+
+# Revision Plan: Automatic Stationary Calibration for Gravity Removal
+
+## Objective
+
+Revise the gravity-removal pipeline so that it:
+
+- assumes acceleration input is in `m/s^2`;
+- assumes gyroscope input is in `rad/s`;
+- uses a default sampling rate of `200 Hz`;
+- automatically finds a stationary calibration interval when the user does not provide one;
+- uses a default stationary interval length of `1.0 s`;
+- preserves manual calibration interval support;
+- keeps the existing offline bidirectional gravity estimator.
+
+## 1. Update Gravity Removal Defaults
+
+Update `GravityRemovalConfig` defaults to:
+
+```python
+sampling_rate_hz = 200.0
+acceleration_scale_to_working_units = 1.0
+acceleration_unit_label = "m/s^2"
+gyro_scale_to_rad_s = 1.0
+```
+
+Use:
+
+```python
+expected_gravity_m_s2 = 9.80665
+```
+
+Do not apply hidden acceleration or gyroscope unit conversions.
+
+Keep the axis transform explicit. Use the identity matrix by default unless the caller supplies a documented sensor-to-body transform.
+
+## 2. Add Automatic Stationary-Interval Detection
+
+Create:
+
+```text
+src/writingring/stationary.py
+```
+
+Add the public function:
+
+```python
+find_stationary_interval(
+    imu: np.ndarray,
+    *,
+    config: StationarySearchConfig = StationarySearchConfig(),
+) -> StationarySearchResult
+```
+
+Expected input:
+
+```text
+shape: (N, 6)
+columns: ax, ay, az, gx, gy, gz
+acceleration unit: m/s^2
+gyroscope unit: rad/s
+```
+
+### Default Search Settings
+
+```python
+sampling_rate_hz = 200.0
+stationary_duration_s = 0.1
+stride_duration_s = 0.05
+
+expected_gravity_m_s2 = 9.80665
+
+max_gravity_error_m_s2 = 0.50
+max_acc_norm_robust_std_m_s2 = 0.15
+max_acc_axis_robust_std_m_s2 = 0.25
+
+max_gyro_median_rad_s = 0.05
+max_gyro_p95_rad_s = 0.10
+max_gyro_robust_std_rad_s = 0.02
+```
+
+At 200 Hz, the default stationary window contains 200 samples.
+
+## 3. Stationary Detection Method
+
+Slide the fixed-length window across the complete recording.
+
+For every window, calculate:
+
+```python
+acc_norm = np.linalg.norm(acceleration, axis=1)
+gyro_norm = np.linalg.norm(gyroscope, axis=1)
+```
+
+Use median and MAD-based robust standard deviation:
+
+```python
+robust_std = 1.4826 * median(abs(x - median(x)))
+```
+
+Calculate these metrics:
+
+1. Median acceleration magnitude.
+2. Difference from `9.80665 m/s^2`.
+3. Robust standard deviation of acceleration magnitude.
+4. Per-axis acceleration robust standard deviation, combined using the vector norm.
+5. Median gyroscope magnitude.
+6. 95th percentile gyroscope magnitude.
+7. Robust standard deviation of gyroscope magnitude.
+
+A window passes only when all configured thresholds pass.
+
+Calculate a dimensionless score:
+
+```python
+score = (
+    gravity_error / max_gravity_error
+    + acc_norm_robust_std / max_acc_norm_robust_std
+    + acc_axis_robust_std / max_acc_axis_robust_std
+    + gyro_median / max_gyro_median
+    + gyro_p95 / max_gyro_p95
+    + gyro_robust_std / max_gyro_robust_std
+)
+```
+
+Select the passing window with the lowest score.
+
+If no window passes, return the lowest-score window with:
+
+```python
+passed = False
+```
+
+Do not silently treat it as a valid calibration interval.
+
+## 4. Search Result
+
+Add an immutable `StationarySearchResult` containing:
+
+```python
+start_index
+stop_index
+duration_s
+passed
+score
+
+estimated_gravity_m_s2
+gravity_direction_body
+estimated_gyro_bias_rad_s
+
+gravity_error_m_s2
+acc_norm_robust_std_m_s2
+acc_axis_robust_std_m_s2
+gyro_median_rad_s
+gyro_p95_rad_s
+gyro_robust_std_rad_s
+
+failed_checks
+evaluated_window_count
+valid_window_count
+```
+
+Estimate the body-frame gravity direction from the componentwise median acceleration:
+
+```python
+acc_center = np.median(acc_window, axis=0)
+gravity_direction = acc_center / np.linalg.norm(acc_center)
+```
+
+Estimate gyroscope bias from the componentwise median:
+
+```python
+gyro_bias = np.median(gyro_window, axis=0)
+```
+
+## 5. Integrate With Gravity Calibration
+
+Use this precedence:
+
+```text
+Manual calibration interval provided
+    -> use the manual interval
+
+No manual interval provided
+    -> run automatic stationary detection
+
+Automatic detection passes
+    -> use the detected start and stop indices
+
+Automatic detection fails in strict mode
+    -> raise a typed calibration error
+
+Automatic detection fails in provisional mode
+    -> continue with the best candidate and attach a warning
+```
+
+The detected interval must still pass the existing `calibrate_gravity_removal()` validation. Automatic detection proposes the interval; calibration performs final validation.
+
+Use the midpoint of the accepted interval as the offline gravity anchor, then retain the existing forward and backward propagation method.
+
+## 6. API Changes
+
+Add exports for:
+
+```python
+StationarySearchConfig
+StationarySearchResult
+find_stationary_interval
+```
+
+Optionally add a wrapper:
+
+```python
+auto_calibrate_gravity_removal(
+    acceleration: np.ndarray,
+    gyroscope: np.ndarray,
+    *,
+    gravity_config: GravityRemovalConfig,
+    search_config: StationarySearchConfig,
+) -> GravityCalibration
+```
+
+The numerical stationary detector must remain independent of Pandas and `RingData`.
+
+## 7. CLI Changes
+
+Add:
+
+```text
+--auto-calibration
+--stationary-duration-s
+--stationary-stride-s
+--expected-gravity
+```
+
+Defaults:
+
+```text
+--stationary-duration-s 1.0
+--stationary-stride-s 0.05
+--expected-gravity 9.80665
+```
+
+Keep:
+
+```text
+--calibration-start
+--calibration-stop
+```
+
+Manual start/stop values take precedence over automatic detection.
+
+Print:
+
+```text
+selected interval
+duration
+stationary score
+pass/fail status
+estimated gravity magnitude
+estimated gyro bias
+failed checks
+```
+
+## 8. Documentation
+
+Update the README and project report to state:
+
+- acceleration must be in `m/s^2`;
+- gyroscope must be in `rad/s`;
+- the default sampling rate is `200 Hz`;
+- the default automatic stationary window is `1.0 s`;
+- automatic detection finds a candidate rather than proving physical stationarity;
+- sustained constant linear acceleration may resemble a stationary interval;
+- failed automatic detection must produce either an error or a provisional warning.
+
+## 9. Reduced Test Plan
+
+Add focused tests for:
+
+1. A valid stationary interval at the beginning, middle, and end.
+2. A tilted but stationary sensor.
+3. Constant rotation rejected because gyroscope magnitude is too high.
+4. No valid stationary interval returns `passed=False`.
+5. Input validation for wrong shape, non-finite values, and recordings shorter than one window.
+6. Manual calibration interval overrides automatic detection.
+7. The full existing gravity-removal test suite still passes.
+
+Do not modify raw Ring data, files under `data_sample/`, or files under `vendor/WritingRing/`.

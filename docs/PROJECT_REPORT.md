@@ -275,7 +275,7 @@ loading, validation, summaries, JSON conversion, and plotting.
 
 ### `scripts`
 
-The four scripts are command-line adapters. They parse arguments, call the
+The five scripts are command-line adapters. They parse arguments, call the
 reusable modules, present errors concisely, and return nonzero status on
 expected failures.
 
@@ -287,7 +287,7 @@ deserializer, summary builder, or plotting implementation.
 
 ### `tests`
 
-The twelve test files use temporary synthetic inputs to encode behavioral
+The fourteen test files use temporary synthetic inputs to encode behavioral
 contracts for discovery, selection, loaders, gravity and spectral analysis,
 plots, and CLIs. Real-sample and notebook acceptance checks complement,
 rather than replace, these unit tests.
@@ -452,13 +452,31 @@ inspection and plotting CLIs, notebook, summary builder, and Board plots use
 **Purpose.** Estimate and subtract the stationary acceleration contribution
 in explicitly configured Ring sensor/body axes without mutating raw data.
 
-`GravityRemovalConfig` records the nominal fixed sampling rate, acceleration
-and gyroscope scales, right-handed axis transform, caller-selected calibration
-interval, complementary correction time constant, confidence gates,
+`GravityRemovalConfig` defaults to a nominal 200 Hz rate, m/s² acceleration,
+rad/s gyroscope data, identity axes, and automatic calibration when manual
+bounds are absent. It also records scale overrides, a right-handed axis
+transform, complementary correction time constant, confidence gates,
 calibration thresholds, strict/provisional policy, unit label, and profile
 name. `GravityCalibration` records robust stationary statistics, gravity
 magnitude/direction, gyro bias, anchor sample, provenance, pass/fail state,
-and warnings.
+stationary-search metadata, and warnings.
+
+### `stationary.py`
+
+**Purpose.** Select an evidence-based stationary calibration candidate from a
+finite `(N, 6)` NumPy array containing m/s² acceleration and rad/s gyroscope
+samples. `StationarySearchConfig` defaults to a 200 Hz, 1.0-second window with
+a 0.05-second stride and expected gravity of `9.80665 m/s^2`.
+
+`find_stationary_interval` measures median gravity magnitude/error, robust
+MAD-based acceleration variation, per-axis acceleration variation, and median,
+95th-percentile, and robust gyroscope activity. It returns the lowest-score
+passing window or, if none pass, the lowest-score failed candidate with its
+failed checks. `process_ring_gravity` honors manual bounds first; otherwise it
+uses this candidate. Strict automatic failure raises a typed calibration error;
+provisional mode retains the candidate with visible warnings. Automatic search
+does not prove physical stationarity and may be fooled by sustained constant
+linear acceleration.
 
 `calibrate_gravity_removal` validates a finite `(N, 3)` acceleration/gyro
 pair and the explicit calibration interval. `remove_gravity_in_body_frame`
@@ -929,8 +947,11 @@ The current suite is organized by responsibility:
   time axes, provisional warnings, row-count validation, saving, and source
   DataFrame preservation.
 - `test_gravity_cli.py` protects explicit gyro scaling, primary `ring_0`
-  selection, assumption-forward summaries, overwrite policy, Agg mode,
-  figure closure, and the opt-in upstream profile.
+  selection, automatic/manual calibration summaries, overwrite policy, Agg
+  mode, figure closure, and the opt-in upstream profile.
+- `test_stationary.py` protects valid beginning/middle/end windows, tilted
+  stationary orientation, rotation rejection, failed candidates, malformed
+  input, and manual-overrides-automatic integration.
 
 Most unit tests use temporary synthetic files, making individual edge cases
 small and deterministic. Real-sample verification separately loads the four
@@ -942,7 +963,7 @@ also executes the notebook.
 The current full-suite result is recorded after the final verification run:
 
 ```text
-158 passed
+174 passed
 ```
 
 ## 14. Packaging and environment

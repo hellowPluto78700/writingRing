@@ -42,12 +42,8 @@ def _args(root: Path, output: Path) -> list[str]:
         str(output),
         "--sampling-rate",
         "100",
-        "--calibration-start",
-        "0",
-        "--calibration-stop",
-        "40",
-        "--gyro-scale-to-rad-s",
-        "1",
+        "--calibration-min-samples",
+        "10",
         "--no-show",
     ]
 
@@ -87,26 +83,25 @@ def test_cli_summary_reports_assumptions(
     captured = capsys.readouterr()
     assert result == 0
     assert f"Saved: {output}" in captured.out
-    assert "Calibration: 0:40 (passed)" in captured.out
+    assert "Calibration: 0:10 (passed)" in captured.out
+    assert "Automatic stationary search: 0:10" in captured.out
     assert "Nominal sampling rate: 100 Hz (assumed)" in captured.out
     assert "Profile: explicit" in captured.out
     assert "offline estimate is noncausal" in captured.out
 
 
-def test_cli_requires_explicit_gyro_scale_and_is_concise(
+def test_cli_can_disable_automatic_calibration_only_with_manual_bounds(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     root, _ = _data_root(tmp_path)
-    args = _args(root, tmp_path / "gravity.png")
-    scale_index = args.index("--gyro-scale-to-rad-s")
-    del args[scale_index : scale_index + 2]
+    args = [*_args(root, tmp_path / "gravity.png"), "--no-auto-calibration"]
 
     result = plot_ring_linear_acceleration.main(args)
 
     captured = capsys.readouterr()
     assert result == 2
-    assert "gyro-scale" in captured.err
+    assert "automatic calibration is disabled" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -167,8 +162,15 @@ def test_upstream_profile_is_available_without_implicit_raw_profile_scale(
 ) -> None:
     root, _ = _data_root(tmp_path)
     args = _args(root, tmp_path / "gravity.png")
-    scale_index = args.index("--gyro-scale-to-rad-s")
-    del args[scale_index : scale_index + 2]
-    args.extend(["--profile", "upstream_suggested"])
+    args.extend(
+        [
+            "--profile",
+            "upstream_suggested",
+            "--calibration-start",
+            "0",
+            "--calibration-stop",
+            "100",
+        ]
+    )
 
     assert plot_ring_linear_acceleration.main(args) == 0

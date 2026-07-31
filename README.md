@@ -211,6 +211,32 @@ analysis does not use marker intervals, load Board data, synchronize Ring and
 Board, repair timestamps, or resample the signal. Use `--overwrite` to replace
 an existing output file explicitly.
 
+To analyze the estimated body-frame linear acceleration instead of the raw
+acceleration, add `--remove-gravity`:
+
+```bash
+python scripts/plot_ring_accel_spectrum.py \
+  --data-root data_sample/data \
+  --user user_0 \
+  --action 0 \
+  --dataset-id 0 \
+  --remove-gravity \
+  --provisional \
+  --output outputs/dataset_0/ring_linear_acceleration_psd.png \
+  --no-show
+```
+
+Raw acceleration remains the default. With `--remove-gravity`, the script uses
+the same offline bidirectional gravity estimator and automatic stationary
+search as `plot_ring_linear_acceleration.py`, then applies the selected PSD or
+frequency-support analysis to the resulting linear acceleration. The default
+search evaluates 0.10-second windows at a nominal 200 Hz, assumes acceleration
+in `m/s^2` and gyro values in `rad/s`, and is only a calibration aid—not proof
+of physical stationarity. Use `--calibration-start` and `--calibration-stop`
+together to override the automatic interval. Strict processing errors when no
+candidate passes; `--provisional` analyzes the best candidate and reports its
+failed checks. This workflow preserves the source recording and is offline.
+
 ## Body-frame gravity-contribution removal
 
 The optional offline gravity workflow estimates the stationary acceleration
@@ -219,9 +245,12 @@ from measured acceleration. It preserves every raw Ring column and returns
 same-length derived acceleration, gravity-contribution, linear-acceleration,
 gate-confidence, calibration, and diagnostic values.
 
-The workflow requires a caller-selected stationary calibration interval.
-With an explicit raw-axis configuration, the gyroscope conversion to
-radians/second is also required:
+By default, the workflow assumes acceleration is in `m/s^2`, gyroscope values
+are in `rad/s`, and processing is at a nominal 200 Hz. It automatically
+selects the lowest-scoring passing 0.10-second stationary candidate using
+acceleration magnitude/variation and gyroscope activity. The candidate is a
+processing aid, not proof of physical stationarity; sustained constant linear
+acceleration may resemble a stationary interval.
 
 ```bash
 python scripts/plot_ring_linear_acceleration.py \
@@ -229,13 +258,15 @@ python scripts/plot_ring_linear_acceleration.py \
   --user user_0 \
   --action 0 \
   --dataset-id 0 \
-  --sampling-rate 200 \
-  --gyro-scale-to-rad-s 1 \
-  --calibration-start <stationary-start-sample> \
-  --calibration-stop <stationary-stop-sample> \
   --output outputs/dataset_0/ring_linear_acceleration.png \
   --no-show
 ```
+
+Use `--stationary-duration-s`, `--stationary-stride-s`, and
+`--expected-gravity` to control the search. Supply both
+`--calibration-start` and `--calibration-stop` to override automatic
+selection. Strict mode errors when no candidate passes; `--provisional`
+continues with the best candidate and visibly reports the failed checks.
 
 The identity axis transform means raw Ring sensor axes, not a confirmed
 physical ring mounting frame. Use `--axis-transform` with nine row-major
@@ -244,9 +275,11 @@ values only when a right-handed sensor-to-body transform is known.
 An opt-in `--profile upstream_suggested` applies the unconfirmed hints from
 the upstream `IMUData.scale()` implementation: acceleration divided by
 `9.8`, raw gyroscope treated as radians/second, and y/z axis sign flips.
-Plots and summaries label that profile as assumed. `--provisional` permits
-exploratory output when stationary calibration checks fail, while preserving
-prominent warnings; strict calibration is the default.
+Plots and summaries label that profile as assumed. Its scaled `g` values are
+not eligible for automatic m/s² stationary search, so use manual calibration
+bounds with that profile. `--provisional` permits exploratory output when
+stationary calibration checks fail, while preserving prominent warnings;
+strict calibration is the default.
 
 The estimator uses a fixed nominal processing rate rather than duplicate-rich
 Ring timestamps. It anchors at the calibration interval midpoint and
@@ -317,18 +350,14 @@ board = load_board(recording)
 plot_ring_imu(ring)
 plot_touch_trajectory(board)
 
-# Replace these example bounds with an interval verified stationary for the
-# selected recording.
-stationary_start, stationary_stop = 1000, 1200
 gravity_config = GravityRemovalConfig(
-    sampling_rate_hz=200.0,
-    gyro_scale_to_rad_s=1.0,  # explicit processing assumption
-    calibration_start_sample=stationary_start,
-    calibration_stop_sample=stationary_stop,
 )
 gravity_result = process_ring_gravity(ring, config=gravity_config)
 plot_ring_gravity_removal(ring, gravity_result)
 ```
+
+Set `calibration_start_sample` and `calibration_stop_sample` on the config to
+override automatic selection with a manually verified interval.
 
 Use `show=False` and an `output_path` for noninteractive plotting. The caller
 should close returned figures after saving when they are no longer needed.
@@ -341,7 +370,7 @@ Install the test extra and run:
 python -m pytest -q
 ```
 
-The latest complete acceptance run verified `158 passed`.
+The latest complete acceptance run verified `174 passed`.
 
 ## Project structure
 

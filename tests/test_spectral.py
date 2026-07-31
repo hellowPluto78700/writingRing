@@ -19,6 +19,7 @@ from writingring.spectral import (
     SpectralPlotError,
     aggregate_windowed_psd,
     compute_windowed_psd,
+    plot_acceleration_psd_overlay,
     plot_ring_acceleration_psd_overlay,
 )
 
@@ -250,6 +251,27 @@ def test_three_panel_plot_layout_lines_ranges_and_units(tmp_path: Path) -> None:
     assert figure.axes[-1].get_xlabel() == "Frequency (Hz)"
     assert all("raw acceleration units²/Hz" in axis.get_ylabel() for axis in figure.axes)
     assert all("m/s" not in axis.get_ylabel() and axis.get_ylabel() != "g" for axis in figure.axes)
+    plt.close(figure)
+
+
+def test_explicit_acceleration_plot_uses_caller_labels() -> None:
+    values = np.column_stack((_sine(5.0), _sine(10.0), _sine(20.0)))
+
+    figure = plot_acceleration_psd_overlay(
+        values,
+        identity=" — test",
+        source_label="Linear acceleration",
+        psd_unit_label="(m/s^2)²/Hz",
+        show=False,
+    )
+
+    assert [axis.get_title() for axis in figure.axes] == [
+        "Linear acceleration X",
+        "Linear acceleration Y",
+        "Linear acceleration Z",
+    ]
+    assert all("(m/s^2)²/Hz" in axis.get_ylabel() for axis in figure.axes)
+    assert "linear acceleration psd" in figure._suptitle.get_text().lower()
     plt.close(figure)
 
 

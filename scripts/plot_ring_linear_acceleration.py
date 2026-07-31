@@ -56,6 +56,7 @@ def _load_runtime() -> SimpleNamespace:
         RecordingSelectionError,
         select_recording,
     )
+    from writingring.stationary import StationarySearchConfig
 
     return SimpleNamespace(
         plt=plt,
@@ -64,6 +65,7 @@ def _load_runtime() -> SimpleNamespace:
         load_ring=load_ring,
         gravity_config=GravityRemovalConfig,
         upstream_suggested_config=upstream_suggested_config,
+        stationary_search_config=StationarySearchConfig,
         process_ring_gravity=process_ring_gravity,
         plot_ring_gravity_removal=plot_ring_gravity_removal,
         ring_time_axes=(RING_SAMPLE_INDEX, RING_INFERRED_TIME),
@@ -86,18 +88,27 @@ def build_parser(runtime: SimpleNamespace) -> argparse.ArgumentParser:
     parser.add_argument("--dataset-id", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sampling-rate", type=float, default=200.0)
-    parser.add_argument("--calibration-start", type=int, required=True)
-    parser.add_argument("--calibration-stop", type=int, required=True)
+    parser.add_argument("--calibration-start", type=int)
+    parser.add_argument("--calibration-stop", type=int)
+    parser.add_argument(
+        "--auto-calibration",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="automatically select a stationary interval when manual bounds are absent",
+    )
+    parser.add_argument("--stationary-duration-s", type=float, default=0.10)
+    parser.add_argument("--stationary-stride-s", type=float, default=0.05)
+    parser.add_argument("--expected-gravity", type=float, default=9.80665)
     parser.add_argument(
         "--profile",
         choices=("explicit", "upstream_suggested"),
         default="explicit",
     )
-    parser.add_argument("--gyro-scale-to-rad-s", type=float)
+    parser.add_argument("--gyro-scale-to-rad-s", type=float, default=1.0)
     parser.add_argument("--acceleration-scale", type=float, default=1.0)
     parser.add_argument(
         "--acceleration-unit-label",
-        default="raw acceleration units",
+        default="m/s^2",
     )
     parser.add_argument(
         "--axis-transform",
@@ -157,6 +168,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         _validate_output(args.output, overwrite=args.overwrite)
         config = _build_config(args, runtime)
+        search_config = _build_stationary_search_config(args, runtime)
+        if (
+            args.calibration_start is None
+            and args.calibration_stop is None
+            and not args.auto_calibration
+        ):
+            raise ValueError(
+                "automatic calibration is disabled; supply both "
+                "--calibration-start and --calibration-stop"
+            )
         recording = runtime.select_recording(
             runtime.discover_recordings(args.data_root),
             user=args.user,
@@ -164,7 +185,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_id=args.dataset_id,
         )
         ring_data = runtime.load_ring(recording)
-        result = runtime.process_ring_gravity(ring_data, config=config)
+        result = runtime.process_ring_gravity(
+            ring_data,
+            config=config,
+            stationary_search_config=search_config,
+        )
         figure = runtime.plot_ring_gravity_removal(
             ring_data,
             result,
@@ -210,7 +235,7 @@ def _build_config(
     }
     if args.profile == "upstream_suggested":
         overrides = dict(common)
-        if args.gyro_scale_to_rad_s is not None:
+        if args.gyro_scale_to_rad_s != 1.0:
             overrides["gyro_scale_to_rad_s"] = args.gyro_scale_to_rad_s
         if args.axis_transform is not None:
             overrides["axis_transform"] = transform
@@ -218,16 +243,12 @@ def _build_config(
             overrides["acceleration_scale_to_working_units"] = (
                 args.acceleration_scale
             )
-        if args.acceleration_unit_label != "raw acceleration units":
+        if args.acceleration_unit_label != "m/s^2":
             overrides["acceleration_unit_label"] = (
                 args.acceleration_unit_label
             )
         return runtime.upstream_suggested_config(**overrides)
 
-    if args.gyro_scale_to_rad_s is None:
-        raise ValueError(
-            "--gyro-scale-to-rad-s is required with --profile explicit"
-        )
     return runtime.gravity_config(
         **common,
         gyro_scale_to_rad_s=args.gyro_scale_to_rad_s,
@@ -235,6 +256,18 @@ def _build_config(
         acceleration_unit_label=args.acceleration_unit_label,
         axis_transform=transform,
         profile_name="explicit",
+    )
+
+
+def _build_stationary_search_config(
+    args: argparse.Namespace,
+    runtime: SimpleNamespace,
+) -> object:
+    return runtime.stationary_search_config(
+        sampling_rate_hz=args.sampling_rate,
+        stationary_duration_s=args.stationary_duration_s,
+        stride_duration_s=args.stationary_stride_s,
+        expected_gravity_m_s2=args.expected_gravity,
     )
 
 
@@ -274,6 +307,23 @@ def _print_summary(output: Path, result: object) -> None:
         f"{calibration.start_sample}:{calibration.stop_sample} "
         f"({'passed' if calibration.passed else 'PROVISIONAL'})"
     )
+    search = calibration.stationary_search
+    if search is None:
+        print("Calibration selection: manual interval")
+    else:
+        print(
+            "Automatic stationary search: "
+            f"{search.start_index}:{search.stop_index} "
+            f"({search.duration_s:g} s; score={search.score:.4g}; "
+            f"{'passed' if search.passed else 'FAILED'})"
+        )
+        print(
+            "Stationary gravity / gyro bias: "
+            f"{search.estimated_gravity_m_s2:.6g} m/s^2 / "
+            f"{search.estimated_gyro_bias_rad_s} rad/s"
+        )
+        if search.failed_checks:
+            print("Failed stationary checks: " + ", ".join(search.failed_checks))
     print(f"Calibration anchor: {calibration.anchor_sample}")
     print(
         f"Gravity magnitude: {calibration.gravity_magnitude:g} "

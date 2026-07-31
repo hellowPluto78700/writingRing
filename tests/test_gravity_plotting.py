@@ -59,7 +59,7 @@ def test_gravity_plot_has_expected_panels_lines_and_labels(tmp_path: Path) -> No
         "gravity_body_y",
         "gravity_body_z",
     ]
-    assert "raw acceleration units" in figure.axes[2].get_ylabel()
+    assert "m/s^2" in figure.axes[2].get_ylabel()
     assert "unconfirmed" in figure.axes[-1].get_xlabel()
     assert "offline bidirectional" in figure._suptitle.get_text()
     pd.testing.assert_frame_equal(ring.dataframe, before)
