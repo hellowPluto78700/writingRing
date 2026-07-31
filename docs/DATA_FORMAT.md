@@ -573,3 +573,43 @@ Verified from: all sample files under `data_sample/data/user_0/0`
   only an observed approximately 201 Hz effective rate under the microsecond
   interpretation.
 
+## 11. Derived gravity-removal data is not part of the file format
+
+`src/writingring/gravity.py` provides an optional offline analysis above the
+raw seven-column Ring loader. It does not change or extend the binary format.
+The following names are derived in memory and are never decoded from
+`ring_0.bin`:
+
+```text
+acc_body_x, acc_body_y, acc_body_z
+angular_velocity_body_x_rad_s
+angular_velocity_body_y_rad_s
+angular_velocity_body_z_rad_s
+gravity_body_x, gravity_body_y, gravity_body_z
+linear_acc_body_x, linear_acc_body_y, linear_acc_body_z
+gravity_correction_used
+gravity_correction_confidence
+```
+
+The transformation requires an explicit nominal processing rate, gyroscope
+scale to radians/second, acceleration scale/label, right-handed axis
+transform, and stationary calibration interval. The identity transform means
+raw Ring sensor axes; a physical sensor-to-ring mounting transform remains
+undocumented.
+
+The opt-in `upstream_suggested` profile is based on
+`IMUData.scale()`—acceleration divided by `9.8`, raw gyroscope treated as
+radians/second for fusion, and y/z sign flips. It remains an assumption rather
+than confirmed file metadata. Raw `acc_*`, `gyr_*`, and `timestamp` columns
+are preserved unchanged.
+
+Because Ring timestamps contain duplicate groups, the first implementation
+uses `dt = 1 / sampling_rate_hz` and does not derive per-sample integration
+steps from the timestamp column. It anchors the gravity contribution in an
+explicitly validated stationary interval and propagates forward and backward.
+The output is therefore noncausal, estimated, and suitable for offline
+inspection rather than navigation or real-time control.
+
+This analysis intentionally differs from the upstream implementation:
+upstream scales and plots IMU channels but does not estimate orientation,
+propagate a body-frame gravity contribution, or subtract it.

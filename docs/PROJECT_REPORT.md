@@ -275,7 +275,7 @@ loading, validation, summaries, JSON conversion, and plotting.
 
 ### `scripts`
 
-The three scripts are command-line adapters. They parse arguments, call the
+The four scripts are command-line adapters. They parse arguments, call the
 reusable modules, present errors concisely, and return nonzero status on
 expected failures.
 
@@ -287,9 +287,10 @@ deserializer, summary builder, or plotting implementation.
 
 ### `tests`
 
-The six test files use temporary synthetic inputs to encode behavioral
-contracts for discovery, selection, loaders, plots, and CLIs. Real-sample and
-notebook acceptance checks complement, rather than replace, these unit tests.
+The twelve test files use temporary synthetic inputs to encode behavioral
+contracts for discovery, selection, loaders, gravity and spectral analysis,
+plots, and CLIs. Real-sample and notebook acceptance checks complement,
+rather than replace, these unit tests.
 
 ## 6. Module-by-module explanation
 
@@ -446,6 +447,34 @@ backward boundaries, and finite ranges. It never sorts by timestamps.
 inspection and plotting CLIs, notebook, summary builder, and Board plots use
 `BoardData`.
 
+### `gravity.py`
+
+**Purpose.** Estimate and subtract the stationary acceleration contribution
+in explicitly configured Ring sensor/body axes without mutating raw data.
+
+`GravityRemovalConfig` records the nominal fixed sampling rate, acceleration
+and gyroscope scales, right-handed axis transform, caller-selected calibration
+interval, complementary correction time constant, confidence gates,
+calibration thresholds, strict/provisional policy, unit label, and profile
+name. `GravityCalibration` records robust stationary statistics, gravity
+magnitude/direction, gyro bias, anchor sample, provenance, pass/fail state,
+and warnings.
+
+`calibrate_gravity_removal` validates a finite `(N, 3)` acceleration/gyro
+pair and the explicit calibration interval. `remove_gravity_in_body_frame`
+propagates the calibrated body-frame gravity contribution with
+`d(g_b)/dt = -omega_b × g_b`, using exact Rodrigues rotations and
+confidence-gated accelerometer correction. It anchors at the calibration
+midpoint and propagates forward and backward, so the same-length result is
+deliberately noncausal. `process_ring_gravity` is the thin `RingData` adapter.
+
+`GravityRemovalResult` exposes read-only configured acceleration,
+bias-corrected angular velocity, estimated gravity contribution, linear
+acceleration, correction mask/confidence, and aggregate diagnostics. Its
+DataFrame conversion uses explicit derived column names and preserves the
+source Ring DataFrame. The opt-in `upstream_suggested` profile records, but
+does not certify, the unit/axis hints from upstream `IMUData.scale()`.
+
 ### `plotting.py`
 
 **Purpose.** Produce reusable Matplotlib figures from already validated
@@ -455,6 +484,9 @@ inspection and plotting CLIs, notebook, summary builder, and Board plots use
 
 - `plot_ring_imu` creates two shared-x axes: accelerometer channels above and
   gyroscope channels below.
+- `plot_ring_gravity_removal` compares configured acceleration, estimated
+  gravity contribution, linear acceleration, and correction confidence in
+  four shared-x panels.
 - `plot_touch_trajectory` scatters x against `y_display`, colors by force,
   uses equal aspect, and adds a color bar when contacts exist.
 - `plot_board_force_over_time` scatters contact force against a frame index or
@@ -889,6 +921,16 @@ The current suite is organized by responsibility:
 - `test_cli.py` protects inspection text/JSON, concise failures, output
   creation, time-axis forwarding, Agg mode, figure closure, primary Ring-only
   reads, and complete Board order.
+- `test_gravity.py` protects frame/sign conventions, stationary and rotating
+  synthetic cases, dynamic correction rejection, gyro-bias calibration,
+  bidirectional anchoring, strict/provisional calibration, transforms,
+  immutability, the Ring adapter, and the assumed upstream profile.
+- `test_gravity_plotting.py` protects the four-panel comparison, existing
+  time axes, provisional warnings, row-count validation, saving, and source
+  DataFrame preservation.
+- `test_gravity_cli.py` protects explicit gyro scaling, primary `ring_0`
+  selection, assumption-forward summaries, overwrite policy, Agg mode,
+  figure closure, and the opt-in upstream profile.
 
 Most unit tests use temporary synthetic files, making individual edge cases
 small and deterministic. Real-sample verification separately loads the four
@@ -900,7 +942,7 @@ also executes the notebook.
 The current full-suite result is recorded after the final verification run:
 
 ```text
-91 passed in 2.11s
+158 passed
 ```
 
 ## 14. Packaging and environment
@@ -945,13 +987,15 @@ The project can now:
 - report missing, duplicate, empty, and temporally anomalous chunks;
 - expose Ring, frame, and contact data through structured Pandas tables;
 - create local Ring IMU, touch trajectory, and Board force figures;
+- derive and plot explicitly configured, offline body-frame gravity and
+  linear-acceleration estimates with calibration diagnostics;
 - produce human-readable and strict-JSON summaries;
-- operate through direct Python, three CLI tools, and Jupyter; and
+- operate through direct Python, four CLI tools, and Jupyter; and
 - retain the author's verified raw and display semantics without claiming
   unsupported physical or synchronization meaning.
 
-It is an inspection and visualization system, not a data-cleaning or
-sensor-fusion system.
+It is an inspection and visualization system, not a data-cleaning,
+navigation, or general sensor-fusion system.
 
 ## 16. Known limitations and non-goals
 
@@ -976,6 +1020,11 @@ available upstream source and sample:
   uses `time.time`; and
 - why `Board.FPS` is 50 while observed sample timing differs.
 
+Gravity-removal results additionally depend on an explicit nominal rate,
+gyroscope scale, acceleration scale/label, sensor-to-body axis transform, and
+stationary calibration interval. These are processing configuration, not
+newly confirmed file-format facts.
+
 The report does not turn those unknowns into assumptions.
 
 ### Current non-goals
@@ -989,7 +1038,9 @@ The current project does not implement:
 - dense Board force-array analysis or visualization;
 - trajectory reconstruction beyond plotting stored contacts;
 - downsampling or aggregation of dense plots;
-- feature extraction, machine-learning preprocessing, training, or inference;
+- feature extraction beyond the documented gravity-removal and spectral
+  inspection workflows, machine-learning preprocessing, training, or
+  inference;
   or
 - reproduction of a WritingRing velocity-prediction model.
 

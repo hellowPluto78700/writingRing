@@ -95,6 +95,19 @@ artifacts and are not intended to be committed to Git. Do not modify
 `data_sample/` or the read-only upstream reference under
 `vendor/WritingRing/`.
 
+To publish every `downloads/**/data.zip` archive into the documented full-data
+layout without changing the protected sample, run:
+
+```bash
+python scripts/extract_downloaded_data.py --output-root data
+```
+
+The extractor keeps only the archive's `data/user_<id>/<action>/...` payload,
+skips macOS metadata, rejects unsafe paths and destination collisions, stages
+the extraction before publishing it as `data/`, and never overwrites an
+existing root. For the included archive, use `--data-root data` with the
+inspection and plotting commands.
+
 ## Command-line usage
 
 All commands below are run from the project root after editable installation.
@@ -198,6 +211,51 @@ analysis does not use marker intervals, load Board data, synchronize Ring and
 Board, repair timestamps, or resample the signal. Use `--overwrite` to replace
 an existing output file explicitly.
 
+## Body-frame gravity-contribution removal
+
+The optional offline gravity workflow estimates the stationary acceleration
+contribution in explicitly configured Ring sensor/body axes and subtracts it
+from measured acceleration. It preserves every raw Ring column and returns
+same-length derived acceleration, gravity-contribution, linear-acceleration,
+gate-confidence, calibration, and diagnostic values.
+
+The workflow requires a caller-selected stationary calibration interval.
+With an explicit raw-axis configuration, the gyroscope conversion to
+radians/second is also required:
+
+```bash
+python scripts/plot_ring_linear_acceleration.py \
+  --data-root data_sample/data \
+  --user user_0 \
+  --action 0 \
+  --dataset-id 0 \
+  --sampling-rate 200 \
+  --gyro-scale-to-rad-s 1 \
+  --calibration-start <stationary-start-sample> \
+  --calibration-stop <stationary-stop-sample> \
+  --output outputs/dataset_0/ring_linear_acceleration.png \
+  --no-show
+```
+
+The identity axis transform means raw Ring sensor axes, not a confirmed
+physical ring mounting frame. Use `--axis-transform` with nine row-major
+values only when a right-handed sensor-to-body transform is known.
+
+An opt-in `--profile upstream_suggested` applies the unconfirmed hints from
+the upstream `IMUData.scale()` implementation: acceleration divided by
+`9.8`, raw gyroscope treated as radians/second, and y/z axis sign flips.
+Plots and summaries label that profile as assumed. `--provisional` permits
+exploratory output when stationary calibration checks fail, while preserving
+prominent warnings; strict calibration is the default.
+
+The estimator uses a fixed nominal processing rate rather than duplicate-rich
+Ring timestamps. It anchors at the calibration interval midpoint and
+propagates in both directions, so the result is noncausal and intended for
+offline inspection—not real-time control, navigation, or ground-truth motion
+reconstruction. See
+[docs/RemoveGravityInTheIMUBodyFramePlan.md](docs/RemoveGravityInTheIMUBodyFramePlan.md)
+for its conventions, limitations, and acceptance criteria.
+
 ## Notebook usage
 
 Install the notebook extra and register the active Conda environment as a
@@ -233,11 +291,14 @@ The public package API supports the same workflow:
 from pathlib import Path
 
 from writingring import (
+    GravityRemovalConfig,
     discover_recordings,
     select_recording,
     load_ring,
     load_board,
+    process_ring_gravity,
     plot_ring_imu,
+    plot_ring_gravity_removal,
     plot_touch_trajectory,
 )
 
@@ -255,6 +316,18 @@ board = load_board(recording)
 
 plot_ring_imu(ring)
 plot_touch_trajectory(board)
+
+# Replace these example bounds with an interval verified stationary for the
+# selected recording.
+stationary_start, stationary_stop = 1000, 1200
+gravity_config = GravityRemovalConfig(
+    sampling_rate_hz=200.0,
+    gyro_scale_to_rad_s=1.0,  # explicit processing assumption
+    calibration_start_sample=stationary_start,
+    calibration_stop_sample=stationary_stop,
+)
+gravity_result = process_ring_gravity(ring, config=gravity_config)
+plot_ring_gravity_removal(ring, gravity_result)
 ```
 
 Use `show=False` and an `output_path` for noninteractive plotting. The caller
@@ -268,13 +341,14 @@ Install the test extra and run:
 python -m pytest -q
 ```
 
-The latest complete acceptance run verified `128 passed`.
+The latest complete acceptance run verified `158 passed`.
 
 ## Project structure
 
 ```text
 src/writingring/       reusable discovery, loading, validation, summaries,
-                       selection, spectral analysis, and Matplotlib plotting
+                       selection, gravity/spectral analysis, and Matplotlib
+                       plotting
 scripts/               command-line entry scripts
 tests/                 focused unit and workflow tests
 notebooks/             installed-package interactive exploration
@@ -298,6 +372,9 @@ new modular and tested implementation.
   Ring writer and a confirmed upstream unit contract are unavailable.
 - Ring–Board clock synchronization and offset guarantees are not confirmed;
   the project does not synchronize the streams.
+- Gravity removal depends on explicit sampling-rate, unit, axis, and
+  stationary-calibration assumptions. Results remain provisional unless
+  those conventions are independently confirmed.
 - Dataset 0 contains a backward Board timestamp boundary from chunk `6` to
   chunk `7`; all numeric chunks remain retained in filename order.
 - Dense contact and force plots can overplot because the plotting API

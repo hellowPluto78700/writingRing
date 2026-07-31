@@ -14,9 +14,11 @@ from typing import Final, Iterable
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+import numpy as np
 import pandas as pd
 
 from writingring.board_loader import BoardData
+from writingring.gravity import GravityRemovalResult
 from writingring.ring_loader import RELATIVE_TIME_COLUMN, RingData
 
 
@@ -117,6 +119,130 @@ def plot_ring_imu(
         f"{ring_data.source_path.name}\n(raw signal units undocumented)"
     )
     warning_items = list(ring_data.warnings)
+    if time_axis == RING_INFERRED_TIME:
+        warning_items.insert(
+            0,
+            "Ring time uses an inferred, unconfirmed microsecond interpretation",
+        )
+    _add_warning_text(figure, warning_items)
+    _save_and_show(figure, output_path=output_path, show=show)
+    return figure
+
+
+def plot_ring_gravity_removal(
+    ring_data: RingData,
+    gravity_result: GravityRemovalResult,
+    *,
+    time_axis: str = RING_INFERRED_TIME,
+    output_path: str | Path | None = None,
+    show: bool = True,
+) -> Figure:
+    """Compare configured acceleration, gravity, and linear acceleration.
+
+    The supplied result is an offline, bidirectional estimate. This function
+    only visualizes existing arrays and never recalibrates or mutates either
+    input.
+    """
+
+    if not isinstance(ring_data, RingData):
+        raise MalformedPlotDataError(
+            "plot_ring_gravity_removal requires a RingData object"
+        )
+    if not isinstance(gravity_result, GravityRemovalResult):
+        raise MalformedPlotDataError(
+            "plot_ring_gravity_removal requires a GravityRemovalResult object"
+        )
+    dataframe = ring_data.dataframe
+    if gravity_result.sample_count != len(dataframe):
+        raise MalformedPlotDataError(
+            "gravity result sample count does not match RingData row count: "
+            f"{gravity_result.sample_count} != {len(dataframe)}"
+        )
+    if time_axis == RING_SAMPLE_INDEX:
+        x_values = dataframe.index.to_numpy(copy=True)
+        x_label = "Sample index"
+    elif time_axis == RING_INFERRED_TIME:
+        if RELATIVE_TIME_COLUMN not in dataframe.columns:
+            raise InferredTimeUnavailableError(
+                "inferred_time requires the existing "
+                f"{RELATIVE_TIME_COLUMN!r} column; use sample_index when "
+                "inferred ring time is unavailable"
+            )
+        x_values = dataframe[RELATIVE_TIME_COLUMN].to_numpy(copy=True)
+        x_label = (
+            "Inferred relative time (s; microsecond interpretation unconfirmed)"
+        )
+    else:
+        raise UnsupportedTimeAxisError(
+            f"unsupported ring time axis {time_axis!r}; expected "
+            f"{RING_SAMPLE_INDEX!r} or {RING_INFERRED_TIME!r}"
+        )
+
+    figure, axes = plt.subplots(
+        4,
+        1,
+        sharex=True,
+        figsize=(12, 10),
+        layout="constrained",
+    )
+    axis_names = ("x", "y", "z")
+    for axis_index, axis_name in enumerate(axis_names):
+        axes[0].plot(
+            x_values,
+            gravity_result.acceleration_body[:, axis_index],
+            label=f"acc_body_{axis_name}",
+        )
+        axes[1].plot(
+            x_values,
+            gravity_result.gravity_body[:, axis_index],
+            label=f"gravity_body_{axis_name}",
+        )
+        axes[2].plot(
+            x_values,
+            gravity_result.linear_acceleration_body[:, axis_index],
+            label=f"linear_acc_body_{axis_name}",
+        )
+    axes[3].plot(
+        x_values,
+        gravity_result.correction_confidence,
+        label="correction confidence",
+        color="tab:blue",
+    )
+    axes[3].step(
+        x_values,
+        gravity_result.correction_used.astype(np.float64),
+        where="mid",
+        label="correction used",
+        color="tab:orange",
+        alpha=0.65,
+    )
+
+    unit = gravity_result.config.acceleration_unit_label
+    axes[0].set_ylabel(f"Configured acceleration\n({unit})")
+    axes[1].set_ylabel(f"Gravity contribution\n({unit})")
+    axes[2].set_ylabel(f"Linear acceleration\n({unit})")
+    axes[3].set_ylabel("Correction gate")
+    axes[3].set_xlabel(x_label)
+    axes[3].set_ylim(-0.05, 1.05)
+    for axis in axes:
+        axis.grid(True)
+        axis.legend(loc="upper right")
+
+    calibration = gravity_result.calibration
+    config = gravity_result.config
+    status = (
+        "calibration passed"
+        if calibration.passed
+        else "PROVISIONAL calibration"
+    )
+    figure.suptitle(
+        "WritingRing gravity-contribution removal — "
+        f"{ring_data.source_path.name}\n"
+        f"{status}; samples {calibration.start_sample}:"
+        f"{calibration.stop_sample}; nominal {config.sampling_rate_hz:g} Hz; "
+        f"profile={config.profile_name}; offline bidirectional estimate"
+    )
+    warning_items = list(gravity_result.diagnostics.warnings)
     if time_axis == RING_INFERRED_TIME:
         warning_items.insert(
             0,
