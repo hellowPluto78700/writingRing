@@ -1,5 +1,18 @@
 """WritingRing recording tools."""
 
+from writingring.alignment import (
+    AlignmentAnalysisError,
+    AlignmentPlotError,
+    ConsensusShift,
+    GroupCandidateWindows,
+    build_group_candidate_windows,
+    estimate_consensus_shift,
+    nearest_sorted_index,
+    plot_group_candidate_heatmap,
+    plot_group_candidate_overlay,
+    robust_normalize_rows,
+)
+
 from writingring.board_loader import (
     BoardClassImportError,
     BoardChunkError,
@@ -98,6 +111,8 @@ from writingring.spectral import (
 )
 
 __all__ = [
+    "AlignmentAnalysisError",
+    "AlignmentPlotError",
     "BoardClassImportError",
     "BoardChunkError",
     "BoardChunkReport",
@@ -118,6 +133,7 @@ __all__ = [
     "GravityRemovalDiagnostics",
     "GravityRemovalError",
     "GravityRemovalResult",
+    "GroupCandidateWindows",
     "StationarySearchConfig",
     "StationarySearchError",
     "StationarySearchResult",
@@ -138,6 +154,7 @@ __all__ = [
     "SpectralAnalysisError",
     "SpectralPlotError",
     "TimestampInterpretation",
+    "ConsensusShift",
     "UnsupportedAggregateError",
     "UnsupportedTimeAxisError",
     "UnexpectedBoardContainerError",
@@ -155,19 +172,25 @@ __all__ = [
     "RecordingNotFoundError",
     "RecordingSelectionError",
     "build_recording_summary",
+    "build_group_candidate_windows",
     "auto_calibrate_gravity_removal",
     "calibrate_gravity_removal",
     "format_recording_summary",
     "find_stationary_interval",
+    "estimate_consensus_shift",
     "load_board",
     "load_ring",
     "parse_recording_filename",
+    "nearest_sorted_index",
     "plot_board_force_over_time",
     "plot_ring_gravity_removal",
     "plot_ring_imu",
+    "plot_group_candidate_heatmap",
+    "plot_group_candidate_overlay",
     "plot_touch_trajectory",
     "process_ring_gravity",
     "remove_gravity_in_body_frame",
+    "robust_normalize_rows",
     "select_recording",
     "to_jsonable",
     "WindowedPSD",
