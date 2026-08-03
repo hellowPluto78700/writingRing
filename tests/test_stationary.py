@@ -88,6 +88,33 @@ def test_no_valid_interval_returns_lowest_score_candidate() -> None:
     assert result.failed_checks
 
 
+def test_score_first_search_can_choose_best_nonpassing_window() -> None:
+    values = _imu(40)
+    values[:20, 3] = 0.055
+    values[20:, 2] = EXPECTED_GRAVITY_M_S2 + 0.4
+    values[20:, 3] = 0.04
+    base = StationarySearchConfig(
+        stationary_duration_s=0.1,
+        stride_duration_s=0.1,
+    )
+
+    passing_first = find_stationary_interval(values, config=base)
+    score_first = find_stationary_interval(
+        values,
+        config=StationarySearchConfig(
+            stationary_duration_s=0.1,
+            stride_duration_s=0.1,
+            prefer_passing_window=False,
+        ),
+    )
+
+    assert passing_first.start_index == 20
+    assert passing_first.passed
+    assert score_first.start_index == 0
+    assert not score_first.passed
+    assert score_first.score < passing_first.score
+
+
 @pytest.mark.parametrize(
     "values, message",
     [

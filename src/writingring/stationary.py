@@ -1,10 +1,11 @@
 """Pure NumPy stationary-interval detection for six-axis IMU recordings.
 
 The detector expects acceleration in m/s^2 and gyroscope values in rad/s.
-It evaluates fixed-duration windows over the entire recording and returns the
-lowest-scoring valid window, or the lowest-scoring candidate when none pass.
-Finding a candidate is evidence-based processing assistance; it does not
-prove physical stationarity.
+It evaluates fixed-duration windows over the entire recording and normally
+returns the lowest-scoring valid window, or the lowest-scoring candidate when
+none pass. Callers may instead request the lowest score across every window.
+Finding a candidate is evidence-based processing assistance; it does not prove
+physical stationarity.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ class StationarySearchConfig:
     max_gyro_median_rad_s: float = 0.05
     max_gyro_p95_rad_s: float = 0.10
     max_gyro_robust_std_rad_s: float = 0.02
+    prefer_passing_window: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,11 +72,13 @@ def find_stationary_interval(
     *,
     config: StationarySearchConfig = StationarySearchConfig(),
 ) -> StationarySearchResult:
-    """Find the best fixed-duration stationary candidate in an ``(N, 6)`` IMU.
+    """Find the configured best fixed-duration candidate in an ``(N, 6)`` IMU.
 
     The six columns must be acceleration x/y/z in m/s^2 followed by gyroscope
     x/y/z in rad/s. Every complete stride-aligned window is evaluated, along
     with a final end-aligned window when the stride would otherwise omit it.
+    ``prefer_passing_window=False`` ranks all candidates only by score and
+    start index, leaving threshold pass/fail state as a diagnostic.
     """
 
     values = _validate_imu(imu)
@@ -110,8 +114,13 @@ def find_stationary_interval(
         for start in starts
     )
     valid_candidates = tuple(candidate for candidate in candidates if candidate.passed)
+    candidate_pool = (
+        valid_candidates
+        if validated_config.prefer_passing_window and valid_candidates
+        else candidates
+    )
     selected = min(
-        valid_candidates if valid_candidates else candidates,
+        candidate_pool,
         key=lambda candidate: (candidate.score, candidate.start_index),
     )
     return StationarySearchResult(
@@ -269,6 +278,8 @@ def _validate_imu(imu: np.ndarray) -> np.ndarray:
 def _validate_config(config: StationarySearchConfig) -> StationarySearchConfig:
     if not isinstance(config, StationarySearchConfig):
         raise StationarySearchError("config must be a StationarySearchConfig object")
+    if not isinstance(config.prefer_passing_window, bool):
+        raise StationarySearchError("prefer_passing_window must be a bool")
     for name in (
         "sampling_rate_hz",
         "stationary_duration_s",
