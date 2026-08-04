@@ -1,7 +1,8 @@
 # Timestamp-label Ring IMU segmentation
 
-`scripts/segment_ring_imu.py` exports variable-length primary Ring IMU
-segments for one `user` and one `action`. It uses only
+`scripts/segment_ring_imu.py` first removes the gravity contribution from each
+primary Ring recording, then exports variable-length IMU segments for one
+`user` and one `action`. It uses only
 `{dataset_id}_ring_0.bin`; `ring_1` is never read.
 
 ```bash
@@ -9,9 +10,28 @@ conda run --no-capture-output -n writingring-viz \
     python scripts/segment_ring_imu.py \
     --data-root data \
     --user user_0 \
-    --action 0 \
-    --output-root outputs/segmentedIMU
+    --action 0
 ```
+
+The default gravity method is the existing causal second-order Butterworth
+low-pass implementation (`low-pass`, 0.2 Hz cutoff). Its default output root
+is `outputs/segmentedIMU_LowPassFiltering`. Select the existing Madgwick
+sensor-fusion implementation with `--gravity-removal-method madgwick`; its
+default root is `outputs/segmentedIMU_Madgwick`.
+
+```bash
+python scripts/segment_ring_imu.py \
+    --data-root data --user user_0 --action 0 \
+    --gravity-removal-method madgwick \
+    --madgwick-beta 0.1
+```
+
+`--low-pass-cutoff-hz` adjusts the low-pass cutoff, and `--sampling-rate` sets
+the processing assumption for either estimator. Low-pass exports remain
+available if the existing calibration diagnostics fail because its filter does
+not use the calibration estimate. Madgwick is strict by default; `--provisional`
+permits its export when stationary-calibration checks fail. Use `--output-root`
+only to explicitly override the method-specific destination.
 
 The command does not overwrite existing artifacts by default. Use
 `--overwrite` to replace the known artifacts for that user/action. This also
@@ -76,11 +96,19 @@ used as IMU features.
 ## Variable-length export
 
 There is no 600-sample limit, zero-padding, mask, or truncation. Each segment
-retains every IMU frame in its label interval, in this channel order:
+retains every gravity-removed IMU frame in its label interval, in this channel
+order:
 
 ```text
-acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z
+linear_acc_body_x, linear_acc_body_y, linear_acc_body_z,
+angular_velocity_body_x_rad_s, angular_velocity_body_y_rad_s,
+angular_velocity_body_z_rad_s
 ```
+
+With the default identity transform and gyro scale, the gyroscope values have
+the stored numeric values; the first three channels are the existing gravity
+module's `linear_acceleration_body`. The manifest and JSON summary record the
+selected method and its low-pass/Madgwick settings.
 
 Variable-length arrays cannot form a regular numeric `(N, L, 6)` NPY file.
 Instead, `rawIMU.npy` is one contiguous numeric `(total_samples, 6)` array,
@@ -99,7 +127,7 @@ For `--user user_0 --action 0`, paths are:
 
 ```text
 outputs/segmentedIMU/user_0/action_0/
-├── user_0_action_0_rawIMU.npy           # (total_samples, 6)
+├── user_0_action_0_rawIMU.npy           # gravity-removed (total_samples, 6)
 ├── user_0_action_0_labels.npy           # (N,), original strings
 ├── user_0_action_0_segment_offsets.npy  # (N + 1,)
 ├── user_0_action_0_segment_lengths.npy  # (N,)

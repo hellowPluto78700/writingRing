@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -143,7 +144,10 @@ def test_invalid_empty_segment_and_invalid_config_are_rejected() -> None:
         )
 
 
-def test_user_action_aggregation_writes_contiguous_values_and_offsets(tmp_path: Path) -> None:
+def test_user_action_aggregation_removes_gravity_before_segmenting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     data_root = tmp_path / "data"
     action_dir = data_root / "user_0" / "0"
     action_dir.mkdir(parents=True)
@@ -160,6 +164,17 @@ def test_user_action_aggregation_writes_contiguous_values_and_offsets(tmp_path: 
         labels=[(2_000_000, "first"), (2_200_000, "wrong"), (2_450_000, "next")],
     )
 
+    gravity_methods: list[str] = []
+
+    def fake_gravity(ring: object, *, config: object) -> SimpleNamespace:
+        gravity_methods.append(config.gravity_removal_method)
+        dataframe = ring.dataframe
+        return SimpleNamespace(
+            linear_acceleration_body=dataframe[["acc_x", "acc_y", "acc_z"]].to_numpy(),
+            angular_velocity_body_rad_s=dataframe[["gyr_x", "gyr_y", "gyr_z"]].to_numpy(),
+        )
+
+    monkeypatch.setattr("writingring.segmentation.process_ring_gravity", fake_gravity)
     output_root = tmp_path / "outputs"
     result = segment_user_action(
         data_root=data_root,
@@ -180,6 +195,8 @@ def test_user_action_aggregation_writes_contiguous_values_and_offsets(tmp_path: 
     assert result.summary["segment_count"] == 4
     assert result.summary["source_label_count"] == 5
     assert result.summary["skipped_label_counts_by_reason"] == {"label_is_wrong": 1}
+    assert result.summary["gravity_removal"]["method"] == "low-pass"
+    assert gravity_methods == ["low-pass", "low-pass"]
     assert result.summary["padding_or_truncation"] == "disabled"
     np.testing.assert_array_equal(
         np.load(result.output_paths.segment_offsets_path, allow_pickle=False),

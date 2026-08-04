@@ -36,8 +36,10 @@ layout, label-time-domain behavior, and overwrite policy.
 
 ## Timestamp-label IMU segmentation
 
-Export variable-length primary-Ring IMU segments for all datasets of one
-user/action, using each dataset's timestamp labels as half-open boundaries:
+Remove gravity and export variable-length primary-Ring IMU segments for all
+datasets of one user/action, using each dataset's timestamp labels as
+half-open boundaries. The default is 0.2 Hz low-pass filtering and writes to
+`outputs/segmentedIMU_LowPassFiltering`:
 
 ```bash
 python scripts/segment_ring_imu.py \
@@ -46,8 +48,10 @@ python scripts/segment_ring_imu.py \
   --output-root outputs/segmentedIMU
 ```
 
-The exporter writes contiguous raw IMU plus segment offsets and lengths,
-string labels, an audit CSV, and JSON summary. It is strict about
+The exporter writes contiguous gravity-removed IMU plus segment offsets and
+lengths, string labels, an audit CSV, and JSON summary. Use
+`--gravity-removal-method madgwick` for sensor fusion; it writes to
+`outputs/segmentedIMU_Madgwick` by default. It is strict about
 malformed/out-of-range labels and does not overwrite by default. See
 [docs/IMU_SEGMENTATION.md](docs/IMU_SEGMENTATION.md) for segment boundary,
 duplicate-timestamp, and overwrite semantics.

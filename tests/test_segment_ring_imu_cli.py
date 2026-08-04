@@ -12,7 +12,13 @@ def _data_root(tmp_path: Path) -> Path:
     action_dir = root / "writer_a" / "letters"
     action_dir.mkdir(parents=True)
     timestamps = 1_000_000 + np.arange(700, dtype=np.float64) * 1_000
-    imu = np.column_stack([timestamps + channel for channel in range(6)])
+    imu = np.column_stack(
+        (
+            np.zeros((len(timestamps), 2)),
+            np.full(len(timestamps), 9.8),
+            np.zeros((len(timestamps), 3)),
+        )
+    )
     np.column_stack((imu, timestamps)).astype(np.float64).tofile(
         action_dir / "0_ring_0.bin"
     )
@@ -46,6 +52,7 @@ def test_cli_exports_primary_ring_variable_segments_and_honors_overwrite(
     assert segment_ring_imu.main(args) == 0
     captured = capsys.readouterr()
     assert "Exported 2 variable-length segments with 700 total IMU samples." in captured.out
+    assert "Gravity removal: low-pass" in captured.out
     assert opened == [root / "writer_a" / "letters" / "0_ring_0.bin"]
     base = output / "writer_a" / "action_letters"
     raw = base / "writer_a_action_letters_rawIMU.npy"
@@ -58,3 +65,12 @@ def test_cli_exports_primary_ring_variable_segments_and_honors_overwrite(
     assert segment_ring_imu.main(args) == 2
     assert "already exists" in capsys.readouterr().err
     assert segment_ring_imu.main([*args, "--overwrite"]) == 0
+
+
+def test_default_output_root_is_gravity_method_specific() -> None:
+    assert segment_ring_imu._default_output_root("low-pass") == Path(
+        "outputs/segmentedIMU_LowPassFiltering"
+    )
+    assert segment_ring_imu._default_output_root("madgwick") == Path(
+        "outputs/segmentedIMU_Madgwick"
+    )

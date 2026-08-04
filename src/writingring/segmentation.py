@@ -20,6 +20,12 @@ import numpy as np
 import pandas as pd
 
 from writingring.discovery import DiscoveryError, Recording, discover_recordings
+from writingring.gravity import (
+    GRAVITY_REMOVAL_METHODS,
+    GravityRemovalConfig,
+    GravityRemovalError,
+    process_ring_gravity,
+)
 from writingring.ring_loader import RingLoadError, load_ring
 
 
@@ -35,6 +41,7 @@ _TIMESTAMP_COLUMN: Final[str] = "timestamp"
 _WRONG_LABEL: Final[str] = "wrong"
 _DEFAULT_MINIMUM_LABEL_INTERVAL_US: Final[float] = 100_000.0
 _DEFAULT_MAXIMUM_SEGMENT_DURATION_US: Final[float] = 5_000_000.0
+_DEFAULT_GRAVITY_REMOVAL_METHOD: Final[str] = "low-pass"
 
 
 class SegmentationError(ValueError):
@@ -251,11 +258,13 @@ def segment_user_action(
     action: str,
     output_root: Path,
     config: SegmentationConfig = SegmentationConfig(),
+    gravity_config: GravityRemovalConfig | None = None,
     overwrite: bool = False,
 ) -> UserActionSegmentationResult:
-    """Aggregate variable-length segments from sorted datasets and save them."""
+    """Remove gravity, then aggregate variable-length segments and save them."""
 
     dtype = _validated_config(config)
+    effective_gravity_config = _effective_gravity_config(gravity_config)
     _validate_identity(user=user, action=action)
     if not isinstance(overwrite, bool):
         raise SegmentationError("overwrite must be a boolean")
@@ -281,7 +290,9 @@ def segment_user_action(
     skipped_label_counts: dict[str, int] = {}
     source_label_count = 0
     for recording in selected:
-        ring_imu, timestamps = _recording_ring_arrays(recording)
+        ring_imu, timestamps = _recording_ring_arrays(
+            recording, gravity_config=effective_gravity_config
+        )
         if recording.timestamp_path is None:
             raise SegmentationError(
                 f"dataset {recording.dataset_id} is missing its timestamp label file"
@@ -312,6 +323,7 @@ def segment_user_action(
                     label_index=sample.source_label_index,
                     sample=sample,
                     timestamps=timestamps,
+                    gravity_config=effective_gravity_config,
                 )
             )
 
@@ -334,6 +346,7 @@ def segment_user_action(
         skipped_label_counts=skipped_label_counts,
         minimum_label_interval_us=config.minimum_label_interval_us,
         maximum_segment_duration_us=config.maximum_segment_duration_us,
+        gravity_config=effective_gravity_config,
     )
     paths = build_segmentation_output_paths(output_root, user=user, action=action)
     _write_outputs(
@@ -361,14 +374,25 @@ def segment_user_action(
     )
 
 
-def _recording_ring_arrays(recording: Recording) -> tuple[np.ndarray, np.ndarray]:
+def _recording_ring_arrays(
+    recording: Recording,
+    *,
+    gravity_config: GravityRemovalConfig,
+) -> tuple[np.ndarray, np.ndarray]:
     try:
         ring = load_ring(recording)
-    except RingLoadError as error:
+        gravity_result = process_ring_gravity(ring, config=gravity_config)
+    except (RingLoadError, GravityRemovalError) as error:
         raise SegmentationError(
-            f"could not load dataset {recording.dataset_id} primary Ring: {error}"
+            "could not load and remove gravity from dataset "
+            f"{recording.dataset_id} primary Ring: {error}"
         ) from error
-    imu = ring.dataframe.loc[:, list(IMU_CHANNEL_COLUMNS)].to_numpy(copy=True)
+    imu = np.column_stack(
+        (
+            gravity_result.linear_acceleration_body,
+            gravity_result.angular_velocity_body_rad_s,
+        )
+    )
     timestamps = ring.dataframe[_TIMESTAMP_COLUMN].to_numpy(copy=True)
     return _validated_ring_inputs(imu, timestamps)
 
@@ -382,6 +406,7 @@ def _manifest_row(
     label_index: int,
     sample: SegmentedSample,
     timestamps: np.ndarray,
+    gravity_config: GravityRemovalConfig,
 ) -> dict[str, object]:
     stop = sample.stop_sample_index_exclusive
     return {
@@ -398,6 +423,9 @@ def _manifest_row(
         "first_sample_timestamp_us": float(timestamps[sample.start_sample_index]),
         "last_sample_timestamp_us": float(timestamps[stop - 1]),
         "sample_count": sample.sample_count,
+        "gravity_removal_method": gravity_config.gravity_removal_method,
+        "gravity_low_pass_cutoff_hz": gravity_config.low_pass_cutoff_hz,
+        "gravity_madgwick_beta": gravity_config.madgwick_beta,
         "is_last_label": sample.next_label_timestamp_us is None,
         "segment_end_source": (
             "ring_recording_end"
@@ -420,6 +448,7 @@ def _summary(
     skipped_label_counts: dict[str, int],
     minimum_label_interval_us: float,
     maximum_segment_duration_us: float,
+    gravity_config: GravityRemovalConfig,
 ) -> dict[str, object]:
     lengths = np.asarray([sample.sample_count for sample in samples], dtype=np.int64)
     return {
@@ -433,6 +462,13 @@ def _summary(
         "skipped_label_counts_by_reason": dict(sorted(skipped_label_counts.items())),
         "minimum_label_interval_us": minimum_label_interval_us,
         "maximum_segment_duration_us": maximum_segment_duration_us,
+        "gravity_removal": {
+            "method": gravity_config.gravity_removal_method,
+            "sampling_rate_hz": gravity_config.sampling_rate_hz,
+            "low_pass_cutoff_hz": gravity_config.low_pass_cutoff_hz,
+            "madgwick_beta": gravity_config.madgwick_beta,
+            "strict_calibration": gravity_config.strict_calibration,
+        },
         "total_imu_sample_count": int(np.sum(lengths)),
         "channel_count": len(IMU_CHANNEL_COLUMNS),
         "minimum_segment_length": int(np.min(lengths)),
@@ -573,6 +609,28 @@ def _validated_config(config: SegmentationConfig) -> np.dtype:
     if config.output_dtype not in {"float32", "float64"}:
         raise SegmentationError("output_dtype must be float32 or float64")
     return np.dtype(config.output_dtype)
+
+
+def _effective_gravity_config(
+    gravity_config: GravityRemovalConfig | None,
+) -> GravityRemovalConfig:
+    """Return the low-pass default while keeping gravity settings explicit."""
+
+    if gravity_config is None:
+        return GravityRemovalConfig(
+            gravity_removal_method=_DEFAULT_GRAVITY_REMOVAL_METHOD,
+            # Low-pass does not use the calibration estimate itself. The
+            # existing reusable API still computes it for diagnostics, so a
+            # failed stationary check must remain provisional rather than
+            # prevent the default preprocessing path from exporting data.
+            strict_calibration=False,
+        )
+    if not isinstance(gravity_config, GravityRemovalConfig):
+        raise SegmentationError("gravity_config must be a GravityRemovalConfig")
+    if gravity_config.gravity_removal_method not in GRAVITY_REMOVAL_METHODS:
+        choices = ", ".join(GRAVITY_REMOVAL_METHODS)
+        raise SegmentationError(f"gravity_removal_method must be one of: {choices}")
+    return gravity_config
 
 
 def _validated_ring_inputs(
