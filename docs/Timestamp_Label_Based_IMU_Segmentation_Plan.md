@@ -1,5 +1,15 @@
 # Timestamp-Label-Based IMU Segmentation Plan
 
+> **状态说明：历史计划（非当前实现）**
+>
+> 本文档中的固定 `600 samples × 6` 设计属于旧版计划，不能作为当前
+> timestamp-label segmentation 的输出契约。当前实现先保留每个 label 区间
+> 的 variable-length IMU segment，不在 segmentation 阶段执行 padding、
+> truncation 或 resampling；如需固定长度，应在 segmentation 完成后，按照
+> [docs/SEGMENT_PADDING.md](SEGMENT_PADDING.md) 独立执行长度分析和 padding。
+>
+> 当前实现的主文档是 [docs/IMU_SEGMENTATION.md](IMU_SEGMENTATION.md)。
+
 ## 1. 目标
 
 基于每个 recording 的 `{dataset_id}_timestamp.txt` 对 Ring IMU 数据进行切分。
@@ -147,7 +157,11 @@ outputs/segmentedIMU/
         └── user_0_action_0_segments.csv
 ```
 
-# 4. 固定 Segment 长度
+# 4. 固定 Segment 长度（历史计划，不适用于当前实现）
+
+本节保留旧版固定长度设计，仅作为历史记录。当前 segmentation 不要求
+`target_samples == 600`，也不直接生成 `(N, 600, 6)`；固定长度转换属于
+segmentation 后的独立 padding 阶段。
 
 配置：
 
