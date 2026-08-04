@@ -82,6 +82,31 @@ python scripts/segment_ring_imu.py \
 See [docs/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 for the required offset layout, Board-event rules, and output schema.
 
+## Global segment-length analysis and fixed-length padding
+
+Analyze one completed variable-length segmentation root before choosing a
+fixed target. The analysis reports global distributions, candidate coverage,
+outlier provenance, and separate pure-padding/P99/balanced recommendations:
+
+```bash
+python scripts/analyze_segment_lengths.py \
+  --input-root outputs/segmentedIMU_LowPassFiltering
+```
+
+After reviewing its outliers, create a separate right-padded dataset from the
+pure-padding recommendation. Padding rejects all overflow instead of
+truncating or silently skipping segments:
+
+```bash
+python scripts/pad_segmented_imu.py \
+  --input-root outputs/segmentedIMU_LowPassFiltering \
+  --analysis-report outputs/segmentedIMU_LowPassFiltering/padding_analysis/segment_length_analysis.json \
+  --recommendation pure-padding
+```
+
+See [docs/SEGMENT_PADDING.md](docs/SEGMENT_PADDING.md) for the complete input,
+output, and transactional publishing contract.
+
 ## Important data rules
 
 Recordings are organized using this hierarchy:
