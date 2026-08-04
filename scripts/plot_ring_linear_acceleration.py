@@ -117,6 +117,24 @@ def build_parser(runtime: SimpleNamespace) -> argparse.ArgumentParser:
         metavar=("R00", "R01", "R02", "R10", "R11", "R12", "R20", "R21", "R22"),
     )
     parser.add_argument(
+        "--gravity-removal-method",
+        choices=("madgwick", "low-pass"),
+        default="madgwick",
+        help="gravity estimator (default: madgwick)",
+    )
+    parser.add_argument(
+        "--madgwick-beta",
+        type=float,
+        default=0.1,
+        help="Madgwick fusion gain (default: 0.1)",
+    )
+    parser.add_argument(
+        "--low-pass-cutoff-hz",
+        type=float,
+        default=0.2,
+        help="second-order Butterworth cutoff in Hz (default: 0.2)",
+    )
+    parser.add_argument(
         "--correction-time-constant",
         type=float,
         default=1.0,
@@ -216,6 +234,9 @@ def _build_config(
         "sampling_rate_hz": args.sampling_rate,
         "calibration_start_sample": args.calibration_start,
         "calibration_stop_sample": args.calibration_stop,
+        "gravity_removal_method": args.gravity_removal_method,
+        "madgwick_beta": args.madgwick_beta,
+        "low_pass_cutoff_hz": args.low_pass_cutoff_hz,
         "correction_time_constant_s": args.correction_time_constant,
         "acceleration_gate_relative_tolerance": (
             args.acceleration_gate_tolerance
@@ -334,6 +355,11 @@ def _print_summary(output: Path, result: object) -> None:
         f"{diagnostics.nominal_sampling_rate_hz:g} Hz (assumed)"
     )
     print(f"Profile: {result.config.profile_name}")
+    print(f"Gravity removal method: {result.config.gravity_removal_method}")
+    if result.config.gravity_removal_method == "madgwick":
+        print(f"Madgwick beta: {result.config.madgwick_beta:g}")
+    else:
+        print(f"Low-pass cutoff: {result.config.low_pass_cutoff_hz:g} Hz")
     print(
         "Correction accepted: "
         f"{diagnostics.correction_used_count}/{diagnostics.sample_count} "

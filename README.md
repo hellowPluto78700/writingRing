@@ -15,6 +15,43 @@ data and reports anomalies without silently repairing them. See
 [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the durable, source-backed
 format reference.
 
+## Ring--Board alignment export and verification
+
+`scripts/align_ring_board.py` estimates one constant offset only when the
+sequence matcher succeeds, writes a directed microsecond TXT record, and
+generates a six-panel verification image. The shared convention is
+`ring_timestamp_us = board_timestamp_us + offset_us`; both artifacts use the
+same `best_offset_us` and never change raw timestamps.
+
+```bash
+python scripts/align_ring_board.py \
+  --data-root data_sample/data \
+  --user user_0 --action 0 --dataset-id 0 \
+  --verification-output-root outputs/alignmentVerification \
+  --label-time-domain shared
+```
+
+See [docs/ALIGNMENT_OUTPUTS.md](docs/ALIGNMENT_OUTPUTS.md) for the output
+layout, label-time-domain behavior, and overwrite policy.
+
+## Timestamp-label IMU segmentation
+
+Export variable-length primary-Ring IMU segments for all datasets of one
+user/action, using each dataset's timestamp labels as half-open boundaries:
+
+```bash
+python scripts/segment_ring_imu.py \
+  --data-root data_sample/data \
+  --user user_0 --action 0 \
+  --output-root outputs/segmentedIMU
+```
+
+The exporter writes contiguous raw IMU plus segment offsets and lengths,
+string labels, an audit CSV, and JSON summary. It is strict about
+malformed/out-of-range labels and does not overwrite by default. See
+[docs/IMU_SEGMENTATION.md](docs/IMU_SEGMENTATION.md) for segment boundary,
+duplicate-timestamp, and overwrite semantics.
+
 ## Important data rules
 
 Recordings are organized using this hierarchy:
@@ -281,11 +318,19 @@ bounds with that profile. `--provisional` permits exploratory output when
 stationary calibration checks fail, while preserving prominent warnings;
 strict calibration is the default.
 
-The estimator uses a fixed nominal processing rate rather than duplicate-rich
-Ring timestamps. It anchors at the calibration interval midpoint and
-propagates in both directions, so the result is noncausal and intended for
-offline inspection—not real-time control, navigation, or ground-truth motion
-reconstruction. See
+Select the estimator with `--gravity-removal-method`. The default `madgwick`
+method performs IMU-only sensor fusion; tune its gradient-descent gain with
+`--madgwick-beta` (default `0.1`). For acceleration-only removal, select
+`--gravity-removal-method low-pass`; `--low-pass-cutoff-hz` controls its
+cutoff (default `0.2` Hz). This method applies one causal second-order
+Butterworth IIR low-pass SOS/biquad independently to each configured
+acceleration axis and subtracts that output as the gravity contribution.
+
+The Madgwick estimator uses a fixed nominal processing rate rather than
+duplicate-rich Ring timestamps. It anchors at the calibration interval
+midpoint and propagates in both directions, so its result is noncausal and
+intended for offline inspection—not real-time control, navigation, or
+ground-truth motion reconstruction. See
 [docs/RemoveGravityInTheIMUBodyFramePlan.md](docs/RemoveGravityInTheIMUBodyFramePlan.md)
 for its conventions, limitations, and acceptance criteria.
 

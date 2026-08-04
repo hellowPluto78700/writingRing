@@ -235,12 +235,18 @@ def plot_ring_gravity_removal(
         if calibration.passed
         else "PROVISIONAL calibration"
     )
+    estimator_kind = (
+        "offline bidirectional estimate"
+        if gravity_result.diagnostics.noncausal_bidirectional
+        else "causal estimate"
+    )
     figure.suptitle(
         "WritingRing gravity-contribution removal — "
         f"{ring_data.source_path.name}\n"
         f"{status}; samples {calibration.start_sample}:"
         f"{calibration.stop_sample}; nominal {config.sampling_rate_hz:g} Hz; "
-        f"profile={config.profile_name}; offline bidirectional estimate"
+        f"profile={config.profile_name}; method={config.gravity_removal_method}; "
+        f"{estimator_kind}"
     )
     warning_items = list(gravity_result.diagnostics.warnings)
     if time_axis == RING_INFERRED_TIME:

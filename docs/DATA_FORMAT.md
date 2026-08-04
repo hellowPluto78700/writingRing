@@ -606,13 +606,36 @@ radians/second for fusion, and y/z sign flips. It remains an assumption rather
 than confirmed file metadata. Raw `acc_*`, `gyr_*`, and `timestamp` columns
 are preserved unchanged.
 
-Because Ring timestamps contain duplicate groups, the first implementation
-uses `dt = 1 / sampling_rate_hz` and does not derive per-sample integration
-steps from the timestamp column. It anchors the gravity contribution in an
+The default Madgwick IMU-only method uses a configurable beta gain of `0.1`.
+Because Ring timestamps contain duplicate groups, it uses
+`dt = 1 / sampling_rate_hz` and does not derive per-sample integration steps
+from the timestamp column. It anchors the gravity contribution in an
 explicitly validated stationary interval and propagates forward and backward.
-The output is therefore noncausal, estimated, and suitable for offline
-inspection rather than navigation or real-time control.
+Its output is therefore noncausal, estimated, and suitable for offline
+inspection rather than navigation or real-time control. The alternative
+low-pass method applies a causal second-order Butterworth IIR SOS/biquad to
+each acceleration axis, with a configurable cutoff of `0.2 Hz` by default.
 
 This analysis intentionally differs from the upstream implementation:
 upstream scales and plots IMU channels but does not estimate orientation,
-propagate a body-frame gravity contribution, or subtract it.
+run Madgwick fusion, low-pass acceleration for gravity estimation, propagate
+a body-frame gravity contribution, or subtract it.
+
+## 12. Alignment exports are derived artifacts
+
+The alignment offset TXT and verification PNG are not source-data formats and
+do not alter Ring, Board, or marker files. A successful sequence alignment
+exports only the finite `best_offset_us` using this explicit convention:
+
+```text
+ring_timestamp_us = board_timestamp_us + offset_us
+```
+
+The offset is in microseconds. `frame_timestamp_raw` remains the unmodified
+Board timestamp; verification derives `aligned_ring_timestamp_us` and
+`aligned_ring_elapsed_s` only for display. The TXT contains the mapping text,
+unit, success state, and coverage counts, so a bare number cannot lose its
+direction. The verification image uses the exact same accepted offset and six
+adjacent ten-second Ring-elapsed-time panels. It also records whether labels
+were interpreted in the `ring`, `board`, or `shared` time domain. See
+[ALIGNMENT_OUTPUTS.md](ALIGNMENT_OUTPUTS.md) for the output schema and CLI.

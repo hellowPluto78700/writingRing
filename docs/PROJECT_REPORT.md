@@ -453,9 +453,10 @@ inspection and plotting CLIs, notebook, summary builder, and Board plots use
 in explicitly configured Ring sensor/body axes without mutating raw data.
 
 `GravityRemovalConfig` defaults to a nominal 200 Hz rate, m/s² acceleration,
-rad/s gyroscope data, identity axes, and automatic calibration when manual
-bounds are absent. It also records scale overrides, a right-handed axis
-transform, complementary correction time constant, confidence gates,
+rad/s gyroscope data, identity axes, Madgwick gravity removal, and automatic
+calibration when manual bounds are absent. It also records the Madgwick beta
+gain, the alternative second-order Butterworth low-pass cutoff, scale
+overrides, a right-handed axis transform, confidence gates,
 calibration thresholds, strict/provisional policy, unit label, and profile
 name. `GravityCalibration` records robust stationary statistics, gravity
 magnitude/direction, gyro bias, anchor sample, provenance, pass/fail state,
@@ -480,11 +481,11 @@ linear acceleration.
 
 `calibrate_gravity_removal` validates a finite `(N, 3)` acceleration/gyro
 pair and the explicit calibration interval. `remove_gravity_in_body_frame`
-propagates the calibrated body-frame gravity contribution with
-`d(g_b)/dt = -omega_b × g_b`, using exact Rodrigues rotations and
-confidence-gated accelerometer correction. It anchors at the calibration
-midpoint and propagates forward and backward, so the same-length result is
-deliberately noncausal. `process_ring_gravity` is the thin `RingData` adapter.
+either runs confidence-gated IMU-only Madgwick fusion from the calibration
+anchor in both directions, or applies a causal second-order Butterworth IIR
+SOS/biquad independently to the three acceleration axes. The Madgwick result
+is deliberately noncausal. `process_ring_gravity` is the thin `RingData`
+adapter.
 
 `GravityRemovalResult` exposes read-only configured acceleration,
 bias-corrected angular velocity, estimated gravity contribution, linear

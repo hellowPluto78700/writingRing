@@ -179,6 +179,64 @@ def test_known_linear_acceleration_is_retained_when_gate_rejects_it() -> None:
     assert not result.correction_used[80:140].any()
 
 
+def test_low_pass_method_uses_default_cutoff_and_attenuates_fast_motion() -> None:
+    sample_count = 1000
+    sampling_rate_hz = 100.0
+    time = np.arange(sample_count) / sampling_rate_hz
+    acceleration = np.column_stack(
+        (
+            np.sin(2.0 * np.pi * 5.0 * time),
+            np.zeros(sample_count),
+            np.full(sample_count, 9.8),
+        )
+    )
+    gyroscope = np.zeros_like(acceleration)
+    config = _config(
+        sample_count=sample_count,
+        gravity_removal_method="low-pass",
+    )
+    calibration = calibrate_gravity_removal(
+        acceleration,
+        gyroscope,
+        config=config,
+    )
+
+    result = remove_gravity_in_body_frame(
+        acceleration,
+        gyroscope,
+        config=config,
+        calibration=calibration,
+    )
+
+    assert result.config.low_pass_cutoff_hz == pytest.approx(0.2)
+    assert not result.diagnostics.noncausal_bidirectional
+    np.testing.assert_allclose(result.gravity_body[:, 2], 9.8, atol=1e-10)
+    assert np.std(result.gravity_body[500:, 0]) < 0.01
+    assert np.std(result.linear_acceleration_body[500:, 0]) > 0.70
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"gravity_removal_method": "unknown"}, "gravity_removal_method"),
+        ({"madgwick_beta": -0.1}, "madgwick_beta"),
+        ({"low_pass_cutoff_hz": 50.0}, "Nyquist"),
+    ],
+)
+def test_method_settings_are_validated(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    acceleration, gyroscope = _stationary()
+
+    with pytest.raises(InvalidGravityConfigError, match=message):
+        calibrate_gravity_removal(
+            acceleration,
+            gyroscope,
+            config=_config(**overrides),
+        )
+
+
 def test_calibration_estimates_and_removes_constant_gyro_bias() -> None:
     bias = np.array([0.01, -0.02, 0.03])
     acceleration, gyroscope = _stationary(gyro_bias=bias)

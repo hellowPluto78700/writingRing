@@ -158,6 +158,13 @@ def _add_gravity_arguments(parser: argparse.ArgumentParser) -> None:
         nargs=9,
         metavar=("R00", "R01", "R02", "R10", "R11", "R12", "R20", "R21", "R22"),
     )
+    parser.add_argument(
+        "--gravity-removal-method",
+        choices=("madgwick", "low-pass"),
+        default="madgwick",
+    )
+    parser.add_argument("--madgwick-beta", type=float, default=0.1)
+    parser.add_argument("--low-pass-cutoff-hz", type=float, default=0.2)
     parser.add_argument("--correction-time-constant", type=float, default=1.0)
     parser.add_argument("--acceleration-gate-tolerance", type=float, default=0.15)
     parser.add_argument("--angular-rate-gate", type=float)
@@ -185,6 +192,9 @@ def _build_gravity_config(
         "sampling_rate_hz": args.sampling_rate,
         "calibration_start_sample": args.calibration_start,
         "calibration_stop_sample": args.calibration_stop,
+        "gravity_removal_method": args.gravity_removal_method,
+        "madgwick_beta": args.madgwick_beta,
+        "low_pass_cutoff_hz": args.low_pass_cutoff_hz,
         "correction_time_constant_s": args.correction_time_constant,
         "acceleration_gate_relative_tolerance": args.acceleration_gate_tolerance,
         "angular_rate_gate_rad_s": args.angular_rate_gate,
@@ -510,6 +520,17 @@ def _print_gravity_summary(gravity_result: Any | None) -> None:
         if search.failed_checks:
             print("Failed stationary checks: " + ", ".join(search.failed_checks))
     print(f"Profile: {gravity_result.config.profile_name}")
+    print(
+        "Gravity removal method: "
+        f"{gravity_result.config.gravity_removal_method}"
+    )
+    if gravity_result.config.gravity_removal_method == "madgwick":
+        print(f"Madgwick beta: {gravity_result.config.madgwick_beta:g}")
+    else:
+        print(
+            "Low-pass cutoff: "
+            f"{gravity_result.config.low_pass_cutoff_hz:g} Hz"
+        )
     print(
         "Correction accepted: "
         f"{diagnostics.correction_used_count}/{diagnostics.sample_count} "

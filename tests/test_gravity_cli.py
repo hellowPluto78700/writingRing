@@ -87,7 +87,29 @@ def test_cli_summary_reports_assumptions(
     assert "Automatic stationary search: 0:10" in captured.out
     assert "Nominal sampling rate: 100 Hz (assumed)" in captured.out
     assert "Profile: explicit" in captured.out
+    assert "Gravity removal method: madgwick" in captured.out
+    assert "Madgwick beta: 0.1" in captured.out
     assert "offline estimate is noncausal" in captured.out
+
+
+def test_cli_accepts_low_pass_method_and_custom_cutoff(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root, _ = _data_root(tmp_path)
+    args = [
+        *_args(root, tmp_path / "gravity.png"),
+        "--gravity-removal-method",
+        "low-pass",
+        "--low-pass-cutoff-hz",
+        "0.5",
+    ]
+
+    assert plot_ring_linear_acceleration.main(args) == 0
+
+    captured = capsys.readouterr()
+    assert "Gravity removal method: low-pass" in captured.out
+    assert "Low-pass cutoff: 0.5 Hz" in captured.out
 
 
 def test_cli_can_disable_automatic_calibration_only_with_manual_bounds(

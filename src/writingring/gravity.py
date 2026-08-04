@@ -3,9 +3,10 @@
 The estimator preserves the raw Ring data and operates on explicitly
 configured working axes and units.  It estimates the stationary acceleration
 contribution represented in those axes, not a ground-truth physical gravity
-vector.  The result is anchored in a caller-selected stationary calibration
-interval and propagated both forward and backward, so it is noncausal and is
-not intended for real-time control.
+vector. The default Madgwick result is anchored in a caller-selected
+stationary calibration interval and propagated both forward and backward, so
+it is noncausal. The alternative Butterworth low-pass result is causal. These
+methods are intended for offline analysis rather than real-time control.
 
 Column-vector convention
 ------------------------
@@ -63,6 +64,7 @@ _ACCELERATION_COLUMNS: Final[tuple[str, ...]] = ("acc_x", "acc_y", "acc_z")
 _GYROSCOPE_COLUMNS: Final[tuple[str, ...]] = ("gyr_x", "gyr_y", "gyr_z")
 _VECTOR_SIZE: Final[int] = 3
 _ROTATION_TOLERANCE: Final[float] = 1e-12
+GRAVITY_REMOVAL_METHODS: Final[tuple[str, ...]] = ("madgwick", "low-pass")
 
 
 class GravityRemovalError(ValueError):
@@ -94,6 +96,9 @@ class GravityRemovalConfig:
     axis_transform: tuple[tuple[float, float, float], ...] = (
         IDENTITY_AXIS_TRANSFORM
     )
+    gravity_removal_method: str = "madgwick"
+    madgwick_beta: float = 0.1
+    low_pass_cutoff_hz: float = 0.2
     correction_time_constant_s: float = 1.0
     acceleration_gate_relative_tolerance: float = 0.15
     angular_rate_gate_rad_s: float | None = None
@@ -526,55 +531,38 @@ def remove_gravity_in_body_frame(
             "calibration stationary direction must have unit norm"
         )
 
-    gravity_body = np.empty_like(acceleration_body)
-    correction_confidence = _correction_confidence(
-        acceleration_body,
-        angular_velocity,
-        gravity_magnitude=gravity_magnitude,
-        config=validated_config,
-    )
-    anchor = calibration.anchor_sample
-    gravity_body[anchor] = initial_direction * gravity_magnitude
     dt = 1.0 / validated_config.sampling_rate_hz
-    base_weight = -math.expm1(
-        -dt / validated_config.correction_time_constant_s
-    )
-
-    for index in range(anchor, sample_count - 1):
-        interval_omega = (
-            angular_velocity[index] + angular_velocity[index + 1]
-        ) * 0.5
-        predicted = _rotate_vector_rodrigues(
-            gravity_body[index],
-            -interval_omega * dt,
-        )
-        gravity_body[index + 1] = _correct_gravity(
-            predicted,
-            acceleration_body[index + 1],
+    if validated_config.gravity_removal_method == "madgwick":
+        correction_confidence = _correction_confidence(
+            acceleration_body,
+            angular_velocity,
             gravity_magnitude=gravity_magnitude,
-            confidence=float(correction_confidence[index + 1]),
-            base_weight=base_weight,
+            config=validated_config,
         )
-
-    for index in range(anchor, 0, -1):
-        interval_omega = (
-            angular_velocity[index - 1] + angular_velocity[index]
-        ) * 0.5
-        predicted = _rotate_vector_rodrigues(
-            gravity_body[index],
-            interval_omega * dt,
-        )
-        gravity_body[index - 1] = _correct_gravity(
-            predicted,
-            acceleration_body[index - 1],
+        gravity_body = _estimate_gravity_madgwick(
+            acceleration_body,
+            angular_velocity,
             gravity_magnitude=gravity_magnitude,
-            confidence=float(correction_confidence[index - 1]),
-            base_weight=base_weight,
+            initial_direction=initial_direction,
+            anchor=calibration.anchor_sample,
+            dt=dt,
+            beta=validated_config.madgwick_beta,
+            correction_confidence=correction_confidence,
         )
+        correction_used = correction_confidence > 0.0
+        correction_used[calibration.anchor_sample] = False
+        noncausal_bidirectional = True
+    else:
+        gravity_body = _butterworth_low_pass_sos(
+            acceleration_body,
+            sampling_rate_hz=validated_config.sampling_rate_hz,
+            cutoff_hz=validated_config.low_pass_cutoff_hz,
+        )
+        correction_confidence = np.ones(sample_count, dtype=np.float64)
+        correction_used = np.ones(sample_count, dtype=np.bool_)
+        noncausal_bidirectional = False
 
     linear_acceleration = acceleration_body - gravity_body
-    correction_used = correction_confidence > 0.0
-    correction_used[anchor] = False
     gravity_norms = np.linalg.norm(gravity_body, axis=1)
     calibration_residual_norms = np.linalg.norm(
         linear_acceleration[
@@ -593,10 +581,16 @@ def remove_gravity_in_body_frame(
         )
 
     warnings = list(calibration.warnings)
-    warnings.append(
-        "offline estimate is noncausal: propagated forward and backward "
-        "from the calibration anchor"
-    )
+    if noncausal_bidirectional:
+        warnings.append(
+            "Madgwick offline estimate is noncausal: propagated forward and "
+            "backward from the calibration anchor"
+        )
+    else:
+        warnings.append(
+            "gravity contribution is the causal second-order Butterworth "
+            "low-pass output of each acceleration axis"
+        )
     if not calibration.passed:
         warnings.append(
             "stationary calibration was not certified; derived values are "
@@ -624,7 +618,7 @@ def remove_gravity_in_body_frame(
         ),
         nominal_sampling_rate_hz=validated_config.sampling_rate_hz,
         fixed_dt_seconds=dt,
-        noncausal_bidirectional=True,
+        noncausal_bidirectional=noncausal_bidirectional,
         provisional=not calibration.passed,
         warnings=tuple(dict.fromkeys(warnings)),
     )
@@ -769,6 +763,21 @@ def _validate_config(
         config.gyro_scale_to_rad_s,
         name="gyro_scale_to_rad_s",
     )
+    if config.gravity_removal_method not in GRAVITY_REMOVAL_METHODS:
+        raise InvalidGravityConfigError(
+            "gravity_removal_method must be one of "
+            + ", ".join(GRAVITY_REMOVAL_METHODS)
+        )
+    _nonnegative_finite_float(config.madgwick_beta, name="madgwick_beta")
+    cutoff_hz = _positive_finite_float(
+        config.low_pass_cutoff_hz,
+        name="low_pass_cutoff_hz",
+    )
+    if cutoff_hz >= config.sampling_rate_hz / 2.0:
+        raise InvalidGravityConfigError(
+            "low_pass_cutoff_hz must be below the Nyquist frequency "
+            f"({config.sampling_rate_hz / 2.0:g} Hz)"
+        )
     _positive_finite_float(
         config.correction_time_constant_s,
         name="correction_time_constant_s",
@@ -953,6 +962,175 @@ def _correction_confidence(
         1.0,
     )
     return acceleration_confidence * angular_confidence
+
+
+def _estimate_gravity_madgwick(
+    acceleration: np.ndarray,
+    angular_velocity: np.ndarray,
+    *,
+    gravity_magnitude: float,
+    initial_direction: np.ndarray,
+    anchor: int,
+    dt: float,
+    beta: float,
+    correction_confidence: np.ndarray,
+) -> np.ndarray:
+    """Run the IMU-only Madgwick update in both directions from an anchor."""
+
+    sample_count = acceleration.shape[0]
+    quaternions = np.empty((sample_count, 4), dtype=np.float64)
+    quaternions[anchor] = _quaternion_from_gravity_direction(initial_direction)
+
+    for index in range(anchor, sample_count - 1):
+        interval_omega = (
+            angular_velocity[index] + angular_velocity[index + 1]
+        ) * 0.5
+        quaternions[index + 1] = _madgwick_imu_step(
+            quaternions[index],
+            interval_omega,
+            acceleration[index + 1],
+            dt=dt,
+            beta=beta * float(correction_confidence[index + 1]),
+        )
+
+    for index in range(anchor, 0, -1):
+        interval_omega = -(
+            angular_velocity[index - 1] + angular_velocity[index]
+        ) * 0.5
+        quaternions[index - 1] = _madgwick_imu_step(
+            quaternions[index],
+            interval_omega,
+            acceleration[index - 1],
+            dt=dt,
+            beta=beta * float(correction_confidence[index - 1]),
+        )
+
+    q0 = quaternions[:, 0]
+    q1 = quaternions[:, 1]
+    q2 = quaternions[:, 2]
+    q3 = quaternions[:, 3]
+    gravity_unit = np.column_stack(
+        (
+            2.0 * (q1 * q3 - q0 * q2),
+            2.0 * (q0 * q1 + q2 * q3),
+            1.0 - 2.0 * (q1 * q1 + q2 * q2),
+        )
+    )
+    return gravity_unit * gravity_magnitude
+
+
+def _quaternion_from_gravity_direction(direction: np.ndarray) -> np.ndarray:
+    """Return a zero-yaw scalar-first quaternion matching body-frame gravity."""
+
+    x, y, z = (float(value) for value in direction)
+    pitch = math.atan2(-x, math.hypot(y, z))
+    roll = math.atan2(y, z)
+    half_roll = roll * 0.5
+    half_pitch = pitch * 0.5
+    quaternion = np.array(
+        [
+            math.cos(half_roll) * math.cos(half_pitch),
+            math.sin(half_roll) * math.cos(half_pitch),
+            math.cos(half_roll) * math.sin(half_pitch),
+            -math.sin(half_roll) * math.sin(half_pitch),
+        ],
+        dtype=np.float64,
+    )
+    return quaternion / np.linalg.norm(quaternion)
+
+
+def _madgwick_imu_step(
+    quaternion: np.ndarray,
+    angular_velocity: np.ndarray,
+    acceleration: np.ndarray,
+    *,
+    dt: float,
+    beta: float,
+) -> np.ndarray:
+    """Advance one 6-DoF Madgwick IMU update using scalar-first quaternions."""
+
+    q0, q1, q2, q3 = quaternion
+    angular_speed = float(np.linalg.norm(angular_velocity))
+    if angular_speed > _ROTATION_TOLERANCE:
+        half_angle = 0.5 * angular_speed * dt
+        delta_vector = (
+            angular_velocity / angular_speed * math.sin(half_angle)
+        )
+        d0 = math.cos(half_angle)
+        d1, d2, d3 = delta_vector
+        updated = np.array(
+            [
+                q0 * d0 - q1 * d1 - q2 * d2 - q3 * d3,
+                q0 * d1 + q1 * d0 + q2 * d3 - q3 * d2,
+                q0 * d2 - q1 * d3 + q2 * d0 + q3 * d1,
+                q0 * d3 + q1 * d2 - q2 * d1 + q3 * d0,
+            ],
+            dtype=np.float64,
+        )
+    else:
+        updated = quaternion.copy()
+
+    acceleration_norm = float(np.linalg.norm(acceleration))
+    if beta > 0.0 and acceleration_norm > _ROTATION_TOLERANCE:
+        ax, ay, az = acceleration / acceleration_norm
+        residual = np.array(
+            [
+                2.0 * (q1 * q3 - q0 * q2) - ax,
+                2.0 * (q0 * q1 + q2 * q3) - ay,
+                1.0 - 2.0 * (q1 * q1 + q2 * q2) - az,
+            ],
+            dtype=np.float64,
+        )
+        jacobian = np.array(
+            [
+                [-2.0 * q2, 2.0 * q3, -2.0 * q0, 2.0 * q1],
+                [2.0 * q1, 2.0 * q0, 2.0 * q3, 2.0 * q2],
+                [0.0, -4.0 * q1, -4.0 * q2, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        gradient = jacobian.T @ residual
+        gradient_norm = float(np.linalg.norm(gradient))
+        if gradient_norm > _ROTATION_TOLERANCE:
+            updated -= beta * dt * gradient / gradient_norm
+
+    updated_norm = float(np.linalg.norm(updated))
+    if not math.isfinite(updated_norm) or updated_norm <= _ROTATION_TOLERANCE:
+        raise GravityRemovalError("Madgwick update produced an invalid quaternion")
+    return updated / updated_norm
+
+
+def _butterworth_low_pass_sos(
+    acceleration: np.ndarray,
+    *,
+    sampling_rate_hz: float,
+    cutoff_hz: float,
+) -> np.ndarray:
+    """Apply one causal second-order Butterworth low-pass SOS per axis."""
+
+    warped = math.tan(math.pi * cutoff_hz / sampling_rate_hz)
+    normalization = 1.0 / (1.0 + math.sqrt(2.0) * warped + warped * warped)
+    b0 = warped * warped * normalization
+    b1 = 2.0 * b0
+    b2 = b0
+    a1 = 2.0 * (warped * warped - 1.0) * normalization
+    a2 = (1.0 - math.sqrt(2.0) * warped + warped * warped) * normalization
+
+    filtered = np.empty_like(acceleration)
+    filtered[0] = acceleration[0]
+    x1 = acceleration[0].copy()
+    x2 = acceleration[0].copy()
+    y1 = acceleration[0].copy()
+    y2 = acceleration[0].copy()
+    for index in range(1, acceleration.shape[0]):
+        current = acceleration[index]
+        output = (
+            b0 * current + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        )
+        filtered[index] = output
+        x2, x1 = x1, current
+        y2, y1 = y1, output
+    return filtered
 
 
 def _correct_gravity(
