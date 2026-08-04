@@ -38,6 +38,37 @@ The command does not overwrite existing artifacts by default. Use
 removes the old fixed-length `valid_lengths` and `valid_mask` files from a
 previous exporter run.
 
+## Optional label-only verification
+
+Label mode does not create figures by default and does not load Board data or
+alignment offsets. Add `--write-label-verification` to write one full-recording
+PNG per dataset beside the label-mode output arrays:
+
+```bash
+python scripts/segment_ring_imu.py \
+    --data-root data --user user_0 --action 0 \
+    --write-label-verification
+```
+
+This figure shows the six-axis transient score, timestamp labels, skipped label
+annotations, and the final label-only segment backgrounds. It does not change
+the exported boundaries or arrays.
+
+To display Board event markers for visual comparison only, add both
+`--overlay-aligned-board-events` and a structured `--alignment-offset-root`:
+
+```bash
+python scripts/segment_ring_imu.py \
+    --data-root data --user user_0 --action 0 \
+    --write-label-verification \
+    --overlay-aligned-board-events \
+    --alignment-offset-root outputs/alignment/offsets
+```
+
+The overlay requires valid saved offsets and Board data, but it never changes
+label-mode segments. `--verification-panel-seconds` and `--verification-dpi`
+adjust either label or aligned verification figures.
+
 ## Segment semantics
 
 Each nonempty, non-comment line in `{dataset_id}_timestamp.txt` has a numeric

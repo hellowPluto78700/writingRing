@@ -193,6 +193,7 @@ def test_user_action_aggregation_removes_gravity_before_segmenting(
     )
     assert result.manifest["dataset_id"].tolist() == [2, 2, 10, 10]
     assert result.summary["segment_count"] == 4
+    assert result.summary["boundary_mode"] == "label"
     assert result.summary["source_label_count"] == 5
     assert result.summary["skipped_label_counts_by_reason"] == {"label_is_wrong": 1}
     assert result.summary["gravity_removal"]["method"] == "low-pass"

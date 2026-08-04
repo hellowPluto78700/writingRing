@@ -34,7 +34,7 @@ python scripts/align_ring_board.py \
 See [docs/ALIGNMENT_OUTPUTS.md](docs/ALIGNMENT_OUTPUTS.md) for the output
 layout, label-time-domain behavior, and overwrite policy.
 
-## Timestamp-label IMU segmentation
+## IMU segmentation: label or aligned Board events
 
 Remove gravity and export variable-length primary-Ring IMU segments for all
 datasets of one user/action, using each dataset's timestamp labels as
@@ -48,13 +48,35 @@ python scripts/segment_ring_imu.py \
   --output-root outputs/segmentedIMU
 ```
 
-The exporter writes contiguous gravity-removed IMU plus segment offsets and
-lengths, string labels, an audit CSV, and JSON summary. Use
+The default `--boundary-mode label` writes contiguous gravity-removed IMU plus
+segment offsets and lengths, string labels, an audit CSV, and JSON summary. Use
 `--gravity-removal-method madgwick` for sensor fusion; it writes to
 `outputs/segmentedIMU_Madgwick` by default. It is strict about
 malformed/out-of-range labels and does not overwrite by default. See
 [docs/IMU_SEGMENTATION.md](docs/IMU_SEGMENTATION.md) for segment boundary,
 duplicate-timestamp, and overwrite semantics.
+
+For Board-event-guided boundaries, first create successful per-recording
+Ring--Board offsets, then select the mode explicitly. Without an explicit
+`--output-root`, Board-assisted output uses a method-specific root:
+`outputs/boardAssistSegmentedIMU_LowPassFilterin` for low-pass and
+`outputs/boardAssistSegmentedIMU_Madgwick` for Madgwick. Use
+`--gravity-removal-method raw` in Board-assisted mode to bypass gravity
+removal and write the original six IMU channels to
+`outputs/boardAssistSegmentedIMU_RawIMU`. Each root contains
+the same `user/action` layout and one full-recording verification PNG per
+dataset:
+
+```bash
+python scripts/segment_ring_imu.py \
+  --data-root data \
+  --user user_0 --action 0 \
+  --boundary-mode aligned-board-events \
+  --alignment-offset-root outputs/alignment/offsets
+```
+
+See [docs/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/BOARD_EVENT_GUIDED_SEGMENTATION.md)
+for the required offset layout, Board-event rules, and output schema.
 
 ## Important data rules
 

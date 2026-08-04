@@ -173,7 +173,7 @@ def segment_recording_by_labels(
     imu, timestamps = _validated_ring_inputs(ring_imu, ring_timestamps_us)
     markers = _validated_labels(labels)
     _validate_label_range(markers, timestamps)
-    skip_reasons = _label_start_skip_reasons(
+    skip_reasons = label_start_skip_reasons(
         markers,
         ring_end_timestamp_us=float(timestamps[-1]),
         config=config,
@@ -299,7 +299,7 @@ def segment_user_action(
             )
         markers = load_timestamp_labels(recording.timestamp_path)
         source_label_count += len(markers)
-        for reason in _label_start_skip_reasons(
+        for reason in label_start_skip_reasons(
             markers,
             ring_end_timestamp_us=float(timestamps[-1]),
             config=config,
@@ -452,6 +452,7 @@ def _summary(
 ) -> dict[str, object]:
     lengths = np.asarray([sample.sample_count for sample in samples], dtype=np.int64)
     return {
+        "boundary_mode": "label",
         "user": user,
         "action": action,
         "recording_count": len(recordings),
@@ -705,6 +706,32 @@ def _label_start_skip_reasons(
     if final_interval > config.maximum_segment_duration_us:
         _set_skip_reason(reasons, len(labels) - 1, "final_segment_duration_gt_5s")
     return tuple(reasons)
+
+
+def label_start_skip_reasons(
+    labels: Sequence[SegmentLabel],
+    *,
+    ring_end_timestamp_us: float,
+    config: SegmentationConfig = SegmentationConfig(),
+) -> tuple[str | None, ...]:
+    """Return the current label-only validity decisions without segmenting.
+
+    Board-guided segmentation uses this public helper so both boundary modes
+    share identical ``wrong``, too-close, and too-long label-start rules.
+    Labels remain interval boundaries even when their returned reason is not
+    ``None``.
+    """
+
+    _validated_config(config)
+    markers = _validated_labels(labels)
+    end = _finite_float(ring_end_timestamp_us, name="ring_end_timestamp_us")
+    if end < markers[-1].timestamp_us:
+        raise SegmentationError("ring_end_timestamp_us precedes the final label")
+    return _label_start_skip_reasons(
+        markers,
+        ring_end_timestamp_us=end,
+        config=config,
+    )
 
 
 def _set_skip_reason(reasons: list[str | None], index: int, reason: str) -> None:
