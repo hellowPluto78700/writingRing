@@ -93,9 +93,9 @@ python scripts/analyze_segment_lengths.py \
   --input-root outputs/segmentedIMU_LowPassFiltering
 ```
 
-After reviewing its outliers, create a separate right-padded dataset from the
-pure-padding recommendation. Padding rejects all overflow instead of
-truncating or silently skipping segments:
+After reviewing its outliers, create a separate right-padded dataset. Segments
+longer than the selected target are skipped (never truncated), and every skip
+is recorded in the padding manifest and summary:
 
 ```bash
 python scripts/pad_segmented_imu.py \
@@ -143,31 +143,19 @@ The project applies the following rules:
 
 ## Environment setup
 
-Create and activate the Python 3.11 Conda environment, then install the
-project editably:
+Create the unified Python 3.10 Conda environment based on
+`environment.yml`, activate it, and install the project editably:
 
 ```bash
-conda create -n writingring-viz python=3.11 -y
+conda env create -f environment.yml
 conda activate writingring-viz
 python -m pip install -e .
 ```
 
-Testing and notebook tooling are optional extras:
-
-```bash
-python -m pip install -e ".[test]"
-python -m pip install -e ".[notebook]"
-```
-
-Install both for development and acceptance work:
-
-```bash
-python -m pip install -e ".[test,notebook]"
-```
-
-The runtime installation includes NumPy, Pandas, Matplotlib, and
-`compress-pickle`. The notebook extra includes JupyterLab, `ipykernel`,
-`nbconvert`, and `nbformat`.
+The unified environment includes the Neuromorphic-Gravity dependencies,
+WritingRing's runtime dependencies, pytest, and the notebook tooling. The
+project's `[test]` and `[notebook]` extras remain available for users who
+create a smaller custom environment.
 
 ## Dataset setup
 
