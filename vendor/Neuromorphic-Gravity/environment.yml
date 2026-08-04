@@ -1,0 +1,65 @@
+name: xyloIMU
+
+channels:
+  - conda-forge
+
+dependencies:
+  # Keep the Python constraint broad enough for current conda-forge builds,
+  # while meeting NeuroBench 2.1.0 and Rockpool requirements.
+  - python=3.10
+  - pip>=24,<26
+  - setuptools
+  - wheel
+
+  # Core numerical stack. NumPy stays below 2.0 because tonic 1.6.0
+  # requires numpy<2.0.0.
+  - numpy=1.26.4
+  - scipy=1.13.1
+  - pandas=2.2.3
+  - matplotlib=3.9.4
+  - scikit-learn=1.6.1
+  - h5py=3.14.0
+  - numba=0.60.0
+  - pyyaml=6.0.2
+
+  # Interactive development tools.
+  - ipython=8.18.1
+  - ipykernel=6.29.5
+
+  - pip:
+      # Portable CPU-only PyTorch wheels. This avoids downloading the large
+      # CUDA runtime packages that appeared in the original exported file.
+      - --index-url https://download.pytorch.org/whl/cpu
+      - --extra-index-url https://pypi.org/simple
+
+      # PyTorch versions must be kept as a matched release set.
+      - torch==2.6.0
+      - torchvision==0.21.0
+      - torchaudio==2.6.0
+
+      # Neuromorphic / SNN stack.
+      - neurobench==2.1.0
+      - rockpool==2.9.1
+      - samna==0.43.0.0
+      - xylosim==0.1.3
+      - tonic==1.6.0
+      - sinabs==3.1.0
+      - snntorch==0.9.4
+      - brian2==2.6.0
+      - nir==1.0.4
+      - nirtorch==2.0.2
+
+      # Backends and project data-processing dependencies.
+      - jax==0.4.30
+      - jaxlib==0.4.30
+      - bitstruct==8.19.0
+      - expelliarmus==1.1.12
+      - importrosbag==1.0.4
+      - librosa==0.11.0
+      - pywavelets==1.6.0
+      - seaborn==0.13.2
+      - tqdm==4.67.1
+      - wandb==0.21.0
+
+      # Test runner used by the original environment.
+      - pytest==8.4.2
