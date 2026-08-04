@@ -77,6 +77,9 @@ def test_default_output_root_is_gravity_method_specific() -> None:
     assert segment_ring_imu._default_output_root("madgwick") == Path(
         "outputs/segmentedIMU_Madgwick"
     )
+    assert segment_ring_imu._default_output_root("raw") == Path(
+        "outputs/segmentedIMU_RawIMU"
+    )
     assert segment_ring_imu._default_output_root(
         "low-pass", boundary_mode="aligned-board-events"
     ) == Path("outputs/boardAssistSegmentedIMU_LowPassFilterin")
@@ -158,15 +161,24 @@ def test_cli_rejects_aligned_options_in_label_mode(tmp_path: Path, capsys) -> No
     assert "requires --overlay-aligned-board-events" in capsys.readouterr().err
 
 
-def test_cli_rejects_raw_imu_in_label_mode(tmp_path: Path, capsys) -> None:
+def test_cli_exports_raw_imu_in_label_mode(tmp_path: Path, capsys) -> None:
+    root = _data_root(tmp_path)
+    output = tmp_path / "outputs"
     assert segment_ring_imu.main(
         [
-            "--data-root", str(tmp_path / "data"),
-            "--user", "user_a", "--action", "a",
+            "--data-root", str(root),
+            "--user", "writer_a", "--action", "letters",
+            "--output-root", str(output),
             "--gravity-removal-method", "raw",
         ]
-    ) == 2
-    assert "supported only" in capsys.readouterr().err
+    ) == 0
+    exported = np.load(
+        output / "writer_a" / "action_letters" / "writer_a_action_letters_rawIMU.npy",
+        allow_pickle=False,
+    )
+    assert exported.shape == (700, 6)
+    np.testing.assert_allclose(exported[:, 2], np.full(700, 9.8))
+    assert "Gravity removal: raw" in capsys.readouterr().out
 
 
 def test_cli_rejects_unimplemented_fallback_to_label_during_argument_parsing(

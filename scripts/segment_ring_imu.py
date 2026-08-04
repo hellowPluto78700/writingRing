@@ -271,11 +271,6 @@ def _validate_mode_arguments(args: argparse.Namespace) -> None:
         args.crossing_touch_policy,
     )
     if args.boundary_mode == "label":
-        if args.gravity_removal_method == "raw":
-            raise ValueError(
-                "--gravity-removal-method raw is supported only with "
-                "--boundary-mode aligned-board-events"
-            )
         if any(value is not None for value in aligned_values):
             raise ValueError(
                 "aligned-board-events options require "
@@ -401,11 +396,16 @@ def _write_label_verifications(
         if recording.timestamp_path is None:
             raise ValueError(f"dataset {recording.dataset_id} is missing timestamp labels")
         ring = load_ring(recording)
-        gravity = process_ring_gravity(ring, config=gravity_config)
         timestamps = ring.dataframe["timestamp"].to_numpy(copy=True)
-        imu = np.column_stack(
-            (gravity.linear_acceleration_body, gravity.angular_velocity_body_rad_s)
-        )
+        if getattr(gravity_config, "gravity_removal_method", None) == "raw":
+            imu = ring.dataframe.loc[
+                :, ["acc_x", "acc_y", "acc_z", "gyr_x", "gyr_y", "gyr_z"]
+            ].to_numpy(copy=True)
+        else:
+            gravity = process_ring_gravity(ring, config=gravity_config)
+            imu = np.column_stack(
+                (gravity.linear_acceleration_body, gravity.angular_velocity_body_rad_s)
+            )
         labels = load_timestamp_labels(recording.timestamp_path)
         samples = segment_recording_by_labels(
             ring_imu=imu,
@@ -484,6 +484,7 @@ def _default_output_root(method: str, *, boundary_mode: str = "label") -> Path:
         }
     else:
         names = {
+            "raw": "segmentedIMU_RawIMU",
             "low-pass": "segmentedIMU_LowPassFiltering",
             "madgwick": "segmentedIMU_Madgwick",
         }

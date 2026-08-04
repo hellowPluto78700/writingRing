@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from writingring.gravity import GravityRemovalConfig
 from writingring.segmentation import (
     SegmentLabel,
     SegmentLabelParseError,
@@ -218,6 +219,36 @@ def test_user_action_aggregation_removes_gravity_before_segmenting(
         overwrite=True,
     )
     assert overwritten.segment_lengths.tolist() == [200, 450, 350, 350]
+
+
+def test_user_action_raw_imu_bypasses_gravity_removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    timestamps = 1_000_000 + np.arange(500, dtype=np.float64) * 1_000
+    _write_recording(
+        action_dir,
+        dataset_id=0,
+        timestamps=timestamps,
+        labels=[(1_000_000, "a"), (1_250_000, "b")],
+    )
+
+    def unexpected_gravity(*args: object, **kwargs: object) -> object:
+        raise AssertionError("raw label mode must not remove gravity")
+
+    monkeypatch.setattr("writingring.segmentation.process_ring_gravity", unexpected_gravity)
+    result = segment_user_action(
+        data_root=data_root,
+        user="user_0",
+        action="0",
+        output_root=tmp_path / "outputs",
+        gravity_config=GravityRemovalConfig(gravity_removal_method="raw"),
+    )
+
+    np.testing.assert_array_equal(result.raw_imu, _imu(timestamps).astype(np.float32))
+    assert result.manifest["gravity_removal_method"].tolist() == ["raw", "raw"]
+    assert result.summary["gravity_removal"]["method"] == "raw"
+    assert result.summary["gravity_removal"]["sampling_rate_hz"] is None
 
 
 def test_wrong_label_ends_previous_segment_without_becoming_a_start() -> None:

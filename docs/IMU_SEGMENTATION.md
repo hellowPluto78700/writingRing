@@ -19,6 +19,16 @@ is `outputs/segmentedIMU_LowPassFiltering`. Select the existing Madgwick
 sensor-fusion implementation with `--gravity-removal-method madgwick`; its
 default root is `outputs/segmentedIMU_Madgwick`.
 
+Use `--gravity-removal-method raw` to bypass gravity removal and export the
+original six Ring IMU channels. Its default root is
+`outputs/segmentedIMU_RawIMU`:
+
+```bash
+python scripts/segment_ring_imu.py \
+    --data-root data --user user_0 --action 0 \
+    --gravity-removal-method raw
+```
+
 ```bash
 python scripts/segment_ring_imu.py \
     --data-root data --user user_0 --action 0 \

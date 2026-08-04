@@ -56,6 +56,10 @@ malformed/out-of-range labels and does not overwrite by default. See
 [docs/IMU_SEGMENTATION.md](docs/IMU_SEGMENTATION.md) for segment boundary,
 duplicate-timestamp, and overwrite semantics.
 
+For label-mode data without gravity removal, use
+`--gravity-removal-method raw`; it writes the original six IMU channels under
+`outputs/segmentedIMU_RawIMU` by default.
+
 For Board-event-guided boundaries, first create successful per-recording
 Ring--Board offsets, then select the mode explicitly. Without an explicit
 `--output-root`, Board-assisted output uses a method-specific root:

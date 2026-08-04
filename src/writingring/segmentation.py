@@ -42,6 +42,7 @@ _WRONG_LABEL: Final[str] = "wrong"
 _DEFAULT_MINIMUM_LABEL_INTERVAL_US: Final[float] = 100_000.0
 _DEFAULT_MAXIMUM_SEGMENT_DURATION_US: Final[float] = 5_000_000.0
 _DEFAULT_GRAVITY_REMOVAL_METHOD: Final[str] = "low-pass"
+_RAW_IMU_METHOD: Final[str] = "raw"
 
 
 class SegmentationError(ValueError):
@@ -381,18 +382,21 @@ def _recording_ring_arrays(
 ) -> tuple[np.ndarray, np.ndarray]:
     try:
         ring = load_ring(recording)
-        gravity_result = process_ring_gravity(ring, config=gravity_config)
+        if gravity_config.gravity_removal_method == _RAW_IMU_METHOD:
+            imu = ring.dataframe.loc[:, list(IMU_CHANNEL_COLUMNS)].to_numpy(copy=True)
+        else:
+            gravity_result = process_ring_gravity(ring, config=gravity_config)
+            imu = np.column_stack(
+                (
+                    gravity_result.linear_acceleration_body,
+                    gravity_result.angular_velocity_body_rad_s,
+                )
+            )
     except (RingLoadError, GravityRemovalError) as error:
         raise SegmentationError(
-            "could not load and remove gravity from dataset "
+            "could not load and preprocess IMU for dataset "
             f"{recording.dataset_id} primary Ring: {error}"
         ) from error
-    imu = np.column_stack(
-        (
-            gravity_result.linear_acceleration_body,
-            gravity_result.angular_velocity_body_rad_s,
-        )
-    )
     timestamps = ring.dataframe[_TIMESTAMP_COLUMN].to_numpy(copy=True)
     return _validated_ring_inputs(imu, timestamps)
 
@@ -424,8 +428,16 @@ def _manifest_row(
         "last_sample_timestamp_us": float(timestamps[stop - 1]),
         "sample_count": sample.sample_count,
         "gravity_removal_method": gravity_config.gravity_removal_method,
-        "gravity_low_pass_cutoff_hz": gravity_config.low_pass_cutoff_hz,
-        "gravity_madgwick_beta": gravity_config.madgwick_beta,
+        "gravity_low_pass_cutoff_hz": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.low_pass_cutoff_hz
+        ),
+        "gravity_madgwick_beta": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.madgwick_beta
+        ),
         "is_last_label": sample.next_label_timestamp_us is None,
         "segment_end_source": (
             "ring_recording_end"
@@ -465,10 +477,26 @@ def _summary(
         "maximum_segment_duration_us": maximum_segment_duration_us,
         "gravity_removal": {
             "method": gravity_config.gravity_removal_method,
-            "sampling_rate_hz": gravity_config.sampling_rate_hz,
-            "low_pass_cutoff_hz": gravity_config.low_pass_cutoff_hz,
-            "madgwick_beta": gravity_config.madgwick_beta,
-            "strict_calibration": gravity_config.strict_calibration,
+            "sampling_rate_hz": (
+                None
+                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                else gravity_config.sampling_rate_hz
+            ),
+            "low_pass_cutoff_hz": (
+                None
+                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                else gravity_config.low_pass_cutoff_hz
+            ),
+            "madgwick_beta": (
+                None
+                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                else gravity_config.madgwick_beta
+            ),
+            "strict_calibration": (
+                None
+                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                else gravity_config.strict_calibration
+            ),
         },
         "total_imu_sample_count": int(np.sum(lengths)),
         "channel_count": len(IMU_CHANNEL_COLUMNS),
@@ -628,8 +656,11 @@ def _effective_gravity_config(
         )
     if not isinstance(gravity_config, GravityRemovalConfig):
         raise SegmentationError("gravity_config must be a GravityRemovalConfig")
-    if gravity_config.gravity_removal_method not in GRAVITY_REMOVAL_METHODS:
-        choices = ", ".join(GRAVITY_REMOVAL_METHODS)
+    if gravity_config.gravity_removal_method not in {
+        _RAW_IMU_METHOD,
+        *GRAVITY_REMOVAL_METHODS,
+    }:
+        choices = ", ".join((_RAW_IMU_METHOD, *GRAVITY_REMOVAL_METHODS))
         raise SegmentationError(f"gravity_removal_method must be one of: {choices}")
     return gravity_config
 
