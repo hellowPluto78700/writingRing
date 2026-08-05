@@ -11,6 +11,15 @@
 - The sample data root is data_sample/data.
 - The official pickle classes are under core/sensel_lib/.
 
+## Documentation layout
+
+- `docs/plans/` contains implementation plans and task specifications.
+- `docs/notes/` contains explanatory documents and reports generated after
+  plans are completed.
+- Keep new plans in `docs/plans/`. After completing a plan, write its
+  explanatory Markdown document in `docs/notes/` rather than in the `docs/`
+  root.
+
 ## Upstream reference code
 
 The original dataset-author code is located under:

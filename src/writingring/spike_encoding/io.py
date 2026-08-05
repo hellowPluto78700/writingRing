@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Final
 
 import numpy as np
@@ -21,6 +22,13 @@ SUPPORTED_METHOD_SEMANTICS: Final[dict[str, str]] = {
     "madgwick": "gravity_removed_linear_acceleration",
     "xylo-rotate-and-remove-gravity": "xylo_gravity_removed_acceleration",
 }
+SOURCE_METADATA_PATH_KEYS: Final[tuple[str, ...]] = (
+    "labels_path",
+    "segment_offsets_path",
+    "segment_lengths_path",
+    "timestamp_source_path",
+    "segments_manifest_path",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +101,78 @@ def single_array_offsets(*, sample_count: int) -> np.ndarray:
     """Return the explicit single-sequence partition for ``sample_count`` rows."""
 
     return validate_sequence_offsets(np.array([0, sample_count]), sample_count=sample_count)
+
+
+def load_and_validate_timestamps(
+    path: Path,
+    *,
+    sample_count: int,
+    sampling_rate_hz: float,
+) -> np.ndarray:
+    """Load optional numeric timestamps and validate their recording alignment.
+
+    Timestamps are intentionally not passed to an encoder.  They only confirm
+    that the source rows can be reused by a later segmentation stage.
+    """
+
+    source = Path(path)
+    if not source.is_file():
+        raise SpikeEncodingError(f"timestamps file is not a regular file: {source}")
+    try:
+        timestamps = np.load(source, allow_pickle=False)
+    except (OSError, ValueError) as error:
+        raise SpikeEncodingError(f"could not load timestamps {source}: {error}") from error
+    try:
+        values = np.asarray(timestamps, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise SpikeEncodingError("timestamps must be numeric") from error
+    if values.ndim != 1 or len(values) != sample_count:
+        raise SpikeEncodingError(
+            f"timestamps must have shape ({sample_count},) to match input IMU rows"
+        )
+    if not np.isfinite(values).all():
+        raise SpikeEncodingError("timestamps must contain only finite values")
+    intervals = np.diff(values)
+    if len(intervals) and np.any(intervals <= 0.0):
+        raise SpikeEncodingError("timestamps must be strictly increasing")
+    expected_interval = 1.0 / _optional_finite_positive(
+        sampling_rate_hz, name="sampling_rate_hz"
+    )
+    if len(intervals) and not math.isclose(
+        float(np.median(intervals)), expected_interval, rel_tol=0.05, abs_tol=0.0
+    ):
+        raise SpikeEncodingError(
+            "timestamp sampling interval is inconsistent with sampling_rate_hz"
+        )
+    values.setflags(write=False)
+    return values
+
+
+def validate_source_metadata_paths(
+    paths: Mapping[str, Path | None] | None,
+) -> dict[str, str | None]:
+    """Validate optional, read-only source sidecars for summary provenance."""
+
+    if paths is None:
+        return {key: None for key in SOURCE_METADATA_PATH_KEYS}
+    unknown = sorted(set(paths) - set(SOURCE_METADATA_PATH_KEYS))
+    if unknown:
+        raise SpikeEncodingError(
+            "unknown source metadata path keys: " + ", ".join(unknown)
+        )
+    validated: dict[str, str | None] = {}
+    for key in SOURCE_METADATA_PATH_KEYS:
+        path = paths.get(key)
+        if path is None:
+            validated[key] = None
+            continue
+        source = Path(path)
+        if not source.is_file():
+            raise SpikeEncodingError(
+                f"source metadata path is not a regular file: {source}"
+            )
+        validated[key] = str(source.resolve())
+    return validated
 
 
 def validate_sequence_offsets(offsets: np.ndarray, *, sample_count: int) -> np.ndarray:

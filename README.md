@@ -12,7 +12,7 @@ visualizing the WritingRing dataset. It includes:
 
 The implementation is intentionally conservative: it preserves the stored
 data and reports anomalies without silently repairing them. See
-[docs/DATA_FORMAT.md](docs/DATA_FORMAT.md) for the durable, source-backed
+[docs/notes/DATA_FORMAT.md](docs/notes/DATA_FORMAT.md) for the durable, source-backed
 format reference.
 
 ## Ring--Board alignment export and verification
@@ -31,7 +31,7 @@ python scripts/align_ring_board.py \
   --label-time-domain shared
 ```
 
-See [docs/ALIGNMENT_OUTPUTS.md](docs/ALIGNMENT_OUTPUTS.md) for the output
+See [docs/notes/ALIGNMENT_OUTPUTS.md](docs/notes/ALIGNMENT_OUTPUTS.md) for the output
 layout, label-time-domain behavior, and overwrite policy.
 
 ## IMU segmentation: label or aligned Board events
@@ -53,7 +53,7 @@ segment offsets and lengths, string labels, an audit CSV, and JSON summary. Use
 `--gravity-removal-method madgwick` for sensor fusion; it writes to
 `outputs/segmentedIMU_Madgwick` by default. It is strict about
 malformed/out-of-range labels and does not overwrite by default. See
-[docs/IMU_SEGMENTATION.md](docs/IMU_SEGMENTATION.md) for segment boundary,
+[docs/notes/IMU_SEGMENTATION.md](docs/notes/IMU_SEGMENTATION.md) for segment boundary,
 duplicate-timestamp, and overwrite semantics.
 
 For label-mode data without gravity removal, use
@@ -80,7 +80,7 @@ python scripts/segment_ring_imu.py \
   --alignment-offset-root outputs/alignment/offsets
 ```
 
-See [docs/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/BOARD_EVENT_GUIDED_SEGMENTATION.md)
+See [docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 for the required offset layout, Board-event rules, and output schema.
 
 All segmentation methods write the same nine channels, in this order:
@@ -91,7 +91,7 @@ they always satisfy `acceleration_m_s2 = acceleration_g * 9.80665`. The
 summary and segment manifest identify whether acceleration retains gravity.
 `rawIMU.npy` remains the filename for compatibility, but contains the full
 preprocessed feature tensor rather than necessarily raw acceleration. See
-[docs/XYLO_GRAVITY_REMOVAL.md](docs/XYLO_GRAVITY_REMOVAL.md) for the Xylo mode.
+[docs/notes/XYLO_GRAVITY_REMOVAL.md](docs/notes/XYLO_GRAVITY_REMOVAL.md) for the Xylo mode.
 
 Xylo is optional; raw, low-pass, and Madgwick installs do not require its
 runtime. Install it only before selecting `xylo-rotate-and-remove-gravity`:
@@ -122,7 +122,7 @@ python scripts/pad_segmented_imu.py \
   --recommendation pure-padding
 ```
 
-See [docs/SEGMENT_PADDING.md](docs/SEGMENT_PADDING.md) for the complete input,
+See [docs/notes/SEGMENT_PADDING.md](docs/notes/SEGMENT_PADDING.md) for the complete input,
 output, and transactional publishing contract.
 
 ## Spike encoding with Custom Wavelet
@@ -138,18 +138,20 @@ python scripts/encode_spikes.py \
   --input-imu outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_rawIMU.npy \
   --input-summary outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_segmentation_summary.json \
   --encoder custom-wavelet \
-  --encoder-settings configs/spike_encoding/custom_wavelet.json \
-  --sequence-mode offsets \
-  --sequence-offsets outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_segment_offsets.npy
+  --encoder-settings configs/spike_encoding/custom_wavelet.json
 ```
 
-The encoder resets its state at every supplied offset interval. Without
-`--sequence-offsets`, the complete input is one continuous sequence. Results
-are written atomically under the input file's parent as
+The complete input is exactly one recording. Custom Wavelet rejects sequence,
+recording, label, and segment-offset sidecars, so label boundaries can never
+reset the IIR state. It derives a reflect-padding width from its extrema half-window (30
+samples at 200 Hz), restores signed extrema to their occurrence rows, and
+publishes both 15-channel events and a 21-channel spike IMU: the events plus
+the original m/s² acceleration and gyro channels. Results are written
+atomically under the input file's parent as
 `custom-wavelet/<output-stem>/`; use `--overwrite` only to replace a prior
 spike-encoding result in that same directory. Custom Wavelet events are signed
 local-extrema amplitudes, not binary spike trains. See
-[docs/SPIKE_ENCODING.md](docs/SPIKE_ENCODING.md) for settings, sampling-rate,
+[docs/notes/SPIKE_ENCODING.md](docs/notes/SPIKE_ENCODING.md) for settings, sampling-rate,
 and output-schema details.
 
 ## Important data rules
@@ -419,7 +421,7 @@ duplicate-rich Ring timestamps. It anchors at the calibration interval
 midpoint and propagates in both directions, so its result is noncausal and
 intended for offline inspection—not real-time control, navigation, or
 ground-truth motion reconstruction. See
-[docs/RemoveGravityInTheIMUBodyFramePlan.md](docs/RemoveGravityInTheIMUBodyFramePlan.md)
+[docs/plans/RemoveGravityInTheIMUBodyFramePlan.md](docs/plans/RemoveGravityInTheIMUBodyFramePlan.md)
 for its conventions, limitations, and acceptance criteria.
 
 ## Notebook usage

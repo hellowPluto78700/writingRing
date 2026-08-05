@@ -86,6 +86,7 @@ def test_publication_writes_verified_independent_artifacts(tmp_path: Path) -> No
 
     assert paths.output_directory == tmp_path / "publication-dummy" / "user_0_action_0"
     assert np.load(paths.spike_events_path, allow_pickle=False).dtype == np.float32
+    assert not paths.spike_imu_path.exists()
     np.testing.assert_array_equal(np.load(paths.sequence_offsets_path, allow_pickle=False), [0, 2, 6])
     with paths.sequences_csv_path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
@@ -94,7 +95,37 @@ def test_publication_writes_verified_independent_artifacts(tmp_path: Path) -> No
     assert summary["output"]["polarity_preserved"] is True
     assert "channel_order" not in summary["output"]
     assert summary["sequence_processing"]["state_reset_boundary"] == "sequence"
+    assert summary["sequence_processing"]["offset_semantics"] == "sequence"
+    assert summary["alignment"]["sample_count_preserved"] is True
+    assert "spike_imu" not in summary
     np.testing.assert_array_equal(np.load(input_data.raw_imu_path, allow_pickle=False), raw)
+
+
+def test_generic_publication_overwrites_compatible_offset_artifacts(tmp_path: Path) -> None:
+    _, input_data, encoder, output, paths = _completed_encoding(tmp_path)
+    arguments = {
+        "output": output,
+        "input_data": input_data,
+        "encoder": encoder,
+        "effective_settings": {"sampling_rate_hz": 200.0},
+        "source_summary": None,
+        "sequence_mode": "offsets",
+        "offsets_source": "provided-offsets.npy",
+        "output_dtype": "float32",
+        "paths": paths,
+        "overwrite": False,
+    }
+    publish_spike_encoding(**arguments)
+    # The intermediate recording-named artifact is an owned legacy artifact,
+    # so an overwrite can atomically migrate it back to sequence semantics.
+    paths.sequence_offsets_path.rename(paths.recording_offsets_path)
+    arguments["overwrite"] = True
+
+    summary = publish_spike_encoding(**arguments)
+
+    assert paths.sequence_offsets_path.is_file()
+    assert not paths.recording_offsets_path.exists()
+    assert summary["sequence_processing"]["offsets_artifact"] == paths.sequence_offsets_path.name
 
 
 def test_publication_refuses_unrequested_or_unsafe_overwrite(tmp_path: Path) -> None:

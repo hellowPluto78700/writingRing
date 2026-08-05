@@ -10,11 +10,13 @@ from writingring.spike_encoding.contracts import SpikeEncodingError
 from writingring.spike_encoding.io import (
     SUPPORTED_METHOD_SEMANTICS,
     load_encoder_settings,
+    load_and_validate_timestamps,
     load_sequence_offsets,
     load_spike_encoding_input,
     load_spike_encoding_source_summary,
     resolve_sampling_rate_hz,
     single_array_offsets,
+    validate_source_metadata_paths,
 )
 
 
@@ -69,6 +71,40 @@ def test_offsets_and_settings_are_strictly_validated(tmp_path: Path) -> None:
     settings_path.write_text("[]", encoding="utf-8")
     with pytest.raises(SpikeEncodingError, match="must be an object"):
         load_encoder_settings(settings_path)
+
+
+def test_source_metadata_paths_are_optional_read_only_references(tmp_path: Path) -> None:
+    labels = tmp_path / "labels.npy"
+    np.save(labels, np.array(["a"]))
+
+    paths = validate_source_metadata_paths({"labels_path": labels})
+
+    assert paths["labels_path"] == str(labels.resolve())
+    assert paths["segment_offsets_path"] is None
+    with pytest.raises(SpikeEncodingError, match="not a regular file"):
+        validate_source_metadata_paths({"labels_path": tmp_path / "missing.npy"})
+
+
+@pytest.mark.parametrize(
+    ("timestamps", "message"),
+    [
+        (np.array([0.0, 0.005]), r"shape \(3,\)"),
+        (np.array([0.0, 0.005, 0.004]), "strictly increasing"),
+        (np.array([0.0, 0.01, 0.02]), "inconsistent"),
+    ],
+)
+def test_timestamp_validation_checks_row_alignment_and_cadence(
+    tmp_path: Path,
+    timestamps: np.ndarray,
+    message: str,
+) -> None:
+    source = tmp_path / "timestamps.npy"
+    np.save(source, timestamps, allow_pickle=False)
+
+    with pytest.raises(SpikeEncodingError, match=message):
+        load_and_validate_timestamps(
+            source, sample_count=3, sampling_rate_hz=200.0
+        )
 
 
 def test_source_summary_resolves_or_rejects_sampling_rate_conflicts(tmp_path: Path) -> None:

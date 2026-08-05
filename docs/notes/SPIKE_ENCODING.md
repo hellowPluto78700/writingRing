@@ -13,9 +13,7 @@ python scripts/encode_spikes.py \
   --input-imu <input-root>/<stem>_rawIMU.npy \
   --input-summary <input-root>/<stem>_segmentation_summary.json \
   --encoder custom-wavelet \
-  --encoder-settings configs/spike_encoding/custom_wavelet.json \
-  --sequence-mode offsets \
-  --sequence-offsets <input-root>/<stem>_segment_offsets.npy
+  --encoder-settings configs/spike_encoding/custom_wavelet.json
 ```
 
 The required IMU input is a finite numeric `(N, 9)` NPY file loaded with
@@ -30,16 +28,27 @@ method must be `raw`, `low-pass`, `madgwick`, or
 `xylo-rotate-and-remove-gravity`, and the semantics must match that method.
 Only validated provenance is copied into the published summary.
 
-## Sequence state boundaries
+## Recording state boundaries and occurrence alignment
 
-Use `--sequence-mode offsets` with `--sequence-offsets` to reset the stateful
-IIR and extrema-window history at every nonempty `[start, stop)` interval.
-Offsets must be integer, strictly increasing, start at zero, and end at `N`.
+Custom Wavelet encodes the complete `(N, 9)` input as exactly one recording
+and resets once at its start. It rejects `--sequence-mode`,
+`--sequence-offsets`, `--recording-offsets`, label sidecars, and segment
+sidecars. Segmentation belongs to the later timestamp-to-index stage, so no
+label boundary can restart the IIR or create a synthetic edge.
 
-With `--sequence-mode single-array`, or with neither sequence argument, the
-whole input is processed as exactly one continuous sequence and `[0, N]` is
-still published for auditability. The tool never guesses continuity between
-rows.
+For each recording, the encoder derives `H` from its actual odd extrema window:
+`H = max_filter_time_samples // 2`. It reflect-pads `H` samples at both ends,
+causally encodes the padded data, then selects detection rows
+`[2H : 2H + N]`. This compensates only the fixed extrema-confirmation latency,
+so row `i` again refers to the wavelet-extremum occurrence at input row `i`.
+At 200 Hz the default 61-sample window gives `H = 30`, or 0.15 s per side.
+No IIR phase/group-delay or warm-up compensation is performed; synthetic
+recording-edge padding is an accepted assumption.
+
+The generic boundary options remain available only to other registered
+encoders. Custom Wavelet may optionally receive `--timestamps-path`; it uses
+that NPY only to validate row count, strict monotonicity, and the sampling-rate
+cadence, never for filtering or event detection.
 
 ## Sampling rate and settings
 
@@ -71,7 +80,8 @@ Outputs always remain under the input IMU's parent:
 └── custom-wavelet/
     └── <output-stem>/
         ├── <output-stem>_spikeEvents.npy
-        ├── <output-stem>_spike_sequence_offsets.npy
+        ├── <output-stem>_spikeIMU.npy
+        ├── <output-stem>_spike_recording_offsets.npy
         ├── <output-stem>_spike_sequences.csv
         └── <output-stem>_spike_encoding_summary.json
 ```
@@ -81,14 +91,35 @@ set with `--output-stem`. `--output-root`, if supplied, must be the input
 IMU's parent directory; this prevents an encoding run from silently publishing
 outside the source root.
 
-The event NPY has shape `(N, 3 * len(frequencies_hz))`, uses the requested
+`spikeEvents.npy` has shape `(N, 3 * len(frequencies_hz))`, uses the requested
 float32 or float64 dtype, contains finite values only, and preserves the input
-sample count. The offsets NPY records the actual reset boundaries. The CSV has
-one row per sequence with event counts and density. The JSON summary records
-source provenance, effective settings and widths, channel names, reset policy,
-dtype, representation, polarity, and aggregate statistics.
+sample count. Its default shape is `(N, 15)` in axis-major, frequency-minor
+order; values are signed wavelet-response extrema, not binary spikes. Plateau
+ties emit the centre amplitude once, rather than adding it twice.
+
+`spikeIMU.npy` is published only for Custom Wavelet's 15-channel output. It is
+`column_stack((spikeEvents, rawIMU[:, 3:9]))` and has shape `(N, 21)`: 15 event channels followed by
+`acceleration_x`, `acceleration_y`, `acceleration_z` (m/s²) and the three
+gyroscope channels (rad/s). It deliberately does not include the three
+`acceleration_*_g` input columns. The last six output columns exactly preserve
+the source array values and no source array is modified.
+
+The recording-offset NPY is `[0, N]` for Custom Wavelet's single recording.
+Labels and segment offsets/lengths are not read by the encoder, but colocated
+sidecars are validated and recorded as read-only provenance for downstream
+segmentation. The summary explicitly states that they did not set reset
+boundaries and that their indices were not shifted. The CSV has one row with
+event counts and density. The JSON summary records source
+provenance, effective settings and widths, padding, delay policy, channel
+schemas, reset policy, dtype, representation, polarity, and aggregate
+statistics.
 
 All sequences must encode and validate before publication. Files are staged,
 reloaded for validation, and atomically published. Existing results are never
 replaced unless `--overwrite` is supplied; even then, the command refuses to
 remove unrelated files from the output directory.
+
+Other registered encoders retain the legacy `spike_sequence_offsets.npy`
+artifact and `offset_semantics: "sequence"`. Publication recognises both
+offset-artifact spellings during an overwrite, so an intermediate result can
+be migrated without treating its owned offset file as unrelated content.

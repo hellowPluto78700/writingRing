@@ -179,7 +179,10 @@ class CustomWaveletEncoder:
     def output_metadata(self) -> dict[str, object]:
         """Declare the encoder-specific layout of its flattened event channels."""
 
-        return {"channel_order": "axis_major_frequency_minor"}
+        return {
+            "channel_order": "axis_major_frequency_minor",
+            "event_index_semantics": "wavelet_extrema_occurrence_index",
+        }
 
     @property
     def wavelet_widths_samples(self) -> tuple[int, ...]:
@@ -192,6 +195,24 @@ class CustomWaveletEncoder:
         """Return the validated odd extrema-window size."""
 
         return self._time_window_samples
+
+    @property
+    def occurrence_lookahead_samples(self) -> int:
+        """Return the causal extrema confirmation latency in samples."""
+
+        return self._time_window_samples // 2
+
+    @property
+    def padding_samples_each_side(self) -> int:
+        """Return the reflect-padding width derived from the extrema window."""
+
+        return self.occurrence_lookahead_samples
+
+    @property
+    def padding_duration_seconds(self) -> float:
+        """Return the actual per-side padding duration after integer rounding."""
+
+        return self.padding_samples_each_side / self.settings.sampling_rate_hz
 
     @property
     def max_filter_frequency_bands(self) -> int:
@@ -240,6 +261,16 @@ class CustomWaveletEncoder:
             "prony_numerator_order": self.settings.prony_numerator_order,
             "max_filter_time_s": self.settings.max_filter_time_s,
             "max_filter_time_samples": self._time_window_samples,
+            "occurrence_lookahead_samples": self.occurrence_lookahead_samples,
+            "padding_samples_each_side": self.padding_samples_each_side,
+            "padding_duration_seconds": self.padding_duration_seconds,
+            "padding_mode": "reflect",
+            "padding_boundary_assumption": "accepted",
+            "boundary_validity_mask_emitted": False,
+            "extrema_detection_latency_compensated": True,
+            "event_index_semantics": "wavelet_extrema_occurrence_index",
+            "iir_delay_compensated": False,
+            "iir_warmup_guaranteed": False,
             "max_filter_frequency_decades": self.settings.max_filter_frequency_decades,
             "max_filter_frequency_bands": self._frequency_window_bands,
             "output_dtype": self.settings.output_dtype,
@@ -276,12 +307,28 @@ class CustomWaveletEncoder:
         return events.reshape(-1).astype(self._output_dtype, copy=False)
 
     def encode_sequence(self, acceleration_g: np.ndarray) -> SpikeEncodingSequenceResult:
-        """Encode one continuous nonempty ``(N, 3)`` acceleration sequence."""
+        """Encode one recording and align extrema events to source occurrences.
+
+        The causal extrema detector emits an event ``H`` samples after its
+        occurrence, where ``H`` is half of its odd time window.  Reflect
+        padding supplies both the leading context and the trailing flush;
+        cropping detection rows ``[2H:2H + N]`` restores the source recording
+        index without attempting to correct causal IIR delay.
+        """
 
         values = _validated_sequence(acceleration_g)
-        encoded = np.empty((len(values), len(self._channel_names)), dtype=self._output_dtype)
-        for index, sample in enumerate(values):
-            encoded[index] = self.step(sample)
+        padding = self.padding_samples_each_side
+        padded = np.pad(
+            values,
+            pad_width=((padding, padding), (0, 0)),
+            mode="reflect",
+        )
+        detected = np.empty((len(padded), len(self._channel_names)), dtype=self._output_dtype)
+        for index, sample in enumerate(padded):
+            detected[index] = self.step(sample)
+        encoded = detected[2 * padding : 2 * padding + len(values)].copy()
+        if encoded.shape != (len(values), len(self._channel_names)):
+            raise SpikeEncodingError("custom-wavelet occurrence alignment changed sequence length")
         if not np.isfinite(encoded).all():
             raise SpikeEncodingError("custom-wavelet output became non-finite")
         encoded.setflags(write=False)
@@ -294,6 +341,11 @@ class CustomWaveletEncoder:
                 "frequencies_hz": list(self.settings.frequencies_hz),
                 "wavelet_widths_samples": list(self._wavelet_widths),
                 "max_filter_time_samples": self._time_window_samples,
+                "occurrence_lookahead_samples": self.occurrence_lookahead_samples,
+                "padding_samples_each_side": padding,
+                "padding_duration_seconds": self.padding_duration_seconds,
+                "padding_mode": "reflect",
+                "event_index_semantics": "wavelet_extrema_occurrence_index",
                 "max_filter_frequency_bands": self._frequency_window_bands,
                 "output_dtype": self.settings.output_dtype,
             },
@@ -332,7 +384,9 @@ class _LocalExtremaDetector:
         centre = memory[:, :, self.time_window_samples // 2]
         maximum = self._frequency_pool(memory, use_minimum=False)
         minimum = self._frequency_pool(memory, use_minimum=True)
-        events = maximum * (maximum == centre) + minimum * (minimum == centre)
+        is_maximum = maximum == centre
+        is_minimum = minimum == centre
+        events = np.where(is_maximum | is_minimum, centre, 0.0)
         self._history = memory[:, :, 1:]
         return events
 

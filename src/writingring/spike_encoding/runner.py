@@ -18,11 +18,16 @@ def run_spike_encoder(
     *,
     acceleration_g: np.ndarray,
     sequence_offsets: np.ndarray,
+    sequence_boundary_semantics: str = "sequence",
 ) -> SpikeEncodingOutput:
     """Reset and run one stateful encoder for each explicit input sequence."""
 
     values = _validated_acceleration(acceleration_g)
     offsets = validate_sequence_offsets(sequence_offsets, sample_count=len(values))
+    if sequence_boundary_semantics not in {"sequence", "recording"}:
+        raise SpikeEncodingError(
+            "sequence_boundary_semantics must be 'sequence' or 'recording'"
+        )
     expected_names = _encoder_channel_names(encoder)
     outputs: list[np.ndarray] = []
     statistics: list[dict[str, object]] = []
@@ -54,7 +59,8 @@ def run_spike_encoder(
         "output_sample_count": len(combined),
         "channel_count": combined.shape[1],
         "sequence_count": len(statistics),
-        "state_reset_boundary": "sequence",
+        "sequence_boundary_semantics": sequence_boundary_semantics,
+        "state_reset_boundary": sequence_boundary_semantics,
     }
     return SpikeEncodingOutput(
         values=combined,

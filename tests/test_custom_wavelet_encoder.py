@@ -5,6 +5,7 @@ import numpy as np
 from writingring.spike_encoding.encoders.custom_wavelet import (
     CustomWaveletEncoder,
     CustomWaveletSettings,
+    _LocalExtremaDetector,
     acceleration_wavelet,
     prony_iir_coefficients,
 )
@@ -83,16 +84,21 @@ def test_encoder_reset_reproduces_one_sequence_and_runner_resets_each_boundary()
     assert output.summary["channel_count"] == 6
 
 
-def test_step_and_sequence_follow_the_same_stateful_iir_path() -> None:
+def test_sequence_occurrence_alignment_matches_padded_causal_detection_path() -> None:
     settings = CustomWaveletSettings(frequencies_hz=(2.0, 4.0))
     samples = np.column_stack((np.arange(80), -np.arange(80), np.ones(80)))
-    stepped = CustomWaveletEncoder(settings)
+    detected_encoder = CustomWaveletEncoder(settings)
     encoded = CustomWaveletEncoder(settings)
 
-    by_step = np.stack([stepped.step(sample) for sample in samples])
+    padding = detected_encoder.padding_samples_each_side
+    padded = np.pad(samples, ((padding, padding), (0, 0)), mode="reflect")
+    detection_aligned = np.stack([detected_encoder.step(sample) for sample in padded])
     by_sequence = encoded.encode_sequence(samples).values
 
-    np.testing.assert_array_equal(by_step, by_sequence)
+    np.testing.assert_array_equal(
+        by_sequence,
+        detection_aligned[2 * padding : 2 * padding + len(samples)],
+    )
 
 
 def test_window_dimensions_follow_settings_and_keep_signed_extrema() -> None:
@@ -122,3 +128,31 @@ def test_reference_window_rounding_is_dynamic_for_64_hz() -> None:
     )
 
     assert encoder.max_filter_time_samples == 19
+
+
+def test_extrema_detector_preserves_signed_maxima_and_minima_once() -> None:
+    maximum = _LocalExtremaDetector(3, 1, 1)
+    minimum = _LocalExtremaDetector(3, 1, 1)
+    plateau = _LocalExtremaDetector(3, 1, 1)
+
+    maximum_events = [maximum.step(np.full((3, 1), value)) for value in (1.0, 5.0, 1.0)]
+    minimum_events = [minimum.step(np.full((3, 1), value)) for value in (-1.0, -5.0, -1.0)]
+    plateau_events = [plateau.step(np.full((3, 1), 2.0)) for _ in range(3)]
+
+    np.testing.assert_array_equal(maximum_events[-1], np.full((3, 1), 5.0))
+    np.testing.assert_array_equal(minimum_events[-1], np.full((3, 1), -5.0))
+    np.testing.assert_array_equal(plateau_events[-1], np.full((3, 1), 2.0))
+
+
+def test_padding_length_is_derived_from_the_odd_extrema_window() -> None:
+    for rate, expected_padding in ((100.0, 15), (200.0, 30), (400.0, 60)):
+        encoder = CustomWaveletEncoder(
+            CustomWaveletSettings(
+                sampling_rate_hz=rate,
+                frequencies_hz=(2.0, 4.0, 8.0),
+            )
+        )
+
+        assert encoder.padding_samples_each_side == encoder.max_filter_time_samples // 2
+        assert encoder.padding_samples_each_side == expected_padding
+        assert encoder.padding_duration_seconds == expected_padding / rate

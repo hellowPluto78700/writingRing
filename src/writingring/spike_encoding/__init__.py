@@ -10,12 +10,14 @@ from writingring.spike_encoding.contracts import (
 from writingring.spike_encoding.io import (
     SpikeEncodingInput,
     SpikeEncodingSourceSummary,
+    load_and_validate_timestamps,
     load_encoder_settings,
     load_sequence_offsets,
     load_spike_encoding_input,
     load_spike_encoding_source_summary,
     resolve_sampling_rate_hz,
     single_array_offsets,
+    validate_source_metadata_paths,
     validate_sequence_offsets,
 )
 from writingring.spike_encoding.registry import (
@@ -54,6 +56,7 @@ __all__ = [
     "available_encoders",
     "create_encoder",
     "load_encoder_settings",
+    "load_and_validate_timestamps",
     "load_sequence_offsets",
     "load_spike_encoding_input",
     "load_spike_encoding_source_summary",
@@ -62,6 +65,7 @@ __all__ = [
     "run_spike_encoder",
     "resolve_sampling_rate_hz",
     "single_array_offsets",
+    "validate_source_metadata_paths",
     "spike_encoding_output_paths",
     "validate_sequence_offsets",
 ]

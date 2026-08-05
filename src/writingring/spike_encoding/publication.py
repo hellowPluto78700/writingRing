@@ -23,6 +23,7 @@ from writingring.spike_encoding.contracts import (
 from writingring.spike_encoding.io import (
     SpikeEncodingInput,
     SpikeEncodingSourceSummary,
+    validate_source_metadata_paths,
     validate_sequence_offsets,
 )
 
@@ -45,11 +46,13 @@ class SpikeEncodingPublishError(SpikeEncodingError):
 
 @dataclass(frozen=True, slots=True)
 class SpikeEncodingOutputPaths:
-    """The four owned artifacts of one encoder run."""
+    """Known artifacts, including both compatible offset-file spellings."""
 
     output_directory: Path
     spike_events_path: Path
+    spike_imu_path: Path
     sequence_offsets_path: Path
+    recording_offsets_path: Path
     sequences_csv_path: Path
     summary_json_path: Path
 
@@ -76,7 +79,9 @@ def spike_encoding_output_paths(
     return SpikeEncodingOutputPaths(
         output_directory=directory,
         spike_events_path=directory / f"{stem}_spikeEvents.npy",
+        spike_imu_path=directory / f"{stem}_spikeIMU.npy",
         sequence_offsets_path=directory / f"{stem}_spike_sequence_offsets.npy",
+        recording_offsets_path=directory / f"{stem}_spike_recording_offsets.npy",
         sequences_csv_path=directory / f"{stem}_spike_sequences.csv",
         summary_json_path=directory / f"{stem}_spike_encoding_summary.json",
     )
@@ -94,6 +99,7 @@ def publish_spike_encoding(
     output_dtype: str,
     paths: SpikeEncodingOutputPaths,
     overwrite: bool,
+    source_metadata_paths: Mapping[str, Path | None] | None = None,
 ) -> dict[str, object]:
     """Stage, verify, and atomically publish one complete encoding result."""
 
@@ -105,6 +111,13 @@ def publish_spike_encoding(
     )
     offsets = validate_sequence_offsets(output.sequence_offsets, sample_count=len(values))
     statistics = _validated_statistics(output.sequence_statistics, sequence_count=len(offsets) - 1)
+    offset_semantics = _offset_semantics(output)
+    offsets_path = _offsets_path(paths, offset_semantics=offset_semantics)
+    spike_imu = (
+        _build_spike_imu(values, input_data.raw_imu)
+        if _publishes_signed_wavelet_spike_imu(output, input_data.raw_imu, values)
+        else None
+    )
     if sequence_mode not in {"offsets", "single-array"}:
         raise SpikeEncodingPublishError("sequence_mode must be 'offsets' or 'single-array'")
     if not isinstance(offsets_source, str) or not offsets_source:
@@ -117,10 +130,41 @@ def publish_spike_encoding(
         source_summary=source_summary,
         sequence_mode=sequence_mode,
         offsets_source=offsets_source,
+        source_metadata_paths=source_metadata_paths,
         values=values,
+        spike_imu=spike_imu,
+        offset_semantics=offset_semantics,
+        offsets_artifact=offsets_path.name,
     )
-    _publish_staged(paths, values=values, offsets=offsets, statistics=statistics, summary=summary, overwrite=overwrite)
+    _publish_staged(
+        paths,
+        values=values,
+        spike_imu=spike_imu,
+        offsets=offsets,
+        offsets_path=offsets_path,
+        statistics=statistics,
+        summary=summary,
+        overwrite=overwrite,
+    )
     return summary
+
+
+def _offset_semantics(output: SpikeEncodingOutput) -> str:
+    """Keep generic sequence partitions distinct from Custom Wavelet recordings."""
+
+    return "recording" if output.encoder_name == "custom-wavelet" else "sequence"
+
+
+def _offsets_path(
+    paths: SpikeEncodingOutputPaths,
+    *,
+    offset_semantics: str,
+) -> Path:
+    if offset_semantics == "recording":
+        return paths.recording_offsets_path
+    if offset_semantics == "sequence":
+        return paths.sequence_offsets_path
+    raise SpikeEncodingPublishError("offset semantics must be 'recording' or 'sequence'")
 
 
 def _validated_values(
@@ -149,6 +193,36 @@ def _validated_values(
     return stored.copy()
 
 
+def _publishes_signed_wavelet_spike_imu(
+    output: SpikeEncodingOutput,
+    raw_imu: np.ndarray,
+    values: np.ndarray,
+) -> bool:
+    """Return whether this output satisfies the only signed-wavelet IMU schema."""
+
+    return (
+        output.encoder_name == "custom-wavelet"
+        and values.shape[1] == 15
+        and raw_imu.ndim == 2
+        and raw_imu.shape == (len(values), len(PREPROCESSED_IMU_COLUMNS))
+    )
+
+
+def _build_spike_imu(values: np.ndarray, raw_imu: np.ndarray) -> np.ndarray:
+    """Replace the g-domain channels with encoded events without mutating source data."""
+
+    source = np.asarray(raw_imu)
+    if source.ndim != 2 or source.shape != (len(values), len(PREPROCESSED_IMU_COLUMNS)):
+        raise SpikeEncodingPublishError("input raw IMU shape changed before publication")
+    spike_imu = np.column_stack((values, source[:, 3:9]))
+    expected_shape = (len(values), values.shape[1] + 6)
+    if spike_imu.shape != expected_shape or not np.isfinite(spike_imu).all():
+        raise SpikeEncodingPublishError("spike IMU has an invalid shape or non-finite values")
+    if not np.array_equal(spike_imu[:, values.shape[1] :], source[:, 3:9]):
+        raise SpikeEncodingPublishError("spike IMU did not preserve source m/s² and gyro channels")
+    return spike_imu
+
+
 def _validated_statistics(
     rows: tuple[dict[str, object], ...],
     *,
@@ -175,7 +249,11 @@ def _build_summary(
     source_summary: SpikeEncodingSourceSummary | None,
     sequence_mode: str,
     offsets_source: str,
+    source_metadata_paths: Mapping[str, Path] | None,
     values: np.ndarray,
+    spike_imu: np.ndarray | None,
+    offset_semantics: str,
+    offsets_artifact: str,
 ) -> dict[str, object]:
     metadata = getattr(encoder, "encoding_metadata", None)
     settings = dict(metadata) if isinstance(metadata, Mapping) else dict(effective_settings)
@@ -193,14 +271,19 @@ def _build_summary(
     }
     if "channel_order" in output_metadata:
         output_section["channel_order"] = output_metadata["channel_order"]
+    try:
+        metadata_references = validate_source_metadata_paths(source_metadata_paths)
+    except SpikeEncodingError as error:
+        raise SpikeEncodingPublishError(str(error)) from error
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "encoder": {"name": output.encoder_name, "representation": output.representation},
         "source": {
             "raw_imu_path": str(input_data.raw_imu_path.resolve()),
             "summary_path": None if source_summary is None else str(source_summary.path.resolve()),
             "gravity_removal_method": None if source_summary is None else source_summary.gravity_removal_method,
             "acceleration_semantics": None if source_summary is None else source_summary.acceleration_semantics,
+            "metadata_references": metadata_references,
         },
         "input": {
             "sample_count": len(input_data.acceleration_g),
@@ -212,11 +295,21 @@ def _build_summary(
         "settings": settings,
         "sequence_processing": {
             "mode": sequence_mode,
+            "offset_semantics": offset_semantics,
+            "offsets_artifact": offsets_artifact,
             "sequence_count": len(output.sequence_statistics),
+            "sequence_boundary_semantics": output.summary["sequence_boundary_semantics"],
             "state_reset_boundary": output.summary["state_reset_boundary"],
             "offsets_source": offsets_source,
         },
         "output": output_section,
+        "alignment": {
+            "row_aligned_with_source_raw_imu": True,
+            "sample_count_preserved": True,
+            "timestamps_reused_without_shift": True,
+            "labels_reused_without_shift": True,
+            "segment_offsets_reused_without_shift": True,
+        },
         "statistics": {
             "nonzero_event_count": nonzero,
             "positive_event_count": int(np.count_nonzero(values > 0.0)),
@@ -224,6 +317,22 @@ def _build_summary(
             "event_density": nonzero / values.size,
         },
     }
+    if spike_imu is not None:
+        summary["spike_imu"] = {
+            "schema": "signed_wavelet_events_plus_imu_v1",
+            "sample_count": len(spike_imu),
+            "channel_count": spike_imu.shape[1],
+            "channel_names": list(output.channel_names) + list(PREPROCESSED_IMU_COLUMNS[3:]),
+            "dtype": spike_imu.dtype.name,
+            "source_raw_imu_columns": [3, 4, 5, 6, 7, 8],
+        }
+    if output.encoder_name == "custom-wavelet":
+        summary["source"]["metadata_usage"] = {
+            "used_by_encoder": False,
+            "used_as_reset_boundaries": False,
+            "reused_for_downstream_alignment": True,
+            "indices_shifted": False,
+        }
     try:
         json.dumps(summary, allow_nan=False)
     except (TypeError, ValueError) as error:
@@ -250,7 +359,9 @@ def _publish_staged(
     paths: SpikeEncodingOutputPaths,
     *,
     values: np.ndarray,
+    spike_imu: np.ndarray | None,
     offsets: np.ndarray,
+    offsets_path: Path,
     statistics: tuple[dict[str, object], ...],
     summary: dict[str, object],
     overwrite: bool,
@@ -267,13 +378,22 @@ def _publish_staged(
     try:
         staged = _staging_paths(paths, staging)
         _save_npy(staged.spike_events_path, values)
-        _save_npy(staged.sequence_offsets_path, offsets)
+        if spike_imu is not None:
+            _save_npy(staged.spike_imu_path, spike_imu)
+        _save_npy(_staged_offset_path(staged, offsets_path), offsets)
         staged.sequences_csv_path.write_text(_csv_text(statistics), encoding="utf-8")
         staged.summary_json_path.write_text(
             json.dumps(summary, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
             encoding="utf-8",
         )
-        _verify_staged(staged, values=values, offsets=offsets, sequence_count=len(statistics))
+        _verify_staged(
+            staged,
+            values=values,
+            spike_imu=spike_imu,
+            offsets=offsets,
+            offsets_path=_staged_offset_path(staged, offsets_path),
+            sequence_count=len(statistics),
+        )
         _publish_directory(staging, destination=destination, overwrite=overwrite)
     except OSError as error:
         raise SpikeEncodingPublishError(f"could not publish spike encoding: {error}") from error
@@ -285,7 +405,9 @@ def _publish_staged(
 def _validate_owned_destination(paths: SpikeEncodingOutputPaths) -> None:
     owned = {
         paths.spike_events_path.name,
+        paths.spike_imu_path.name,
         paths.sequence_offsets_path.name,
+        paths.recording_offsets_path.name,
         paths.sequences_csv_path.name,
         paths.summary_json_path.name,
     }
@@ -301,10 +423,22 @@ def _staging_paths(paths: SpikeEncodingOutputPaths, staging: Path) -> SpikeEncod
     return SpikeEncodingOutputPaths(
         output_directory=staging,
         spike_events_path=staging / paths.spike_events_path.name,
+        spike_imu_path=staging / paths.spike_imu_path.name,
         sequence_offsets_path=staging / paths.sequence_offsets_path.name,
+        recording_offsets_path=staging / paths.recording_offsets_path.name,
         sequences_csv_path=staging / paths.sequences_csv_path.name,
         summary_json_path=staging / paths.summary_json_path.name,
     )
+
+
+def _staged_offset_path(staged: SpikeEncodingOutputPaths, offsets_path: Path) -> Path:
+    """Map an output-directory offset path into the staging directory."""
+
+    if offsets_path.name == staged.recording_offsets_path.name:
+        return staged.recording_offsets_path
+    if offsets_path.name == staged.sequence_offsets_path.name:
+        return staged.sequence_offsets_path
+    raise SpikeEncodingPublishError("offset artifact does not belong to output paths")
 
 
 def _save_npy(path: Path, values: np.ndarray) -> None:
@@ -324,15 +458,25 @@ def _verify_staged(
     paths: SpikeEncodingOutputPaths,
     *,
     values: np.ndarray,
+    spike_imu: np.ndarray | None,
     offsets: np.ndarray,
+    offsets_path: Path,
     sequence_count: int,
 ) -> None:
     stored_values = np.load(paths.spike_events_path, allow_pickle=False)
-    stored_offsets = np.load(paths.sequence_offsets_path, allow_pickle=False)
+    stored_offsets = np.load(offsets_path, allow_pickle=False)
     if stored_values.shape != values.shape or stored_values.dtype != values.dtype or not np.isfinite(stored_values).all():
         raise SpikeEncodingPublishError("staged spikeEvents NPY failed verification")
+    if spike_imu is not None:
+        stored_spike_imu = np.load(paths.spike_imu_path, allow_pickle=False)
+        if (
+            stored_spike_imu.shape != spike_imu.shape
+            or stored_spike_imu.dtype != spike_imu.dtype
+            or not np.array_equal(stored_spike_imu, spike_imu)
+        ):
+            raise SpikeEncodingPublishError("staged spikeIMU NPY failed verification")
     if not np.array_equal(stored_offsets, offsets):
-        raise SpikeEncodingPublishError("staged sequence offsets NPY failed verification")
+        raise SpikeEncodingPublishError("staged offset NPY failed verification")
     with paths.sequences_csv_path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     if not rows or len(rows) != sequence_count or tuple(rows[0]) != _SEQUENCE_FIELDS:
