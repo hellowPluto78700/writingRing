@@ -48,17 +48,23 @@ python scripts/segment_ring_imu.py \
   --output-root outputs/segmentedIMU
 ```
 
-The default `--boundary-mode label` writes contiguous gravity-removed IMU plus
+The default `--boundary-mode label` writes contiguous preprocessed IMU plus
 segment offsets and lengths, string labels, an audit CSV, and JSON summary. Use
-`--gravity-removal-method madgwick` for sensor fusion; it writes to
+`--gravity-removal-method madgwick` for IMU-only sensor fusion; it writes to
 `outputs/segmentedIMU_Madgwick` by default. It is strict about
 malformed/out-of-range labels and does not overwrite by default. See
 [docs/notes/IMU_SEGMENTATION.md](docs/notes/IMU_SEGMENTATION.md) for segment boundary,
 duplicate-timestamp, and overwrite semantics.
 
-For label-mode data without gravity removal, use
-`--gravity-removal-method raw`; it retains measured acceleration (including
-gravity) and writes the common nine-channel feature schema under
+The preprocessing method controls the acceleration semantics. `raw` bypasses
+gravity removal: its m/s² acceleration is the measured Ring acceleration and
+still includes gravity. `low-pass` estimates the gravity contribution with a
+causal second-order Butterworth low-pass filter and exports the residual linear
+acceleration. `madgwick` estimates gravity with the IMU-only sensor-fusion
+path and exports its residual linear acceleration. Xylo uses its rotation and
+gravity-removal path and exports the resulting processed acceleration. The
+default `--gravity-removal-method` is `low-pass`; use `raw` when measured
+acceleration including gravity is required. Raw-mode output is written under
 `outputs/segmentedIMU_RawIMU` by default.
 
 For Board-event-guided boundaries, first create successful per-recording
@@ -83,14 +89,21 @@ python scripts/segment_ring_imu.py \
 See [docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 for the required offset layout, Board-event rules, and output schema.
 
-All segmentation methods write the same nine channels, in this order:
+All segmentation methods write the same nine preprocessed channels, in this
+order:
 `acceleration_x_g`, `acceleration_y_g`, `acceleration_z_g`,
 `acceleration_x`, `acceleration_y`, `acceleration_z`, `gyro_x`, `gyro_y`,
-`gyro_z`. The first acceleration triplet is in g and the second in m/s²;
-they always satisfy `acceleration_m_s2 = acceleration_g * 9.80665`. The
-summary and segment manifest identify whether acceleration retains gravity.
-`rawIMU.npy` remains the filename for compatibility, but contains the full
-preprocessed feature tensor rather than necessarily raw acceleration. See
+`gyro_z`. The first acceleration triplet is always the selected preprocessing
+result in g; the second is the same result in m/s². They always satisfy
+`acceleration_m_s2 = acceleration_g * 9.80665`. Thus, only `raw` has measured
+acceleration including gravity; the other methods have processed, gravity-
+removed acceleration. For `raw` and Xylo, the gyro triplet is retained from the
+Ring input; the low-pass and Madgwick paths use the gyro output from the
+gravity-processing pipeline. The summary and segment manifest identify the
+selected method and acceleration semantics.
+`rawIMU.npy` remains the filename for compatibility, but contains the
+contiguous preprocessed feature tensor rather than necessarily raw acceleration
+and does not contain the Ring timestamp column. See
 [docs/notes/XYLO_GRAVITY_REMOVAL.md](docs/notes/XYLO_GRAVITY_REMOVAL.md) for the Xylo mode.
 
 Xylo is optional; raw, low-pass, and Madgwick installs do not require its

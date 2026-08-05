@@ -98,11 +98,17 @@ order; values are signed wavelet-response extrema, not binary spikes. Plateau
 ties emit the centre amplitude once, rather than adding it twice.
 
 `spikeIMU.npy` is published only for Custom Wavelet's 15-channel output. It is
-`column_stack((spikeEvents, rawIMU[:, 3:9]))` and has shape `(N, 21)`: 15 event channels followed by
-`acceleration_x`, `acceleration_y`, `acceleration_z` (m/s²) and the three
-gyroscope channels (rad/s). It deliberately does not include the three
-`acceleration_*_g` input columns. The last six output columns exactly preserve
-the source array values and no source array is modified.
+`column_stack((spikeEvents, rawIMU[:, 3:9]))` and has shape `(N, 21)`: 15 event
+channels followed by the preprocessed `acceleration_x`, `acceleration_y`,
+`acceleration_z` channels (m/s²) and the three gyroscope channels (rad/s).
+These six channels exactly preserve the corresponding source `rawIMU` rows;
+they are not necessarily raw sensor values. When the source preprocessing
+method is `low-pass`, `madgwick`, or `xylo-rotate-and-remove-gravity`, the
+acceleration triplet is already processed/gravity-removed. Only `raw`
+preprocessing retains measured acceleration including gravity. The output
+deliberately does not include the three `acceleration_*_g` input columns, the
+original Ring acceleration columns, or the Ring timestamp. No source array is
+modified.
 
 The recording-offset NPY is `[0, N]` for Custom Wavelet's single recording.
 Labels and segment offsets/lengths are not read by the encoder, but colocated

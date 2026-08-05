@@ -450,7 +450,7 @@ inspection and plotting CLIs, notebook, summary builder, and Board plots use
 ### `gravity.py`
 
 **Purpose.** Estimate and subtract the stationary acceleration contribution
-in explicitly configured Ring sensor/body axes without mutating raw data.
+in explicitly configured Ring sensor/body axes without mutating raw Ring data.
 
 `GravityRemovalConfig` defaults to a nominal 200 Hz rate, m/s² acceleration,
 rad/s gyroscope data, identity axes, Madgwick gravity removal, and automatic
@@ -493,6 +493,33 @@ acceleration, correction mask/confidence, and aggregate diagnostics. Its
 DataFrame conversion uses explicit derived column names and preserves the
 source Ring DataFrame. The opt-in `upstream_suggested` profile records, but
 does not certify, the unit/axis hints from upstream `IMUData.scale()`.
+
+The raw Ring DataFrame and the preprocessing export have different contracts.
+The Ring source retains the six source IMU columns and its timestamp. The
+segmentation-facing `preprocess_ring_imu()` result is a derived nine-channel
+array in this fixed order:
+
+```text
+acceleration_x_g, acceleration_y_g, acceleration_z_g,
+acceleration_x, acceleration_y, acceleration_z,
+gyro_x, gyro_y, gyro_z
+```
+
+The g and m/s² acceleration triplets describe the same selected acceleration
+and satisfy `acceleration_m_s2 = acceleration_g * 9.80665`. For `raw`, that
+selected acceleration is the measured Ring acceleration and includes gravity.
+For `low-pass`, `madgwick`, and
+`xylo-rotate-and-remove-gravity`, it is the corresponding processed,
+gravity-removed acceleration. The low-pass and Madgwick paths use the gyro
+output produced by the gravity-processing path; raw and Xylo retain the Ring
+gyro values. These nine columns are derived processing output, not an
+extension of the source Ring binary format.
+
+The segmentation exporter concatenates selected rows from each recording into
+`rawIMU.npy`, whose shape is `(total_samples, 9)`. Segment offsets and manifests
+describe the aggregation, while timestamps remain separate source/metadata
+values. The compatibility filename `rawIMU.npy` must not be interpreted as a
+guarantee that its acceleration is raw sensor acceleration.
 
 ### `plotting.py`
 

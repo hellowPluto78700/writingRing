@@ -573,12 +573,18 @@ Verified from: all sample files under `data_sample/data/user_0/0`
   only an observed approximately 201 Hz effective rate under the microsecond
   interpretation.
 
-## 11. Derived gravity-removal data is not part of the file format
+## 11. Derived gravity-removal and preprocessing data is not part of the file format
 
 `src/writingring/gravity.py` provides an optional offline analysis above the
 raw seven-column Ring loader. It does not change or extend the binary format.
-The following names are derived in memory and are never decoded from
-`ring_0.bin`:
+The raw `ring_0.bin` row remains the seven-value source record:
+
+```text
+acc_x, acc_y, acc_z, gyr_x, gyr_y, gyr_z, timestamp
+```
+
+The following names are derived in memory and are never decoded as named
+fields from `ring_0.bin`:
 
 ```text
 acc_body_x, acc_body_y, acc_body_z
@@ -590,6 +596,31 @@ linear_acc_body_x, linear_acc_body_y, linear_acc_body_z
 gravity_correction_used
 gravity_correction_confidence
 ```
+
+`preprocess_ring_imu()` builds a separate, fixed nine-channel derived schema
+for segmentation:
+
+```text
+acceleration_x_g, acceleration_y_g, acceleration_z_g,
+acceleration_x, acceleration_y, acceleration_z,
+gyro_x, gyro_y, gyro_z
+```
+
+The first acceleration triplet is always the selected preprocessing result in
+g, and the second is the same result in m/s². The relationship is
+`acceleration_m_s2 = acceleration_g * 9.80665`. With the `raw` preprocessing
+method, the selected acceleration is the measured Ring acceleration and still
+contains gravity. With `low-pass`, `madgwick`, or
+`xylo-rotate-and-remove-gravity`, it is a processed gravity-removed result.
+The gyro columns likewise represent the method's selected gyro output, not a
+new field in the source binary.
+
+The segmentation exporter writes those nine channels to `rawIMU.npy` for
+compatibility. That file is a contiguous aggregation of selected samples and
+does not contain the source timestamp column; `segment_offsets.npy`, the
+segment manifest, and the source Ring data retain the boundary/time
+information separately. The name `rawIMU.npy` therefore does not imply that
+its acceleration columns are raw measurements.
 
 The default transformation assumes a nominal 200 Hz rate, acceleration in
 `m/s^2`, gyroscope values in `rad/s`, the identity axis transform, and
