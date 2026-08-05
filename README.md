@@ -125,6 +125,33 @@ python scripts/pad_segmented_imu.py \
 See [docs/SEGMENT_PADDING.md](docs/SEGMENT_PADDING.md) for the complete input,
 output, and transactional publishing contract.
 
+## Spike encoding with Custom Wavelet
+
+Encode the first three g-domain acceleration channels from an existing
+nine-channel `*_rawIMU.npy` segmentation output. This is a read-only
+post-processing step: it does not remove gravity again, resample, alter
+segment boundaries, or modify the source IMU, labels, offsets, summaries, or
+padding outputs.
+
+```bash
+python scripts/encode_spikes.py \
+  --input-imu outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_rawIMU.npy \
+  --input-summary outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_segmentation_summary.json \
+  --encoder custom-wavelet \
+  --encoder-settings configs/spike_encoding/custom_wavelet.json \
+  --sequence-mode offsets \
+  --sequence-offsets outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_segment_offsets.npy
+```
+
+The encoder resets its state at every supplied offset interval. Without
+`--sequence-offsets`, the complete input is one continuous sequence. Results
+are written atomically under the input file's parent as
+`custom-wavelet/<output-stem>/`; use `--overwrite` only to replace a prior
+spike-encoding result in that same directory. Custom Wavelet events are signed
+local-extrema amplitudes, not binary spike trains. See
+[docs/SPIKE_ENCODING.md](docs/SPIKE_ENCODING.md) for settings, sampling-rate,
+and output-schema details.
+
 ## Important data rules
 
 Recordings are organized using this hierarchy:
