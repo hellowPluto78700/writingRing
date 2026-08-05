@@ -112,8 +112,8 @@ python scripts/segment_ring_imu.py \
 ```
 
 Without `--output-root`, this publishes under
-`outputs/boardAssistSegmentedIMU_RawIMU/user_0/action_0/`. The raw option is
-only available for Board-assisted segmentation.
+`outputs/boardAssistSegmentedIMU_RawIMU/user_0/action_0/`. Raw keeps gravity
+in the measured acceleration; all modes still publish the same nine channels.
 
 ```text
 outputs/boardAssistSegmentedIMU_LowPassFilterin/user_0/action_0/
@@ -128,7 +128,7 @@ outputs/boardAssistSegmentedIMU_LowPassFilterin/user_0/action_0/
 └── {dataset_id}_ring_0_segmentation_verification.png
 ```
 
-`rawIMU.npy` remains contiguous `(total_samples, 6)` storage. The four-column
+`rawIMU.npy` remains contiguous `(total_samples, 9)` preprocessing-feature storage. The four-column
 boolean `board_event_targets.npy` has the same row count and channel order:
 
 ```text

@@ -57,7 +57,8 @@ malformed/out-of-range labels and does not overwrite by default. See
 duplicate-timestamp, and overwrite semantics.
 
 For label-mode data without gravity removal, use
-`--gravity-removal-method raw`; it writes the original six IMU channels under
+`--gravity-removal-method raw`; it retains measured acceleration (including
+gravity) and writes the common nine-channel feature schema under
 `outputs/segmentedIMU_RawIMU` by default.
 
 For Board-event-guided boundaries, first create successful per-recording
@@ -66,7 +67,7 @@ Ring--Board offsets, then select the mode explicitly. Without an explicit
 `outputs/boardAssistSegmentedIMU_LowPassFilterin` for low-pass and
 `outputs/boardAssistSegmentedIMU_Madgwick` for Madgwick. Use
 `--gravity-removal-method raw` in Board-assisted mode to bypass gravity
-removal and write the original six IMU channels to
+removal while still writing the common nine-channel feature schema to
 `outputs/boardAssistSegmentedIMU_RawIMU`. Each root contains
 the same `user/action` layout and one full-recording verification PNG per
 dataset:
@@ -81,6 +82,23 @@ python scripts/segment_ring_imu.py \
 
 See [docs/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 for the required offset layout, Board-event rules, and output schema.
+
+All segmentation methods write the same nine channels, in this order:
+`acceleration_x_g`, `acceleration_y_g`, `acceleration_z_g`,
+`acceleration_x`, `acceleration_y`, `acceleration_z`, `gyro_x`, `gyro_y`,
+`gyro_z`. The first acceleration triplet is in g and the second in m/s²;
+they always satisfy `acceleration_m_s2 = acceleration_g * 9.80665`. The
+summary and segment manifest identify whether acceleration retains gravity.
+`rawIMU.npy` remains the filename for compatibility, but contains the full
+preprocessed feature tensor rather than necessarily raw acceleration. See
+[docs/XYLO_GRAVITY_REMOVAL.md](docs/XYLO_GRAVITY_REMOVAL.md) for the Xylo mode.
+
+Xylo is optional; raw, low-pass, and Madgwick installs do not require its
+runtime. Install it only before selecting `xylo-rotate-and-remove-gravity`:
+
+```bash
+pip install -e ".[xylo]"
+```
 
 ## Global segment-length analysis and fixed-length padding
 

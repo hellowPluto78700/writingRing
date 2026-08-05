@@ -29,12 +29,15 @@ def _write_package(
     action: str,
     lengths: list[int],
     with_targets: bool = False,
+    channel_count: int = 6,
 ) -> Path:
     directory = root / user / f"action_{action}"
     directory.mkdir(parents=True)
     stem = f"{user}_action_{action}"
     offsets = np.concatenate(([0], np.cumsum(lengths))).astype(np.int64)
-    raw = np.arange(int(offsets[-1]) * 6, dtype=np.float32).reshape(-1, 6)
+    raw = np.arange(
+        int(offsets[-1]) * channel_count, dtype=np.float32
+    ).reshape(-1, channel_count)
     np.save(directory / f"{stem}_rawIMU.npy", raw, allow_pickle=False)
     np.save(directory / f"{stem}_labels.npy", np.asarray([f"L{i}" for i in range(len(lengths))]), allow_pickle=False)
     np.save(directory / f"{stem}_segment_offsets.npy", offsets, allow_pickle=False)
@@ -119,10 +122,14 @@ def test_padding_arrays_skip_overflow_and_preserve_board_targets(tmp_path: Path)
     np.testing.assert_array_equal(result.padded_imu[0, :3], dataset.raw_imu[:3])
     assert result.summary["skipped_segment_count"] == 1
     assert result.summary["overflow_policy"] == "skip"
+    assert result.summary["channel_count"] == 6
     manifest = result.manifest
     assert manifest["exported"].tolist() == [True, False]
     assert manifest.loc[1, "skip_reason"] == "length_exceeds_target"
     assert pd.isna(manifest.loc[1, "output_segment_index"])
+    assert manifest["channel_count"].notna().all()
+    assert manifest["channel_count"].nunique() == 1
+    assert int(manifest["channel_count"].iloc[0]) == dataset.raw_imu.shape[1]
 
     output = tmp_path / "padded"
     summary = publish_padded_root([dataset], input_root=root, output_root=output, target_length=4)
@@ -132,6 +139,10 @@ def test_padding_arrays_skip_overflow_and_preserve_board_targets(tmp_path: Path)
     base = output / "user_a" / "action_one"
     assert np.load(base / "user_a_action_one_paddedIMU.npy", allow_pickle=False).shape == (1, 4, 6)
     assert np.load(base / "user_a_action_one_padded_board_event_targets.npy", allow_pickle=False).shape == (1, 4, 4)
+    published_manifest = pd.read_csv(base / "user_a_action_one_padding_manifest.csv")
+    assert published_manifest["channel_count"].notna().all()
+    assert published_manifest["channel_count"].nunique() == 1
+    assert int(published_manifest["channel_count"].iloc[0]) == 6
     np.testing.assert_array_equal(
         np.load(base / "user_a_action_one_labels.npy", allow_pickle=False), ["L0"]
     )
@@ -140,6 +151,25 @@ def test_padding_arrays_skip_overflow_and_preserve_board_targets(tmp_path: Path)
         path: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in dataset.paths.input_dir.iterdir()
     }
+
+
+def test_padding_manifest_records_nine_channel_input_schema(tmp_path: Path) -> None:
+    root = tmp_path / "segments"
+    _write_package(
+        root,
+        user="user_a",
+        action="one",
+        lengths=[2, 3],
+        channel_count=9,
+    )
+    dataset = validate_segmented_root(root)[0]
+    result = build_padding_package(dataset, target_length=4)
+
+    assert result.padded_imu.shape == (2, 4, 9)
+    assert result.summary["channel_count"] == 9
+    assert result.manifest["channel_count"].notna().all()
+    assert result.manifest["channel_count"].nunique() == 1
+    assert int(result.manifest["channel_count"].iloc[0]) == 9
 
 
 def test_padding_rejects_output_root_that_equals_or_contains_input(tmp_path: Path) -> None:

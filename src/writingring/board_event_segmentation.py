@@ -35,6 +35,13 @@ from writingring.gravity import (
     GravityRemovalError,
     process_ring_gravity,
 )
+from writingring.imu_preprocessing import (
+    IMU_PREPROCESSING_METHODS,
+    IMUPreprocessingError,
+    PREPROCESSED_IMU_COLUMNS,
+    STANDARD_GRAVITY_M_S2,
+    preprocess_ring_imu,
+)
 from writingring.ring_loader import RingLoadError, load_ring
 from writingring.segmentation import (
     SegmentLabel,
@@ -86,16 +93,6 @@ _TARGET_CHANNELS: Final[dict[tuple[str, bool], int]] = {
     ("press", True): 2,
     ("lift", True): 3,
 }
-_RAW_IMU_COLUMNS: Final[tuple[str, ...]] = (
-    "acc_x",
-    "acc_y",
-    "acc_z",
-    "gyr_x",
-    "gyr_y",
-    "gyr_z",
-)
-
-
 class BoardEventSegmentationError(ValueError):
     """Raised when Board events cannot safely define aligned segments."""
 
@@ -816,6 +813,7 @@ def _aggregate_and_write_aligned_outputs(
                     published_verification_path=(
                         published_output_directory / artifact.verification_path.name
                     ),
+                    gravity_config=gravity_config,
                 )
             )
             if sample is not None:
@@ -827,7 +825,7 @@ def _aggregate_and_write_aligned_outputs(
     raw_imu = (
         np.concatenate([sample.imu for sample in all_samples], axis=0)
         if all_samples
-        else np.empty((0, 6), dtype=np.dtype(config.output_dtype))
+        else np.empty((0, len(PREPROCESSED_IMU_COLUMNS)), dtype=np.dtype(config.output_dtype))
     )
     targets = (
         np.concatenate([sample.board_event_targets for sample in all_samples], axis=0)
@@ -884,14 +882,8 @@ def _load_gravity_removed_ring(
 
     try:
         ring = load_ring(recording)
-        if gravity_config.gravity_removal_method == "raw":
-            imu = ring.dataframe.loc[:, list(_RAW_IMU_COLUMNS)].to_numpy(copy=True)
-        else:
-            gravity = process_ring_gravity(ring, config=gravity_config)
-            imu = np.column_stack(
-                (gravity.linear_acceleration_body, gravity.angular_velocity_body_rad_s)
-            )
-    except (RingLoadError, GravityRemovalError) as error:
+        imu = preprocess_ring_imu(ring, config=gravity_config).imu
+    except (RingLoadError, GravityRemovalError, IMUPreprocessingError) as error:
         raise BoardEventSegmentationError(
             f"could not load and preprocess Ring IMU for dataset {recording.dataset_id}: {error}"
         ) from error
@@ -936,6 +928,7 @@ def _manifest_row(
     skipped: SkippedBoardEventSegment | None,
     segment_index: int | None,
     published_verification_path: Path,
+    gravity_config: GravityRemovalConfig,
 ) -> dict[str, object]:
     next_label = (
         artifact.labels[label_index + 1]
@@ -959,6 +952,15 @@ def _manifest_row(
         "label_source_path": str(artifact.recording.timestamp_path),
         "offset_source_path": str(artifact.offset_path),
         "segmentation_verification_path": str(published_verification_path),
+        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
+        "channel_schema": "dual_acceleration_units_v1",
+        "acceleration_semantics": _acceleration_semantics(
+            gravity_config.gravity_removal_method
+        ),
+        "acceleration_g_unit": "g",
+        "acceleration_m_s2_unit": "m/s^2",
+        "gyroscope_unit": "rad/s",
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
     }
     if sample is None:
         base.update(
@@ -1157,6 +1159,18 @@ def _aligned_summary(
             if not artifact.verification_path.is_file() or artifact.verification_path.stat().st_size == 0
         ],
         "output_dtype": output_dtype.name,
+        "output_schema_version": 3,
+        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
+        "channel_names": list(PREPROCESSED_IMU_COLUMNS),
+        "units": {
+            "acceleration_x_g": "g", "acceleration_y_g": "g", "acceleration_z_g": "g",
+            "acceleration_x": "m/s^2", "acceleration_y": "m/s^2", "acceleration_z": "m/s^2",
+            "gyro_x": "rad/s", "gyro_y": "rad/s", "gyro_z": "rad/s",
+        },
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
+        "acceleration_semantics": _acceleration_semantics(
+            gravity_config.gravity_removal_method
+        ),
         "gravity_removal": {
             "method": gravity_config.gravity_removal_method,
             "sampling_rate_hz": (
@@ -1204,7 +1218,11 @@ def _validate_aggregate_arrays(
     lengths: np.ndarray,
     targets: np.ndarray,
 ) -> None:
-    if raw_imu.ndim != 2 or raw_imu.shape[1] != 6 or targets.shape != (len(raw_imu), 4):
+    if (
+        raw_imu.ndim != 2
+        or raw_imu.shape[1] != len(PREPROCESSED_IMU_COLUMNS)
+        or targets.shape != (len(raw_imu), 4)
+    ):
         raise BoardEventSegmentationError("aligned aggregate arrays have invalid channel shapes")
     if len(labels) != len(lengths) or len(offsets) != len(labels) + 1:
         raise BoardEventSegmentationError("aligned aggregate arrays have inconsistent segment counts")
@@ -1251,11 +1269,20 @@ def _effective_gravity_config(
         )
     if not isinstance(gravity_config, GravityRemovalConfig):
         raise BoardEventSegmentationError("gravity_config must be GravityRemovalConfig")
-    if gravity_config.gravity_removal_method not in {"raw", "low-pass", "madgwick"}:
+    if gravity_config.gravity_removal_method not in IMU_PREPROCESSING_METHODS:
         raise BoardEventSegmentationError(
-            "gravity_removal_method must be raw, low-pass, or madgwick"
+            "gravity_removal_method must be one of: "
+            + ", ".join(IMU_PREPROCESSING_METHODS)
         )
     return gravity_config
+
+
+def _acceleration_semantics(method: str) -> str:
+    if method == "raw":
+        return "measured_acceleration_with_gravity"
+    if method == "xylo-rotate-and-remove-gravity":
+        return "xylo_gravity_removed_acceleration"
+    return "gravity_removed_linear_acceleration"
 
 
 def _analyze_label_interval(
@@ -1646,8 +1673,8 @@ def _validated_ring_inputs(
         timestamps = np.asarray(ring_timestamps_us, dtype=np.float64)
     except (TypeError, ValueError) as error:
         raise BoardEventSegmentationError("Ring IMU and timestamps must be numeric") from error
-    if imu.ndim != 2 or imu.shape[1] != 6 or len(imu) == 0:
-        raise BoardEventSegmentationError("Ring IMU must have nonempty shape (M, 6)")
+    if imu.ndim != 2 or imu.shape[1] not in {6, len(PREPROCESSED_IMU_COLUMNS)} or len(imu) == 0:
+        raise BoardEventSegmentationError("Ring IMU must have nonempty shape (M, 6) or (M, 9)")
     if timestamps.ndim != 1 or len(timestamps) != len(imu):
         raise BoardEventSegmentationError("Ring timestamps must be a length-M vector")
     if not np.isfinite(imu).all() or not np.isfinite(timestamps).all():

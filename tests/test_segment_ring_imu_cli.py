@@ -59,7 +59,7 @@ def test_cli_exports_primary_ring_variable_segments_and_honors_overwrite(
     assert opened == [root / "writer_a" / "letters" / "0_ring_0.bin"]
     base = output / "writer_a" / "action_letters"
     raw = base / "writer_a_action_letters_rawIMU.npy"
-    np.testing.assert_equal(np.load(raw, allow_pickle=False).shape, (700, 6))
+    np.testing.assert_equal(np.load(raw, allow_pickle=False).shape, (700, 9))
     np.testing.assert_array_equal(
         np.load(base / "writer_a_action_letters_segment_offsets.npy", allow_pickle=False),
         [0, 350, 700],
@@ -176,8 +176,9 @@ def test_cli_exports_raw_imu_in_label_mode(tmp_path: Path, capsys) -> None:
         output / "writer_a" / "action_letters" / "writer_a_action_letters_rawIMU.npy",
         allow_pickle=False,
     )
-    assert exported.shape == (700, 6)
-    np.testing.assert_allclose(exported[:, 2], np.full(700, 9.8))
+    assert exported.shape == (700, 9)
+    np.testing.assert_allclose(exported[:, 2], np.full(700, 9.8 / 9.80665))
+    np.testing.assert_allclose(exported[:, 5], np.full(700, 9.8))
     assert "Gravity removal: raw" in capsys.readouterr().out
 
 

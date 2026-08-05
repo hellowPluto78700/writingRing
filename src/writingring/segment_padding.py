@@ -140,7 +140,7 @@ def discover_segmented_datasets(input_root: Path) -> tuple[SegmentedDatasetPaths
 def load_and_validate_segmented_dataset(paths: SegmentedDatasetPaths) -> ValidatedSegmentedDataset:
     """Load one package without pickle support and enforce array invariants."""
 
-    raw_imu = _load_array(paths.raw_imu_path, paths=paths, expected="a 2-D (N, 6) array")
+    raw_imu = _load_array(paths.raw_imu_path, paths=paths, expected="a 2-D (N, C) array")
     labels = _load_array(paths.labels_path, paths=paths, expected="a 1-D labels array")
     offsets = _load_array(paths.segment_offsets_path, paths=paths, expected="a 1-D offsets array")
     lengths = _load_array(paths.segment_lengths_path, paths=paths, expected="a 1-D lengths array")
@@ -170,7 +170,13 @@ def load_and_validate_segmented_dataset(paths: SegmentedDatasetPaths) -> Validat
 def validate_segmented_root(input_root: Path) -> tuple[ValidatedSegmentedDataset, ...]:
     """Discover and fully validate every package before any output is written."""
 
-    return tuple(load_and_validate_segmented_dataset(item) for item in discover_segmented_datasets(input_root))
+    datasets = tuple(load_and_validate_segmented_dataset(item) for item in discover_segmented_datasets(input_root))
+    if len({dataset.raw_imu.shape[1] for dataset in datasets}) != 1:
+        raise SegmentPaddingError(
+            "segmentation root mixes IMU channel schemas; split six- and "
+            "nine-channel exports before padding"
+        )
+    return datasets
 
 
 def collect_segment_length_records(
@@ -335,12 +341,15 @@ def build_padding_package(
     target = _positive_integer(target_length, name="target_length")
     requested_value = _finite_float(padding_value, name="padding_value")
     stored_value = _stored_padding_value(requested_value, dtype=dataset.raw_imu.dtype)
+    channel_count = int(dataset.raw_imu.shape[1])
     lengths = dataset.segment_lengths
     maximum = int(np.max(lengths))
     retained_indices = np.flatnonzero(lengths <= target)
     retained_count = len(retained_indices)
     padded = np.full(
-        (retained_count, target, 6), stored_value, dtype=dataset.raw_imu.dtype
+        (retained_count, target, channel_count),
+        stored_value,
+        dtype=dataset.raw_imu.dtype,
     )
     exported_labels = dataset.labels[retained_indices].copy()
     valid_lengths = lengths[retained_indices].astype(np.int32, copy=True)
@@ -376,6 +385,7 @@ def build_padding_package(
             "valid_fraction": length / target if exported else None,
             "was_padded": length < target if exported else False,
             "board_event_targets_present": padded_targets is not None,
+            "channel_count": channel_count,
             "source_input_directory": str(dataset.paths.input_dir),
         })
     total_valid = int(np.sum(valid_lengths, dtype=np.int64))
@@ -393,6 +403,7 @@ def build_padding_package(
         "padding_side": "right", "padding_value": stored_value,
         "overflow_policy": "skip",
         "board_event_targets_present": padded_targets is not None,
+        "channel_count": channel_count,
     }
     return PaddingPackageResult(
         dataset=dataset, padded_imu=padded, labels=exported_labels,
@@ -444,7 +455,7 @@ _OUTLIER_FIELDS: Final[tuple[str, ...]] = (
 _PADDING_MANIFEST_FIELDS: Final[tuple[str, ...]] = (
     "segment_index", "output_segment_index", "exported", "skip_reason", "user", "action",
     "dataset_id", "label", "original_length", "target_length", "padding_length",
-    "valid_fraction", "was_padded", "board_event_targets_present", "source_input_directory",
+    "valid_fraction", "was_padded", "board_event_targets_present", "channel_count", "source_input_directory",
 )
 
 
@@ -481,8 +492,8 @@ def _load_array(path: Path, *, paths: SegmentedDatasetPaths, expected: str) -> n
 
 
 def _validate_dataset_arrays(paths: SegmentedDatasetPaths, raw: np.ndarray, labels: np.ndarray, offsets: np.ndarray, lengths: np.ndarray) -> None:
-    if raw.ndim != 2 or raw.shape[1:] != (6,):
-        _shape_error(paths, paths.raw_imu_path, "(sample_count, 6)", tuple(raw.shape))
+    if raw.ndim != 2 or raw.shape[1] <= 0:
+        _shape_error(paths, paths.raw_imu_path, "(sample_count, channel_count)", tuple(raw.shape))
     if labels.ndim != 1:
         _shape_error(paths, paths.labels_path, "(segment_count,)", tuple(labels.shape))
     if lengths.ndim != 1:
@@ -745,6 +756,7 @@ def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root
     return {
         "input_root": str(input_root.resolve()), "output_root": str(output_root.resolve()),
         "target_length": target_length, "sampling_rate_hz": sampling_rate_hz,
+        "channel_count": results[0].padded_imu.shape[2],
         "processed_user_action_count": len(results), "source_segment_count": source_segments,
         "segment_count": exported_segments,
         "skipped_segment_count": source_segments - exported_segments,

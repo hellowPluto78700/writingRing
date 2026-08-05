@@ -26,17 +26,20 @@ from writingring.gravity import (
     GravityRemovalError,
     process_ring_gravity,
 )
+from writingring.imu_preprocessing import (
+    IMU_PREPROCESSING_METHODS,
+    IMUPreprocessingError,
+    PREPROCESSED_IMU_COLUMNS,
+    RING_SOURCE_IMU_COLUMNS,
+    STANDARD_GRAVITY_M_S2,
+    preprocess_ring_imu,
+)
 from writingring.ring_loader import RingLoadError, load_ring
 
 
-IMU_CHANNEL_COLUMNS: Final[tuple[str, ...]] = (
-    "acc_x",
-    "acc_y",
-    "acc_z",
-    "gyr_x",
-    "gyr_y",
-    "gyr_z",
-)
+# Compatibility alias for source columns. Exported segmentation data always
+# uses the separate nine-channel PREPROCESSED_IMU_COLUMNS schema.
+IMU_CHANNEL_COLUMNS: Final[tuple[str, ...]] = RING_SOURCE_IMU_COLUMNS
 _TIMESTAMP_COLUMN: Final[str] = "timestamp"
 _WRONG_LABEL: Final[str] = "wrong"
 _DEFAULT_MINIMUM_LABEL_INTERVAL_US: Final[float] = 100_000.0
@@ -382,17 +385,8 @@ def _recording_ring_arrays(
 ) -> tuple[np.ndarray, np.ndarray]:
     try:
         ring = load_ring(recording)
-        if gravity_config.gravity_removal_method == _RAW_IMU_METHOD:
-            imu = ring.dataframe.loc[:, list(IMU_CHANNEL_COLUMNS)].to_numpy(copy=True)
-        else:
-            gravity_result = process_ring_gravity(ring, config=gravity_config)
-            imu = np.column_stack(
-                (
-                    gravity_result.linear_acceleration_body,
-                    gravity_result.angular_velocity_body_rad_s,
-                )
-            )
-    except (RingLoadError, GravityRemovalError) as error:
+        imu = preprocess_ring_imu(ring, config=gravity_config).imu
+    except (RingLoadError, GravityRemovalError, IMUPreprocessingError) as error:
         raise SegmentationError(
             "could not load and preprocess IMU for dataset "
             f"{recording.dataset_id} primary Ring: {error}"
@@ -428,6 +422,15 @@ def _manifest_row(
         "last_sample_timestamp_us": float(timestamps[stop - 1]),
         "sample_count": sample.sample_count,
         "gravity_removal_method": gravity_config.gravity_removal_method,
+        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
+        "channel_schema": "dual_acceleration_units_v1",
+        "acceleration_semantics": _acceleration_semantics(
+            gravity_config.gravity_removal_method
+        ),
+        "acceleration_g_unit": "g",
+        "acceleration_m_s2_unit": "m/s^2",
+        "gyroscope_unit": "rad/s",
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
         "gravity_low_pass_cutoff_hz": (
             None
             if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
@@ -499,7 +502,18 @@ def _summary(
             ),
         },
         "total_imu_sample_count": int(np.sum(lengths)),
-        "channel_count": len(IMU_CHANNEL_COLUMNS),
+        "output_schema_version": 3,
+        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
+        "channel_names": list(PREPROCESSED_IMU_COLUMNS),
+        "units": {
+            "acceleration_x_g": "g", "acceleration_y_g": "g", "acceleration_z_g": "g",
+            "acceleration_x": "m/s^2", "acceleration_y": "m/s^2", "acceleration_z": "m/s^2",
+            "gyro_x": "rad/s", "gyro_y": "rad/s", "gyro_z": "rad/s",
+        },
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
+        "acceleration_semantics": _acceleration_semantics(
+            gravity_config.gravity_removal_method
+        ),
         "minimum_segment_length": int(np.min(lengths)),
         "maximum_segment_length": int(np.max(lengths)),
         "median_segment_length": float(np.median(lengths)),
@@ -656,13 +670,18 @@ def _effective_gravity_config(
         )
     if not isinstance(gravity_config, GravityRemovalConfig):
         raise SegmentationError("gravity_config must be a GravityRemovalConfig")
-    if gravity_config.gravity_removal_method not in {
-        _RAW_IMU_METHOD,
-        *GRAVITY_REMOVAL_METHODS,
-    }:
-        choices = ", ".join((_RAW_IMU_METHOD, *GRAVITY_REMOVAL_METHODS))
+    if gravity_config.gravity_removal_method not in IMU_PREPROCESSING_METHODS:
+        choices = ", ".join(IMU_PREPROCESSING_METHODS)
         raise SegmentationError(f"gravity_removal_method must be one of: {choices}")
     return gravity_config
+
+
+def _acceleration_semantics(method: str) -> str:
+    if method == _RAW_IMU_METHOD:
+        return "measured_acceleration_with_gravity"
+    if method == "xylo-rotate-and-remove-gravity":
+        return "xylo_gravity_removed_acceleration"
+    return "gravity_removed_linear_acceleration"
 
 
 def _validated_ring_inputs(
@@ -674,8 +693,8 @@ def _validated_ring_inputs(
         timestamps = np.asarray(ring_timestamps_us, dtype=np.float64)
     except (TypeError, ValueError) as error:
         raise SegmentationError("Ring IMU and timestamps must be numeric") from error
-    if imu.ndim != 2 or imu.shape[1] != len(IMU_CHANNEL_COLUMNS) or len(imu) == 0:
-        raise SegmentationError("Ring IMU must have nonempty shape (M, 6)")
+    if imu.ndim != 2 or imu.shape[1] not in {len(IMU_CHANNEL_COLUMNS), len(PREPROCESSED_IMU_COLUMNS)} or len(imu) == 0:
+        raise SegmentationError("Ring IMU must have nonempty shape (M, 6) or (M, 9)")
     if timestamps.ndim != 1 or len(timestamps) != len(imu):
         raise SegmentationError("Ring timestamps must be a length-M vector")
     if not np.isfinite(imu).all() or not np.isfinite(timestamps).all():

@@ -35,6 +35,7 @@ from writingring.stationary import (
     StationarySearchResult,
     find_stationary_interval,
 )
+from writingring.xylo_gravity import XyloGravityConfig
 
 
 IDENTITY_AXIS_TRANSFORM: Final[
@@ -108,6 +109,7 @@ class GravityRemovalConfig:
     calibration_gyro_norm_mad_max_rad_s: float = 0.02
     strict_calibration: bool = True
     profile_name: str = "explicit"
+    xylo: XyloGravityConfig = XyloGravityConfig()
 
 
 @dataclass(frozen=True, slots=True)

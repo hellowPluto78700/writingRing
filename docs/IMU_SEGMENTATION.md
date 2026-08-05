@@ -137,22 +137,23 @@ used as IMU features.
 ## Variable-length export
 
 There is no 600-sample limit, zero-padding, mask, or truncation. Each segment
-retains every gravity-removed IMU frame in its label interval, in this channel
+retains every preprocessed IMU frame in its label interval, in this channel
 order:
 
 ```text
-linear_acc_body_x, linear_acc_body_y, linear_acc_body_z,
-angular_velocity_body_x_rad_s, angular_velocity_body_y_rad_s,
-angular_velocity_body_z_rad_s
+acceleration_x_g, acceleration_y_g, acceleration_z_g,
+acceleration_x, acceleration_y, acceleration_z,
+gyro_x, gyro_y, gyro_z
 ```
 
-With the default identity transform and gyro scale, the gyroscope values have
-the stored numeric values; the first three channels are the existing gravity
-module's `linear_acceleration_body`. The manifest and JSON summary record the
-selected method and its low-pass/Madgwick settings.
+The first three channels are g, channels 3--5 are the same processed
+acceleration in m/s², and the final triplet is gyroscope in rad/s. They satisfy
+`acceleration_m_s2 = acceleration_g * 9.80665`. Raw preserves measured
+acceleration including gravity; the summary and manifest expose that choice as
+`acceleration_semantics` alongside the selected preprocessing method.
 
-Variable-length arrays cannot form a regular numeric `(N, L, 6)` NPY file.
-Instead, `rawIMU.npy` is one contiguous numeric `(total_samples, 6)` array,
+Variable-length arrays cannot form a regular numeric `(N, L, 9)` NPY file.
+Instead, `rawIMU.npy` is one contiguous numeric `(total_samples, 9)` array,
 and `segment_offsets.npy` identifies each segment:
 
 ```python
@@ -168,7 +169,7 @@ For `--user user_0 --action 0`, paths are:
 
 ```text
 outputs/segmentedIMU/user_0/action_0/
-├── user_0_action_0_rawIMU.npy           # gravity-removed (total_samples, 6)
+├── user_0_action_0_rawIMU.npy           # preprocessing features (total_samples, 9)
 ├── user_0_action_0_labels.npy           # (N,), original strings
 ├── user_0_action_0_segment_offsets.npy  # (N + 1,)
 ├── user_0_action_0_segment_lengths.npy  # (N,)

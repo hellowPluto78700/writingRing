@@ -2,7 +2,7 @@
 
 `scripts/analyze_segment_lengths.py` 和 `scripts/pad_segmented_imu.py` 只读取已完成的 variable-length segmentation 输出；它们不读取任何 Ring/Board 原始数据、timestamp label、alignment offset 或 gravity-removal 配置。
 
-先对一种 segmentation/preprocessing 方法的一个根目录执行全局分析：
+先对一种 segmentation/preprocessing 方法的一个根目录执行全局分析。Padding 保留输入 IMU 的通道数；新的九通道 schema 会得到 `(N, T, 9)`，并且同一输入根不得混用六通道与九通道导出：
 
 ```bash
 conda run --no-capture-output -n writingring-viz \

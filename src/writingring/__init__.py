@@ -121,6 +121,21 @@ from writingring.gravity import (
     remove_gravity_in_body_frame,
     upstream_suggested_config,
 )
+from writingring.imu_preprocessing import (
+    IMU_PREPROCESSING_METHODS,
+    PREPROCESSED_IMU_COLUMNS,
+    RING_SOURCE_IMU_COLUMNS,
+    STANDARD_GRAVITY_M_S2,
+    IMUPreprocessingError,
+    IMUPreprocessingResult,
+    preprocess_ring_imu,
+)
+from writingring.xylo_gravity import (
+    XyloGravityConfig,
+    XyloGravityError,
+    XyloGravityResult,
+    xylo_rotate_and_remove_gravity,
+)
 from writingring.stationary import (
     StationarySearchConfig,
     StationarySearchError,
@@ -325,6 +340,7 @@ __all__ = [
     "plot_group_candidate_overlay",
     "plot_touch_trajectory",
     "process_ring_gravity",
+    "preprocess_ring_imu",
     "read_alignment_offset_txt",
     "remove_gravity_in_body_frame",
     "robust_normalize_rows",
@@ -338,6 +354,16 @@ __all__ = [
     "upstream_suggested_config",
     "write_json",
     "write_alignment_offset_txt",
+    "IMU_PREPROCESSING_METHODS",
+    "IMUPreprocessingError",
+    "IMUPreprocessingResult",
+    "PREPROCESSED_IMU_COLUMNS",
+    "RING_SOURCE_IMU_COLUMNS",
+    "STANDARD_GRAVITY_M_S2",
+    "XyloGravityConfig",
+    "XyloGravityError",
+    "XyloGravityResult",
+    "xylo_rotate_and_remove_gravity",
     "IMU_CHANNEL_COLUMNS",
     "SegmentationConfig",
     "SegmentationError",

@@ -46,11 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sampling-rate", type=float, default=200.0)
     parser.add_argument(
         "--gravity-removal-method",
-        choices=("raw", "low-pass", "madgwick"),
+        choices=("raw", "low-pass", "madgwick", "xylo-rotate-and-remove-gravity"),
         default="low-pass",
         help=(
             "IMU preprocessing before segmentation: raw (no gravity removal), "
-            "low-pass, or Madgwick (default: low-pass)"
+            "low-pass, Madgwick, or Xylo rotation/gravity removal (default: low-pass)"
         ),
     )
     parser.add_argument(
@@ -360,7 +360,7 @@ def _write_label_verifications(
     )
     from writingring.discovery import discover_recordings
     from writingring.event_alignment import compute_transient_score
-    from writingring.gravity import process_ring_gravity
+    from writingring.imu_preprocessing import preprocess_ring_imu
     from writingring.board_loader import load_board
     from writingring.ring_loader import load_ring
     from writingring.segmentation import (
@@ -397,15 +397,7 @@ def _write_label_verifications(
             raise ValueError(f"dataset {recording.dataset_id} is missing timestamp labels")
         ring = load_ring(recording)
         timestamps = ring.dataframe["timestamp"].to_numpy(copy=True)
-        if getattr(gravity_config, "gravity_removal_method", None) == "raw":
-            imu = ring.dataframe.loc[
-                :, ["acc_x", "acc_y", "acc_z", "gyr_x", "gyr_y", "gyr_z"]
-            ].to_numpy(copy=True)
-        else:
-            gravity = process_ring_gravity(ring, config=gravity_config)
-            imu = np.column_stack(
-                (gravity.linear_acceleration_body, gravity.angular_velocity_body_rad_s)
-            )
+        imu = preprocess_ring_imu(ring, config=gravity_config).imu
         labels = load_timestamp_labels(recording.timestamp_path)
         samples = segment_recording_by_labels(
             ring_imu=imu,
@@ -481,12 +473,14 @@ def _default_output_root(method: str, *, boundary_mode: str = "label") -> Path:
             "raw": "boardAssistSegmentedIMU_RawIMU",
             "low-pass": "boardAssistSegmentedIMU_LowPassFilterin",
             "madgwick": "boardAssistSegmentedIMU_Madgwick",
+            "xylo-rotate-and-remove-gravity": "boardAssistSegmentedIMU_XyloRotateAndRemoveGravity",
         }
     else:
         names = {
             "raw": "segmentedIMU_RawIMU",
             "low-pass": "segmentedIMU_LowPassFiltering",
             "madgwick": "segmentedIMU_Madgwick",
+            "xylo-rotate-and-remove-gravity": "segmentedIMU_XyloRotateAndRemoveGravity",
         }
     return Path("outputs") / names[method]
 

@@ -175,7 +175,7 @@ def test_user_action_aggregation_removes_gravity_before_segmenting(
             angular_velocity_body_rad_s=dataframe[["gyr_x", "gyr_y", "gyr_z"]].to_numpy(),
         )
 
-    monkeypatch.setattr("writingring.segmentation.process_ring_gravity", fake_gravity)
+    monkeypatch.setattr("writingring.imu_preprocessing.process_ring_gravity", fake_gravity)
     output_root = tmp_path / "outputs"
     result = segment_user_action(
         data_root=data_root,
@@ -184,13 +184,13 @@ def test_user_action_aggregation_removes_gravity_before_segmenting(
         output_root=output_root,
     )
 
-    assert result.raw_imu.shape == (1_350, 6)
+    assert result.raw_imu.shape == (1_350, 9)
     assert result.raw_imu.dtype == np.dtype("float32")
     assert result.labels.tolist() == ["first", "next", "late", "end"]
     np.testing.assert_array_equal(result.segment_lengths, [200, 450, 350, 350])
     np.testing.assert_array_equal(result.segment_offsets, [0, 200, 650, 1_000, 1_350])
     np.testing.assert_allclose(
-        result.raw_imu[200:650, 0], 2_450_000 + np.arange(450) * 1_000
+        result.raw_imu[200:650, 3], 2_450_000 + np.arange(450) * 1_000
     )
     assert result.manifest["dataset_id"].tolist() == [2, 2, 10, 10]
     assert result.summary["segment_count"] == 4
@@ -200,6 +200,8 @@ def test_user_action_aggregation_removes_gravity_before_segmenting(
     assert result.summary["gravity_removal"]["method"] == "low-pass"
     assert gravity_methods == ["low-pass", "low-pass"]
     assert result.summary["padding_or_truncation"] == "disabled"
+    assert result.summary["channel_count"] == 9
+    assert result.summary["acceleration_semantics"] == "gravity_removed_linear_acceleration"
     np.testing.assert_array_equal(
         np.load(result.output_paths.segment_offsets_path, allow_pickle=False),
         result.segment_offsets,
@@ -236,7 +238,7 @@ def test_user_action_raw_imu_bypasses_gravity_removal(tmp_path: Path, monkeypatc
     def unexpected_gravity(*args: object, **kwargs: object) -> object:
         raise AssertionError("raw label mode must not remove gravity")
 
-    monkeypatch.setattr("writingring.segmentation.process_ring_gravity", unexpected_gravity)
+    monkeypatch.setattr("writingring.imu_preprocessing.process_ring_gravity", unexpected_gravity)
     result = segment_user_action(
         data_root=data_root,
         user="user_0",
@@ -245,7 +247,15 @@ def test_user_action_raw_imu_bypasses_gravity_removal(tmp_path: Path, monkeypatc
         gravity_config=GravityRemovalConfig(gravity_removal_method="raw"),
     )
 
-    np.testing.assert_array_equal(result.raw_imu, _imu(timestamps).astype(np.float32))
+    source = _imu(timestamps).astype(np.float32)
+    np.testing.assert_allclose(
+        result.raw_imu[:, :3],
+        result.raw_imu[:, 3:6] / 9.80665,
+        rtol=1e-6,
+        atol=1e-7,
+    )
+    np.testing.assert_array_equal(result.raw_imu[:, 3:6], source[:, :3])
+    np.testing.assert_array_equal(result.raw_imu[:, 6:9], source[:, 3:])
     assert result.manifest["gravity_removal_method"].tolist() == ["raw", "raw"]
     assert result.summary["gravity_removal"]["method"] == "raw"
     assert result.summary["gravity_removal"]["sampling_rate_hz"] is None

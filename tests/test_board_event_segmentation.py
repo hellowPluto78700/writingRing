@@ -155,14 +155,16 @@ def test_raw_board_assisted_imu_bypasses_gravity_removal(
         raise AssertionError("raw Board-assisted mode must not remove gravity")
 
     monkeypatch.setattr(
-        board_event_segmentation, "process_ring_gravity", unexpected_gravity
+        "writingring.imu_preprocessing.process_ring_gravity", unexpected_gravity
     )
     _, imu, timestamps = board_event_segmentation._load_gravity_removed_ring(
         recording,
         gravity_config=GravityRemovalConfig(gravity_removal_method="raw"),
     )
 
-    np.testing.assert_array_equal(imu, raw[:, :6])
+    np.testing.assert_allclose(imu[:, :3], raw[:, :3] / 9.80665)
+    np.testing.assert_array_equal(imu[:, 3:6], raw[:, :3])
+    np.testing.assert_array_equal(imu[:, 6:9], raw[:, 3:6])
     np.testing.assert_array_equal(timestamps, raw[:, 6])
 
 
@@ -521,7 +523,8 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     )
 
     base = tmp_path / "outputs" / "user_0" / "action_0"
-    assert result.raw_imu.shape[1] == 6
+    assert result.raw_imu.shape[1] == 9
+    assert result.summary["channel_count"] == 9
     assert result.board_event_targets.shape == (len(result.raw_imu), 4)
     assert result.segment_offsets.shape == (len(result.labels) + 1,)
     assert result.summary["verification_image_count"] == 1
