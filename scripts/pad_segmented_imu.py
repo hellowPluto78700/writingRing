@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a fixed-length IMU dataset, skipping segments over the target."""
+"""Create a fixed-length SpikeIMU dataset, skipping segments over the target."""
 
 from __future__ import annotations
 
@@ -18,7 +18,9 @@ os.environ.setdefault("XDG_CACHE_HOME", str(Path(tempfile.gettempdir()) / "writi
 def build_parser() -> argparse.ArgumentParser:
     """Build the fixed-length padding CLI parser."""
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__ + " Input must be a SpikeIMU segmentation root."
+    )
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path)
     source = parser.add_mutually_exclusive_group(required=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze completed variable-length IMU segmentation exports globally."""
+"""Analyze completed variable-length SpikeIMU segmentation exports globally."""
 
 from __future__ import annotations
 
@@ -20,7 +20,9 @@ matplotlib.use("Agg")
 def build_parser() -> argparse.ArgumentParser:
     """Build the analysis CLI parser."""
 
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__ + " Input must be a SpikeIMU segmentation root."
+    )
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--sampling-rate", type=float, default=200.0)

@@ -22,10 +22,12 @@ import numpy as np
 import pandas as pd
 
 from writingring.alignment_io import (
+    ALIGNMENT_WORK_AXIS_DOMAIN,
     AlignmentOffset,
     AlignmentOffsetExportError,
     apply_board_to_ring_offset,
     build_alignment_offset_path,
+    build_offset_domain_timestamps,
     read_alignment_offset_txt,
     validate_alignment_feature_provenance,
 )
@@ -167,6 +169,8 @@ class BoardEventSegmentedSample:
     boundary_collision_resolved: bool
     first_press_paired_touch_index: int | None = None
     last_lift_paired_touch_index: int | None = None
+    boundary_start_timestamp_us: float | None = None
+    boundary_end_timestamp_us: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,19 +349,20 @@ def align_board_event_tables(
     if "aligned_event_timestamp_us" in events or "aligned_press_us" in touch_pairs:
         raise BoardEventSegmentationError("alignment offset must not be applied twice")
     try:
+        boundary_offset_us = offset.boundary_offset_us
         aligned_events = raw_events.copy(deep=True)
         aligned_events["aligned_event_timestamp_us"] = apply_board_to_ring_offset(
             aligned_events["frame_timestamp_raw"].to_numpy(dtype=np.float64),
-            offset_us=offset.offset_us,
+            offset_us=boundary_offset_us,
         )
         aligned_pairs = raw_pairs.copy(deep=True)
         aligned_pairs["aligned_press_us"] = apply_board_to_ring_offset(
             aligned_pairs["press_timestamp_raw"].to_numpy(dtype=np.float64),
-            offset_us=offset.offset_us,
+            offset_us=boundary_offset_us,
         )
         lift_raw = aligned_pairs["lift_timestamp_raw"].to_numpy(dtype=np.float64)
         aligned_pairs["aligned_lift_us"] = np.where(
-            np.isfinite(lift_raw), lift_raw + offset.offset_us, np.nan
+            np.isfinite(lift_raw), lift_raw + boundary_offset_us, np.nan
         )
     except (AlignmentOffsetExportError, TypeError, ValueError) as error:
         raise BoardEventSegmentationError(f"could not align Board events: {error}") from error
@@ -374,8 +379,15 @@ def segment_recording_by_aligned_board_events(
     aligned_board_events: pd.DataFrame,
     aligned_touch_pairs: pd.DataFrame,
     config: BoardEventSegmentationConfig = BoardEventSegmentationConfig(),
+    boundary_timestamps_us: np.ndarray | None = None,
 ) -> BoardEventSegmentationResult:
-    """Build final, non-overlapping Board-event-guided segments for one Ring."""
+    """Build segments with boundary lookup separated from feature slicing.
+
+    ``timestamps_us`` remains the canonical feature timestamp vector.  When
+    ``boundary_timestamps_us`` is supplied, all Board/label boundary searches
+    use that work-axis vector while the returned IMU rows and their canonical
+    timestamp metadata are selected by sample index.
+    """
 
     dtype = _validated_config(config)
     imu_source, timestamp_source = _resolve_feature_arguments(
@@ -385,8 +397,11 @@ def segment_recording_by_aligned_board_events(
         ring_timestamps_us=ring_timestamps_us,
     )
     imu, timestamps = _validated_ring_inputs(imu_source, timestamp_source)
+    boundary_timestamps = _validated_boundary_timestamps(
+        boundary_timestamps_us, canonical_timestamps_us=timestamps
+    )
     markers = _validated_labels(labels)
-    _validate_label_range(markers, timestamps)
+    _validate_label_range(markers, boundary_timestamps)
     events, touch_pairs = _validated_aligned_event_tables(
         aligned_board_events, aligned_touch_pairs
     )
@@ -401,7 +416,7 @@ def segment_recording_by_aligned_board_events(
     )
     label_reasons = label_start_skip_reasons(
         markers,
-        ring_end_timestamp_us=float(timestamps[-1]),
+        ring_end_timestamp_us=float(boundary_timestamps[-1]),
         config=label_config,
     )
     analyses = tuple(
@@ -409,7 +424,7 @@ def segment_recording_by_aligned_board_events(
             source_label_index=index,
             label=label,
             next_label=(markers[index + 1] if index + 1 < len(markers) else None),
-            ring_end_us=float(timestamps[-1]),
+            ring_end_us=float(boundary_timestamps[-1]),
             events=events,
             touch_pairs=touch_pairs,
         )
@@ -457,16 +472,16 @@ def segment_recording_by_aligned_board_events(
             next_label=next_label,
             first_press_us=first_press,
             last_lift_us=last_lift,
-            provisional_start_us=max(float(timestamps[0]), first_press - config.pre_press_context_us),
-            provisional_end_us=min(float(timestamps[-1]), last_lift + config.post_lift_context_us),
+            provisional_start_us=max(float(boundary_timestamps[0]), first_press - config.pre_press_context_us),
+            provisional_end_us=min(float(boundary_timestamps[-1]), last_lift + config.post_lift_context_us),
             valid_pair_count=len(eligible),
             transient_pair_count=analysis.transient_touch_pair_count,
             incomplete_pair_count=analysis.incomplete_touch_pair_count,
             crossing_pair_count=analysis.crossing_touch_pair_count,
             accepted_crossing_pair_count=analysis.accepted_crossing_touch_pair_count,
             rejected_crossing_pair_count=analysis.rejected_crossing_touch_pair_count,
-            final_start_us=max(float(timestamps[0]), first_press - config.pre_press_context_us),
-            final_end_us=min(float(timestamps[-1]), last_lift + config.post_lift_context_us),
+            final_start_us=max(float(boundary_timestamps[0]), first_press - config.pre_press_context_us),
+            final_end_us=min(float(boundary_timestamps[-1]), last_lift + config.post_lift_context_us),
         )
 
     _resolve_window_collisions(candidates)
@@ -484,8 +499,12 @@ def segment_recording_by_aligned_board_events(
                 analysis=analyses[index],
             )
             continue
-        start = int(np.searchsorted(timestamps, candidate.final_start_us, side="left"))
-        stop = int(np.searchsorted(timestamps, candidate.final_end_us, side="left"))
+        start = int(
+            np.searchsorted(boundary_timestamps, candidate.final_start_us, side="left")
+        )
+        stop = int(
+            np.searchsorted(boundary_timestamps, candidate.final_end_us, side="left")
+        )
         if not 0 <= start < stop <= len(imu):
             skipped[index] = _skipped(
                 candidate.label,
@@ -496,10 +515,10 @@ def segment_recording_by_aligned_board_events(
             )
             continue
         segment = np.asarray(imu[start:stop], dtype=dtype).copy()
-        segment_times = timestamps[start:stop]
+        boundary_segment_times = boundary_timestamps[start:stop]
         targets = _event_targets_for_segment(
             events,
-            segment_timestamps_us=segment_times,
+            segment_timestamps_us=boundary_segment_times,
             final_start_us=candidate.final_start_us,
             final_end_us=candidate.final_end_us,
             source_label_index=index,
@@ -515,16 +534,50 @@ def segment_recording_by_aligned_board_events(
                 sample_count=len(segment),
                 start_sample_index=start,
                 stop_sample_index_exclusive=stop,
-                label_timestamp_us=candidate.label.timestamp_us,
-                next_label_timestamp_us=(
-                    None if candidate.next_label is None else candidate.next_label.timestamp_us
+                label_timestamp_us=_canonical_point_for_boundary(
+                    candidate.label.timestamp_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
                 ),
-                first_press_timestamp_us=candidate.first_press_us,
-                last_lift_timestamp_us=candidate.last_lift_us,
-                provisional_start_timestamp_us=candidate.provisional_start_us,
-                provisional_end_timestamp_us=candidate.provisional_end_us,
-                final_start_timestamp_us=candidate.final_start_us,
-                final_end_timestamp_us=candidate.final_end_us,
+                next_label_timestamp_us=(
+                    None
+                    if candidate.next_label is None
+                    else _canonical_point_for_boundary(
+                        candidate.next_label.timestamp_us,
+                        canonical_timestamps_us=timestamps,
+                        boundary_timestamps_us=boundary_timestamps,
+                    )
+                ),
+                first_press_timestamp_us=_canonical_point_for_boundary(
+                    candidate.first_press_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
+                last_lift_timestamp_us=_canonical_point_for_boundary(
+                    candidate.last_lift_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
+                provisional_start_timestamp_us=_canonical_start_for_boundary(
+                    candidate.provisional_start_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
+                provisional_end_timestamp_us=_canonical_end_for_boundary(
+                    candidate.provisional_end_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
+                final_start_timestamp_us=_canonical_start_for_boundary(
+                    candidate.final_start_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
+                final_end_timestamp_us=_canonical_end_for_boundary(
+                    candidate.final_end_us,
+                    canonical_timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                ),
                 valid_touch_pair_count=candidate.valid_pair_count,
                 transient_touch_pair_count=candidate.transient_pair_count,
                 incomplete_touch_pair_count=candidate.incomplete_pair_count,
@@ -539,6 +592,8 @@ def segment_recording_by_aligned_board_events(
                 last_lift_paired_touch_index=_optional_int(
                     eligible.iloc[-1]["paired_touch_index"]
                 ),
+                boundary_start_timestamp_us=candidate.final_start_us,
+                boundary_end_timestamp_us=candidate.final_end_us,
             )
         )
     _validate_final_samples(samples)
@@ -743,6 +798,7 @@ class _RecordingArtifacts:
     recording: Recording
     feature_input: RecordingFeatureInput
     timestamps_us: np.ndarray
+    boundary_timestamps_us: np.ndarray
     result: BoardEventSegmentationResult
     labels: tuple[SegmentLabel, ...]
     offset: AlignmentOffset
@@ -815,9 +871,24 @@ def _build_aligned_recording_artifacts(
                     f"alignment feature provenance failed for dataset "
                     f"{recording.dataset_id}: {error}"
                 ) from error
-        labels = _labels_in_ring_domain(
-            load_timestamp_labels(recording.timestamp_path),
-            offset_us=offset.offset_us,
+        try:
+            boundary_timestamps = build_offset_domain_timestamps(
+                timestamps,
+                offset_domain=offset.offset_domain,
+                input_kind=feature_input.input_kind,
+                feature_sampling_rate_hz=feature_input.sampling_rate_hz,
+            )
+        except AlignmentOffsetExportError as error:
+            raise BoardEventSegmentationError(
+                f"could not build alignment boundary axis for dataset "
+                f"{recording.dataset_id}: {error}"
+            ) from error
+        source_labels = load_timestamp_labels(recording.timestamp_path)
+        boundary_labels = _labels_in_boundary_domain(
+            source_labels,
+            canonical_timestamps_us=timestamps,
+            boundary_timestamps_us=boundary_timestamps,
+            offset_us=offset.boundary_offset_us,
             label_time_domain=config.label_time_domain,
         )
         try:
@@ -837,12 +908,13 @@ def _build_aligned_recording_artifacts(
         recording_result = segment_recording_by_aligned_board_events(
             feature_values=ring_imu,
             timestamps_us=timestamps,
-            labels=labels,
+            labels=boundary_labels,
             aligned_board_events=events,
             aligned_touch_pairs=pairs,
             config=config,
+            boundary_timestamps_us=boundary_timestamps,
         )
-        reasons = _combined_label_skip_reasons(labels, recording_result)
+        reasons = _combined_label_skip_reasons(source_labels, recording_result)
         verification_path = build_verification_path(
             staging_directory,
             dataset_id=recording.dataset_id,
@@ -857,7 +929,7 @@ def _build_aligned_recording_artifacts(
                     feature_input.values[:, feature_input.transient_channel_indices]
                 ),
                 aligned_board_events=recording_result.aligned_board_events,
-                labels=labels,
+                labels=source_labels,
                 label_skip_reasons=reasons,
                 segmented_samples=recording_result.samples,
                 output_path=verification_path,
@@ -866,7 +938,18 @@ def _build_aligned_recording_artifacts(
                 action=recording.action,
                 dataset_id=recording.dataset_id,
                 boundary_mode="aligned_board_events",
-                alignment_offset_us=offset.offset_us,
+                alignment_offset_us=offset.boundary_offset_us,
+                alignment_timestamps_us=boundary_timestamps,
+                alignment_time_axis_strategy=(
+                    (
+                        offset.alignment_time_axis_strategy
+                        if offset.offset_domain == ALIGNMENT_WORK_AXIS_DOMAIN
+                        else "canonical_timestamp"
+                    )
+                ),
+                canonical_offset_projection_success=(
+                    offset.canonical_offset_projection_success
+                ),
             )
         except verification_error as error:
             raise BoardEventSegmentationError(
@@ -881,8 +964,9 @@ def _build_aligned_recording_artifacts(
                 recording=recording,
                 feature_input=feature_input,
                 timestamps_us=timestamps,
+                boundary_timestamps_us=boundary_timestamps,
                 result=recording_result,
-                labels=labels,
+                labels=source_labels,
                 offset=offset,
                 offset_path=offset_path,
                 verification_path=verification_path,
@@ -1040,9 +1124,54 @@ def _load_gravity_removed_ring(
     return ring, *_validated_ring_inputs(imu, timestamps)
 
 
+def _labels_in_boundary_domain(
+    labels: Sequence[SegmentLabel],
+    *,
+    canonical_timestamps_us: np.ndarray,
+    boundary_timestamps_us: np.ndarray,
+    offset_us: float,
+    label_time_domain: str,
+) -> tuple[SegmentLabel, ...]:
+    if label_time_domain not in {"ring", "board"}:
+        raise BoardEventSegmentationError("label_time_domain must be ring or board")
+    if label_time_domain == "ring":
+        if np.array_equal(canonical_timestamps_us, boundary_timestamps_us):
+            values = [label.timestamp_us for label in labels]
+        else:
+            values = [
+                float(
+                    boundary_timestamps_us[
+                        min(
+                            int(
+                                np.searchsorted(
+                                    canonical_timestamps_us,
+                                    label.timestamp_us,
+                                    side="left",
+                                )
+                            ),
+                            len(boundary_timestamps_us) - 1,
+                        )
+                    ]
+                )
+                for label in labels
+            ]
+    else:
+        values = [label.timestamp_us + offset_us for label in labels]
+    return tuple(
+        SegmentLabel(
+            timestamp_us=timestamp,
+            label=label.label,
+            source_line_number=label.source_line_number,
+        )
+        for label, timestamp in zip(labels, values, strict=True)
+    )
+
+
 def _labels_in_ring_domain(
     labels: Sequence[SegmentLabel], *, offset_us: float, label_time_domain: str
 ) -> tuple[SegmentLabel, ...]:
+    """Compatibility wrapper for callers that do not have a work axis."""
+
     if label_time_domain == "ring":
         return tuple(labels)
     if label_time_domain != "board":
@@ -1101,6 +1230,10 @@ def _manifest_row(
         "label_timestamp_us": label.timestamp_us,
         "next_label_timestamp_us": None if next_label is None else next_label.timestamp_us,
         "alignment_offset_us": artifact.offset.offset_us,
+        "work_axis_offset_us": artifact.offset.work_axis_offset_us,
+        "canonical_offset_us": artifact.offset.canonical_offset_us,
+        "alignment_offset_domain": artifact.offset.offset_domain,
+        "canonical_offset_projection_success": artifact.offset.canonical_offset_projection_success,
         "alignment_event_coverage_ratio": artifact.offset.event_coverage_ratio,
         "ring_source_path": str(artifact.recording.ring_0_path),
         "feature_values_path": str(feature.values_path),
@@ -1193,7 +1326,7 @@ def _board_event_rows(
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     samples = artifact.result.samples
-    ring_start = float(artifact.timestamps_us[0])
+    boundary_start = float(artifact.boundary_timestamps_us[0])
     for event in artifact.result.aligned_board_events.itertuples(index=False):
         timestamp = float(event.aligned_event_timestamp_us)
         channel = _event_target_channel(event)
@@ -1226,9 +1359,19 @@ def _board_event_rows(
             for local_segment_index, sample in enumerate(samples):
                 if _optional_int(event.assigned_label_index) != sample.source_label_index:
                     continue
-                if not sample.final_start_timestamp_us <= timestamp < sample.final_end_timestamp_us:
+                boundary_start_us = (
+                    sample.boundary_start_timestamp_us
+                    if sample.boundary_start_timestamp_us is not None
+                    else sample.final_start_timestamp_us
+                )
+                boundary_end_us = (
+                    sample.boundary_end_timestamp_us
+                    if sample.boundary_end_timestamp_us is not None
+                    else sample.final_end_timestamp_us
+                )
+                if not boundary_start_us <= timestamp < boundary_end_us:
                     continue
-                segment_times = artifact.timestamps_us[
+                segment_times = artifact.boundary_timestamps_us[
                     sample.start_sample_index : sample.stop_sample_index_exclusive
                 ]
                 local_index = int(np.searchsorted(segment_times, timestamp, side="left"))
@@ -1247,7 +1390,8 @@ def _board_event_rows(
                 "paired_touch_index": event.paired_touch_index,
                 "frame_timestamp_raw": event.frame_timestamp_raw,
                 "aligned_event_timestamp_us": timestamp,
-                "aligned_event_elapsed_s": (timestamp - ring_start) / 1_000_000.0,
+                "aligned_event_elapsed_s": (timestamp - boundary_start) / 1_000_000.0,
+                "alignment_offset_domain": artifact.offset.offset_domain,
                 "valid_touch": bool(event.valid_touch),
                 "transient": bool(event.transient),
                 "incomplete_touch": bool(event.incomplete_touch),
@@ -1345,6 +1489,20 @@ def _aligned_summary(
         "boundary_mode": "aligned_board_events",
         "boundary_source": "aligned_board_events",
         "time_mapping": "ring_timestamp_us = board_timestamp_us + offset_us",
+        "alignment_offset_domain": (
+            artifacts[0].offset.offset_domain
+            if len({artifact.offset.offset_domain for artifact in artifacts}) == 1
+            else "mixed"
+        ),
+        "alignment_time_axis": {
+            "strategy": artifacts[0].offset.alignment_time_axis_strategy,
+            "sampling_rate_hz": artifacts[0].offset.alignment_time_axis_sampling_rate_hz,
+            "sample_count": artifacts[0].offset.alignment_time_axis_sample_count,
+        },
+        "canonical_offset_projection_success": all(
+            artifact.offset.canonical_offset_projection_success is not False
+            for artifact in artifacts
+        ),
         "padding_or_truncation": "disabled",
         "alignment_required": config.require_successful_alignment,
         "alignment_offset_root": str(alignment_offset_root),
@@ -1383,6 +1541,7 @@ def _aligned_summary(
         "channel_names": list(first_feature.channel_names),
         "channel_units": list(first_feature.units),
         "sampling_rate_hz": common_sampling_rate_hz,
+        "feature_sampling_rate_hz": common_sampling_rate_hz,
         "sample_count_by_recording": {
             str(feature.dataset_id): feature.sample_count for feature in feature_inputs
         },
@@ -2021,6 +2180,68 @@ def _validate_label_range(labels: Sequence[SegmentLabel], timestamps: np.ndarray
             raise BoardEventSegmentationError("label timestamp is outside the Ring range")
 
 
+def _validated_boundary_timestamps(
+    values: np.ndarray | None,
+    *,
+    canonical_timestamps_us: np.ndarray,
+) -> np.ndarray:
+    if values is None:
+        return canonical_timestamps_us.copy()
+    try:
+        boundary = np.asarray(values, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise BoardEventSegmentationError(
+            "boundary_timestamps_us must be numeric"
+        ) from error
+    if (
+        boundary.ndim != 1
+        or boundary.size != canonical_timestamps_us.size
+        or not np.isfinite(boundary).all()
+        or not np.all(np.diff(boundary) >= 0.0)
+    ):
+        raise BoardEventSegmentationError(
+            "boundary_timestamps_us must be finite and nondecreasing, "
+            "and match the canonical sample count"
+        )
+    return boundary.copy()
+
+
+def _canonical_point_for_boundary(
+    timestamp_us: float,
+    *,
+    canonical_timestamps_us: np.ndarray,
+    boundary_timestamps_us: np.ndarray,
+) -> float:
+    index = int(np.searchsorted(boundary_timestamps_us, timestamp_us, side="left"))
+    index = min(max(index, 0), len(canonical_timestamps_us) - 1)
+    return float(canonical_timestamps_us[index])
+
+
+def _canonical_start_for_boundary(
+    timestamp_us: float,
+    *,
+    canonical_timestamps_us: np.ndarray,
+    boundary_timestamps_us: np.ndarray,
+) -> float:
+    return _canonical_point_for_boundary(
+        timestamp_us,
+        canonical_timestamps_us=canonical_timestamps_us,
+        boundary_timestamps_us=boundary_timestamps_us,
+    )
+
+
+def _canonical_end_for_boundary(
+    timestamp_us: float,
+    *,
+    canonical_timestamps_us: np.ndarray,
+    boundary_timestamps_us: np.ndarray,
+) -> float:
+    index = int(np.searchsorted(boundary_timestamps_us, timestamp_us, side="left"))
+    if index >= len(canonical_timestamps_us):
+        return float(canonical_timestamps_us[-1])
+    return float(canonical_timestamps_us[index])
+
+
 def _validated_board_frames(frames: pd.DataFrame) -> pd.DataFrame:
     _require_dataframe(frames, name="Board frames")
     _require_columns(
@@ -2042,13 +2263,13 @@ def _validated_board_contacts(contacts: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate_final_samples(samples: Sequence[BoardEventSegmentedSample]) -> None:
-    previous_end: float | None = None
+    previous_stop: int | None = None
     for sample in samples:
-        if not sample.final_start_timestamp_us < sample.final_end_timestamp_us:
+        if not 0 <= sample.start_sample_index < sample.stop_sample_index_exclusive:
             raise BoardEventSegmentationError("final segmentation window is empty")
-        if previous_end is not None and previous_end > sample.final_start_timestamp_us:
+        if previous_stop is not None and previous_stop > sample.start_sample_index:
             raise BoardEventSegmentationError("final segmentation windows overlap")
-        previous_end = sample.final_end_timestamp_us
+        previous_stop = sample.stop_sample_index_exclusive
 
 
 def _require_dataframe(value: object, *, name: str) -> None:

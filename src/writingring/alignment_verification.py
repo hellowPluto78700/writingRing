@@ -147,6 +147,8 @@ def create_alignment_verification_figure(
     user: str | None = None,
     action: str | None = None,
     dataset_id: int | None = None,
+    alignment_time_axis_strategy: str = "endpoint_reconstruction",
+    canonical_offset_projection_success: bool | None = None,
 ) -> AlignmentVerificationResult:
     """Render matching verification on the strict alignment work axis.
 
@@ -180,6 +182,10 @@ def create_alignment_verification_figure(
 
     output = Path(output_path)
     _validate_output_path(output, overwrite=config.overwrite)
+    if not isinstance(alignment_time_axis_strategy, str) or not alignment_time_axis_strategy:
+        raise AlignmentVerificationError(
+            "alignment_time_axis_strategy must be a nonempty string"
+        )
     offset_us = float(alignment_result.best_offset_us)
     ring_start = float(timestamps[0])
     elapsed = (timestamps - ring_start) / 1_000_000.0
@@ -207,8 +213,14 @@ def create_alignment_verification_figure(
     lift = ~press
     warnings_output: list[str] = [
         "time mapping: ring_timestamp_us = board_timestamp_us + offset_us",
+        f"alignment domain: {alignment_time_axis_strategy} work axis",
         f"label time domain: {config.label_time_domain}",
     ]
+    if canonical_offset_projection_success is False:
+        warnings_output.append(
+            "canonical projection unavailable; Board segmentation will use "
+            "sample-index mapping on the work axis"
+        )
     recording_end = float(elapsed[-1])
     if recording_end < displayed_stop:
         warnings_output.append(
@@ -294,6 +306,9 @@ def create_alignment_verification_figure(
         "Ring\N{EN DASH}Board Alignment Verification\n"
         f"{identity}; ring_time = board_time + offset; "
         f"offset = {offset_us:.6f} us ({offset_us / 1_000.0:.6f} ms)\n"
+        f"Alignment domain: {alignment_time_axis_strategy} work axis; "
+        f"canonical projection: "
+        f"{'available' if canonical_offset_projection_success is not False else 'unavailable'}\n"
         f"label source = {label_path.name}; label time domain = {config.label_time_domain}"
     )
     try:

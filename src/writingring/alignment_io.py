@@ -23,6 +23,12 @@ from writingring.event_alignment import SequenceAlignmentResult
 ALIGNMENT_MODEL: Final[str] = "constant_offset"
 TIMESTAMP_UNIT: Final[str] = "microseconds"
 TIME_MAPPING: Final[str] = "ring_timestamp_us = board_timestamp_us + offset_us"
+ALIGNMENT_OFFSET_SCHEMA_VERSION: Final[int] = 2
+ALIGNMENT_WORK_AXIS_DOMAIN: Final[str] = "alignment_work_axis"
+CANONICAL_TIMESTAMP_DOMAIN: Final[str] = "canonical_timestamp"
+_OFFSET_DOMAINS: Final[frozenset[str]] = frozenset(
+    {ALIGNMENT_WORK_AXIS_DOMAIN, CANONICAL_TIMESTAMP_DOMAIN}
+)
 
 
 class AlignmentOffsetExportError(ValueError):
@@ -48,15 +54,25 @@ class AlignmentTimeAxes:
     canonical_timestamps_us: np.ndarray
     work_timestamps_us: np.ndarray
     input_kind: str
+    # ``sampling_rate_hz`` is retained for API compatibility, but explicitly
+    # means the rate of the synthetic alignment work axis.  It must never be
+    # populated from SpikeIMU feature metadata.
     sampling_rate_hz: float
     strategy: str
     duplicate_step_count: int
+    feature_sampling_rate_hz: float | None = None
 
     @property
     def alignment_timestamps_us(self) -> np.ndarray:
         """Return the work axis under the explicit alignment terminology."""
 
         return self.work_timestamps_us
+
+    @property
+    def alignment_sampling_rate_hz(self) -> float:
+        """Return the endpoint-derived sampling rate of the work axis."""
+
+        return self.sampling_rate_hz
 
     @property
     def metadata(self) -> dict[str, object]:
@@ -68,6 +84,8 @@ class AlignmentTimeAxes:
             "strategy": self.strategy,
             "sampling_rate_hz": self.sampling_rate_hz,
             "sample_count": int(self.canonical_timestamps_us.size),
+            "canonical_start_us": float(self.canonical_timestamps_us[0]),
+            "canonical_stop_us": float(self.canonical_timestamps_us[-1]),
             "canonical_timestamps_modified": False,
         }
 
@@ -100,13 +118,12 @@ def build_alignment_time_axes(
     input_kind: str,
     sampling_rate_hz: float | None = None,
 ) -> AlignmentTimeAxes:
-    """Build canonical and source-aware strictly increasing alignment axes.
+    """Build one representation-invariant strictly increasing alignment axis.
 
-    The canonical vector is copied and never rewritten.  Raw Ring alignment
-    intentionally retains the historical endpoint reconstruction for every
-    nondecreasing timestamp stream, including strictly increasing streams
-    with sampling jitter.  SpikeIMU keeps a strict canonical vector as its
-    work axis and reconstructs only when duplicate rows require it.
+    ``sampling_rate_hz`` is accepted as feature metadata for validation and
+    provenance only.  The alignment work axis is always reconstructed from
+    the canonical timestamp endpoints so raw Ring and SpikeIMU inputs with
+    the same canonical timestamps cannot acquire different time coordinates.
     """
 
     canonical = _validated_timestamp_vector(canonical_timestamps_us)
@@ -115,46 +132,26 @@ def build_alignment_time_axes(
             "input_kind must be 'raw-ring' or 'spike-imu'"
         )
     duplicate_step_count = int(np.count_nonzero(np.diff(canonical) == 0.0))
-    has_duplicates = duplicate_step_count > 0
-    supplied_rate = None
+    feature_rate = None
     if sampling_rate_hz is not None:
-        supplied_rate = _finite_float(sampling_rate_hz, name="sampling_rate_hz")
-        if supplied_rate <= 0.0:
+        feature_rate = _finite_float(sampling_rate_hz, name="sampling_rate_hz")
+        if feature_rate <= 0.0:
             raise AlignmentOffsetExportError("sampling_rate_hz must be positive")
 
     duration_us = float(canonical[-1] - canonical[0])
-    endpoint_rate: float | None = None
-    if duration_us > 0.0:
-        endpoint_rate = (canonical.size - 1) * 1_000_000.0 / duration_us
-
-    if input_kind == "raw-ring":
-        if endpoint_rate is None:
-            raise AlignmentOffsetExportError(
-                "timestamps must have positive duration for alignment"
-            )
-        rate = endpoint_rate
-        strategy = "raw_endpoint_reconstruction"
-        work = canonical[0] + (
-            np.arange(canonical.size, dtype=np.float64) * 1_000_000.0 / rate
+    if duration_us <= 0.0:
+        raise AlignmentOffsetExportError(
+            "timestamps must have positive duration for alignment"
         )
-    else:
-        if supplied_rate is None:
-            if endpoint_rate is None:
-                raise AlignmentOffsetExportError(
-                    "sampling_rate_hz was not supplied and cannot be inferred "
-                    "from SpikeIMU timestamp endpoints"
-                )
-            rate = endpoint_rate
-        else:
-            rate = supplied_rate
-        if has_duplicates:
-            strategy = "strict_reconstruction"
-            work = canonical[0] + (
-                np.arange(canonical.size, dtype=np.float64) * 1_000_000.0 / rate
-            )
-        else:
-            strategy = "canonical_strict_copy"
-            work = canonical.copy()
+
+    endpoint_rate = (canonical.size - 1) * 1_000_000.0 / duration_us
+    work = np.linspace(
+        float(canonical[0]),
+        float(canonical[-1]),
+        canonical.size,
+        dtype=np.float64,
+    )
+    strategy = "endpoint_reconstruction"
 
     if work.ndim != 1 or not np.isfinite(work).all() or not np.all(np.diff(work) > 0.0):
         raise AlignmentOffsetExportError(
@@ -164,9 +161,10 @@ def build_alignment_time_axes(
         canonical_timestamps_us=canonical,
         work_timestamps_us=work,
         input_kind=input_kind,
-        sampling_rate_hz=float(rate),
+        sampling_rate_hz=float(endpoint_rate),
         strategy=strategy,
         duplicate_step_count=duplicate_step_count,
+        feature_sampling_rate_hz=feature_rate,
     )
 
 
@@ -182,6 +180,35 @@ def build_alignment_timestamps(
         canonical_timestamps_us,
         input_kind=input_kind,
         sampling_rate_hz=sampling_rate_hz,
+    ).work_timestamps_us.copy()
+
+
+def build_offset_domain_timestamps(
+    canonical_timestamps_us: np.ndarray,
+    *,
+    offset_domain: str,
+    input_kind: str,
+    feature_sampling_rate_hz: float | None = None,
+) -> np.ndarray:
+    """Return the timestamp vector used to locate boundaries for an offset.
+
+    New alignment artifacts use the endpoint-reconstructed work axis for
+    matching and Board boundary lookup.  Legacy artifacts explicitly (or by
+    schema inference) use canonical timestamps.  The canonical vector is
+    always returned unchanged as the feature slicing/provenance vector.
+    """
+
+    canonical = _validated_timestamp_vector(canonical_timestamps_us)
+    if offset_domain == CANONICAL_TIMESTAMP_DOMAIN:
+        return canonical
+    if offset_domain != ALIGNMENT_WORK_AXIS_DOMAIN:
+        raise AlignmentOffsetExportError(
+            "offset_domain must be alignment_work_axis or canonical_timestamp"
+        )
+    return build_alignment_time_axes(
+        canonical,
+        input_kind=input_kind,
+        sampling_rate_hz=feature_sampling_rate_hz,
     ).work_timestamps_us.copy()
 
 
@@ -318,18 +345,7 @@ def project_alignment_offset_to_canonical(
             "projection quality thresholds must be nonnegative and ordered"
         )
     warnings: list[str] = []
-    if delta_range > failure_threshold * sample_interval_us:
-        raise AlignmentOffsetExportError(
-            "canonical offset projection is not representable by one constant "
-            f"offset: delta range {delta_range:.3f} us exceeds "
-            f"{failure_threshold:.3f} sampling intervals"
-        )
-    if delta_range > warning_threshold * sample_interval_us:
-        warnings.append(
-            "canonical/work timestamp projection delta range is larger than "
-            f"{warning_threshold:.3f} sampling intervals"
-        )
-    return AlignmentOffsetProjection(
+    projection = AlignmentOffsetProjection(
         work_axis_offset_us=work_offset,
         canonical_offset_us=work_offset + median,
         projection_delta_us=median,
@@ -339,6 +355,31 @@ def project_alignment_offset_to_canonical(
         projection_delta_max_us=maximum,
         projection_delta_range_us=delta_range,
         contributing_match_count=int(indices.size),
+        warnings=(),
+    )
+    if delta_range > failure_threshold * sample_interval_us:
+        error = AlignmentOffsetExportError(
+            "canonical offset projection is not representable by one constant "
+            f"offset: delta range {delta_range:.3f} us exceeds "
+            f"{failure_threshold:.3f} sampling intervals"
+        )
+        setattr(error, "projection_diagnostics", projection)
+        raise error
+    if delta_range > warning_threshold * sample_interval_us:
+        warnings.append(
+            "canonical/work timestamp projection delta range is larger than "
+            f"{warning_threshold:.3f} sampling intervals"
+        )
+    return AlignmentOffsetProjection(
+        work_axis_offset_us=projection.work_axis_offset_us,
+        canonical_offset_us=projection.canonical_offset_us,
+        projection_delta_us=projection.projection_delta_us,
+        projection_delta_median_us=projection.projection_delta_median_us,
+        projection_delta_mad_us=projection.projection_delta_mad_us,
+        projection_delta_min_us=projection.projection_delta_min_us,
+        projection_delta_max_us=projection.projection_delta_max_us,
+        projection_delta_range_us=projection.projection_delta_range_us,
+        contributing_match_count=projection.contributing_match_count,
         warnings=tuple(warnings),
     )
 
@@ -385,10 +426,15 @@ class AlignmentOffset:
     event_coverage_ratio: float | None
     matched_event_count: int | None
     total_valid_event_count: int | None
+    offset_schema_version: int | None = None
+    offset_domain: str = CANONICAL_TIMESTAMP_DOMAIN
+    canonical_offset_us: float | None = None
+    canonical_offset_projection_success: bool | None = None
     alignment_signal_source: str | None = None
     feature_schema: str | None = None
     feature_values_sha256: str | None = None
     feature_metadata_sha256: str | None = None
+    feature_sampling_rate_hz: float | None = None
     timestamp_sha256: str | None = None
     transient_channel_indices: tuple[int, ...] | None = None
     spike_event_channels_used: bool | None = None
@@ -414,6 +460,18 @@ class AlignmentOffset:
 
         return self.offset_us / 1_000.0
 
+    @property
+    def boundary_offset_us(self) -> float:
+        """Return the Board-to-Ring offset in the artifact's declared domain."""
+
+        if self.offset_domain == ALIGNMENT_WORK_AXIS_DOMAIN:
+            if self.work_axis_offset_us is None:
+                raise AlignmentOffsetExportError(
+                    "alignment_work_axis offset is missing work_axis_offset_us"
+                )
+            return self.work_axis_offset_us
+        return self.offset_us
+
 
 def extract_alignment_offset(
     result: SequenceAlignmentResult,
@@ -423,13 +481,14 @@ def extract_alignment_offset(
     dataset_id: int,
     ring_stream: str = "ring_0",
     projection: AlignmentOffsetProjection | None = None,
+    projection_diagnostics: AlignmentOffsetProjection | None = None,
 ) -> AlignmentOffset:
-    """Extract an offset, using a canonical projection when one is supplied.
+    """Extract a successful alignment with the work-axis offset as primary.
 
-    The legacy no-projection path remains available for results that do not
-    carry a source-specific work-axis contract.  Source-aware results must
-    provide ``projection`` so ``AlignmentOffset.offset_us`` remains safe for
-    downstream canonical timestamp segmentation.
+    Results carrying an alignment-time-axis report are the schema-v2 source
+    aware form.  Their ``offset_us`` always remains the work-axis offset;
+    canonical projection is optional diagnostic provenance.  Results without
+    that report retain the old canonical-domain export behavior.
     """
 
     if not isinstance(result, SequenceAlignmentResult):
@@ -454,13 +513,35 @@ def extract_alignment_offset(
         raise AlignmentOffsetExportError(
             "alignment result must use the constant_offset model"
         )
+    source_aware = (
+        report.get("offset_domain") == ALIGNMENT_WORK_AXIS_DOMAIN
+        or "alignment_time_axis" in report
+    )
     if projection is None:
-        if "alignment_time_axis" in report or "canonical_offset_projection" in report:
-            raise AlignmentOffsetExportError(
-                "source-aware alignment results require a canonical offset projection"
-            )
-        offset_us = work_axis_offset_us
         projection_fields: dict[str, object] = {}
+        if projection_diagnostics is not None:
+            _validate_projection(projection_diagnostics)
+            if not math.isclose(
+                projection_diagnostics.work_axis_offset_us,
+                work_axis_offset_us,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                raise AlignmentOffsetExportError(
+                    "projection diagnostics do not match alignment result"
+                )
+            projection_fields = {
+                "work_axis_offset_us": projection_diagnostics.work_axis_offset_us,
+                "projection_delta_us": projection_diagnostics.projection_delta_us,
+                "projection_delta_median_us": projection_diagnostics.projection_delta_median_us,
+                "projection_delta_mad_us": projection_diagnostics.projection_delta_mad_us,
+                "projection_delta_min_us": projection_diagnostics.projection_delta_min_us,
+                "projection_delta_max_us": projection_diagnostics.projection_delta_max_us,
+                "projection_delta_range_us": projection_diagnostics.projection_delta_range_us,
+                "projection_contributing_match_count": (
+                    projection_diagnostics.contributing_match_count
+                ),
+            }
     else:
         _validate_projection(projection)
         if not math.isclose(
@@ -472,7 +553,6 @@ def extract_alignment_offset(
             raise AlignmentOffsetExportError(
                 "canonical offset projection does not match alignment result"
             )
-        offset_us = projection.canonical_offset_us
         projection_fields = {
             "work_axis_offset_us": projection.work_axis_offset_us,
             "projection_delta_us": projection.projection_delta_us,
@@ -485,6 +565,27 @@ def extract_alignment_offset(
                 projection.contributing_match_count
             ),
         }
+    if source_aware:
+        offset_us = work_axis_offset_us
+        offset_domain = ALIGNMENT_WORK_AXIS_DOMAIN
+        offset_schema_version: int | None = ALIGNMENT_OFFSET_SCHEMA_VERSION
+        canonical_offset_us = (
+            None if projection is None else projection.canonical_offset_us
+        )
+        canonical_projection_success: bool | None = projection is not None
+        projection_fields.setdefault("work_axis_offset_us", work_axis_offset_us)
+    else:
+        # Preserve the old API for callers that construct a bare alignment
+        # result without source-aware axis metadata.
+        offset_us = (
+            work_axis_offset_us
+            if projection is None
+            else projection.canonical_offset_us
+        )
+        offset_domain = CANONICAL_TIMESTAMP_DOMAIN
+        offset_schema_version = None
+        canonical_offset_us = None
+        canonical_projection_success = None
     return AlignmentOffset(
         user=user,
         action=action,
@@ -505,6 +606,10 @@ def extract_alignment_offset(
             report.get("total_valid_event_count"),
             name="total_valid_event_count",
         ),
+        offset_schema_version=offset_schema_version,
+        offset_domain=offset_domain,
+        canonical_offset_us=canonical_offset_us,
+        canonical_offset_projection_success=canonical_projection_success,
         alignment_signal_source=_optional_nonempty_string(
             report.get("alignment_signal_source"),
             name="alignment_signal_source",
@@ -520,6 +625,10 @@ def extract_alignment_offset(
         feature_metadata_sha256=_optional_sha256(
             report.get("feature_metadata_sha256"),
             name="feature_metadata_sha256",
+        ),
+        feature_sampling_rate_hz=_optional_finite_float(
+            report.get("feature_sampling_rate_hz"),
+            name="feature_sampling_rate_hz",
         ),
         timestamp_sha256=_optional_sha256(
             report.get("timestamp_sha256"),
@@ -797,6 +906,35 @@ def read_alignment_offset_txt(
         )
     if fields["alignment_success"] != "true":
         raise AlignmentOffsetExportError("offset TXT alignment_success must be true")
+    schema_version = _optional_nonnegative_int(
+        fields.get("offset_schema_version"), name="offset_schema_version"
+    )
+    if schema_version is not None and schema_version != ALIGNMENT_OFFSET_SCHEMA_VERSION:
+        raise AlignmentOffsetExportError(
+            "offset TXT has an unsupported offset_schema_version"
+        )
+    if schema_version is None:
+        # Files predating the explicit domain field used canonical timestamps.
+        offset_domain = CANONICAL_TIMESTAMP_DOMAIN
+        canonical_offset_us = None
+        canonical_projection_success = None
+    else:
+        if "offset_domain" not in fields:
+            raise AlignmentOffsetExportError(
+                "schema-v2 offset TXT must declare offset_domain"
+            )
+        offset_domain = _offset_domain(fields["offset_domain"])
+        canonical_offset_us = _optional_finite_float(
+            fields.get("canonical_offset_us"), name="canonical_offset_us"
+        )
+        canonical_projection_success = _optional_bool(
+            fields.get("canonical_offset_projection_success"),
+            name="canonical_offset_projection_success",
+        )
+        if canonical_projection_success is None:
+            raise AlignmentOffsetExportError(
+                "schema-v2 offset TXT must declare canonical_offset_projection_success"
+            )
     offset = AlignmentOffset(
         user=fields["user"],
         action=fields["action"],
@@ -805,6 +943,10 @@ def read_alignment_offset_txt(
         offset_us=_finite_float(fields["offset_us"], name="offset_us"),
         alignment_model=fields["alignment_model"],
         alignment_success=True,
+        offset_schema_version=schema_version,
+        offset_domain=offset_domain,
+        canonical_offset_us=canonical_offset_us,
+        canonical_offset_projection_success=canonical_projection_success,
         event_coverage_ratio=_optional_finite_float(
             fields.get("event_coverage_ratio"), name="event_coverage_ratio"
         ),
@@ -829,6 +971,10 @@ def read_alignment_offset_txt(
         feature_metadata_sha256=_optional_sha256(
             fields.get("feature_metadata_sha256"),
             name="feature_metadata_sha256",
+        ),
+        feature_sampling_rate_hz=_optional_finite_float(
+            fields.get("feature_sampling_rate_hz"),
+            name="feature_sampling_rate_hz",
         ),
         timestamp_sha256=_optional_sha256(
             fields.get("timestamp_sha256"),
@@ -985,10 +1131,55 @@ def validate_alignment_feature_provenance(
         raise AlignmentOffsetExportError(
             "alignment offset feature metadata SHA-256 does not match feature input"
         )
+    if (
+        offset.feature_sampling_rate_hz is not None
+        and not math.isclose(
+            offset.feature_sampling_rate_hz,
+            feature_input.sampling_rate_hz,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        raise AlignmentOffsetExportError(
+            "alignment offset feature sampling rate does not match feature input"
+        )
     if offset.timestamp_sha256 != feature_input.timestamps_sha256:
         raise AlignmentOffsetExportError(
             "alignment offset timestamp SHA-256 does not match feature input"
         )
+    if (
+        offset.timestamp_source_sha256 is not None
+        and offset.timestamp_source_sha256 != feature_input.timestamps_sha256
+    ):
+        raise AlignmentOffsetExportError(
+            "alignment offset timestamp source SHA-256 does not match feature input"
+        )
+    if (
+        offset.alignment_time_axis_sample_count is not None
+        and offset.alignment_time_axis_sample_count != feature_input.sample_count
+    ):
+        raise AlignmentOffsetExportError(
+            "alignment offset alignment-axis sample count does not match feature input"
+        )
+    if offset.alignment_time_axis_strategy is not None:
+        if offset.alignment_time_axis_strategy != "endpoint_reconstruction":
+            raise AlignmentOffsetExportError(
+                "alignment offset alignment-axis strategy is unsupported"
+            )
+        expected_axes = build_alignment_time_axes(
+            feature_input.timestamps_us,
+            input_kind=feature_input.input_kind,
+            sampling_rate_hz=feature_input.sampling_rate_hz,
+        )
+        if offset.alignment_time_axis_sampling_rate_hz is None or not math.isclose(
+            offset.alignment_time_axis_sampling_rate_hz,
+            expected_axes.alignment_sampling_rate_hz,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise AlignmentOffsetExportError(
+                "alignment offset alignment-axis sampling rate does not match feature timestamps"
+            )
     if offset.transient_channel_indices != feature_input.transient_channel_indices:
         raise AlignmentOffsetExportError(
             "alignment offset transient channel indices do not match feature input"
@@ -1008,6 +1199,11 @@ def _format_offset(offset: AlignmentOffset) -> str:
         ""
         if offset.total_valid_event_count is None
         else str(offset.total_valid_event_count)
+    )
+    feature_sampling_rate_line = (
+        ""
+        if offset.feature_sampling_rate_hz is None
+        else f"feature_sampling_rate_hz={offset.feature_sampling_rate_hz:.17g}\n"
     )
     provenance = ""
     if offset.alignment_signal_source is not None:
@@ -1044,37 +1240,62 @@ def _format_offset(offset: AlignmentOffset) -> str:
             "alignment_time_axis_strategy="
             f"{offset.alignment_time_axis_strategy}\n"
             "alignment_time_axis_sampling_rate_hz="
-            f"{offset.alignment_time_axis_sampling_rate_hz:.12g}\n"
+            f"{offset.alignment_time_axis_sampling_rate_hz:.17g}\n"
             "alignment_time_axis_sample_count="
             f"{offset.alignment_time_axis_sample_count}\n"
             "canonical_timestamps_modified="
             f"{'true' if offset.canonical_timestamps_modified else 'false'}\n"
         )
+    schema = ""
+    if offset.offset_schema_version is not None:
+        assert offset.canonical_offset_projection_success is not None
+        canonical_offset = (
+            ""
+            if offset.canonical_offset_us is None
+            else f"{offset.canonical_offset_us:.17g}"
+        )
+        schema = (
+            f"offset_schema_version={offset.offset_schema_version}\n"
+            f"offset_domain={offset.offset_domain}\n"
+            f"canonical_offset_us={canonical_offset}\n"
+            "canonical_offset_projection_success="
+            f"{'true' if offset.canonical_offset_projection_success else 'false'}\n"
+        )
     projection = ""
     if offset.work_axis_offset_us is not None:
-        assert offset.projection_delta_us is not None
-        assert offset.projection_delta_median_us is not None
-        assert offset.projection_delta_mad_us is not None
-        assert offset.projection_delta_min_us is not None
-        assert offset.projection_delta_max_us is not None
-        assert offset.projection_delta_range_us is not None
-        assert offset.projection_contributing_match_count is not None
-        projection = (
-            f"work_axis_offset_us={offset.work_axis_offset_us:.6f}\n"
-            f"projection_delta_us={offset.projection_delta_us:.6f}\n"
-            "projection_delta_median_us="
-            f"{offset.projection_delta_median_us:.6f}\n"
-            "projection_delta_mad_us="
-            f"{offset.projection_delta_mad_us:.6f}\n"
-            "projection_delta_min_us="
-            f"{offset.projection_delta_min_us:.6f}\n"
-            "projection_delta_max_us="
-            f"{offset.projection_delta_max_us:.6f}\n"
-            "projection_delta_range_us="
-            f"{offset.projection_delta_range_us:.6f}\n"
-            "projection_contributing_match_count="
-            f"{offset.projection_contributing_match_count}\n"
+        work_axis_line = f"work_axis_offset_us={offset.work_axis_offset_us:.17g}\n"
+        diagnostics = (
+            offset.projection_delta_us,
+            offset.projection_delta_median_us,
+            offset.projection_delta_mad_us,
+            offset.projection_delta_min_us,
+            offset.projection_delta_max_us,
+            offset.projection_delta_range_us,
+            offset.projection_contributing_match_count,
         )
+        if any(value is not None for value in diagnostics):
+            if any(value is None for value in diagnostics):
+                raise AlignmentOffsetExportError(
+                    "canonical offset projection is incomplete"
+                )
+            projection = (
+                work_axis_line
+                + f"projection_delta_us={offset.projection_delta_us:.6f}\n"
+                + "projection_delta_median_us="
+                + f"{offset.projection_delta_median_us:.6f}\n"
+                + "projection_delta_mad_us="
+                + f"{offset.projection_delta_mad_us:.6f}\n"
+                + "projection_delta_min_us="
+                + f"{offset.projection_delta_min_us:.6f}\n"
+                + "projection_delta_max_us="
+                + f"{offset.projection_delta_max_us:.6f}\n"
+                + "projection_delta_range_us="
+                + f"{offset.projection_delta_range_us:.6f}\n"
+                + "projection_contributing_match_count="
+                + f"{offset.projection_contributing_match_count}\n"
+            )
+        else:
+            projection = work_axis_line
     return (
         f"user={offset.user}\n"
         f"action={offset.action}\n"
@@ -1089,6 +1310,8 @@ def _format_offset(offset: AlignmentOffset) -> str:
         f"event_coverage_ratio={coverage}\n"
         f"matched_event_count={matched}\n"
         f"total_valid_event_count={total}\n"
+        f"{feature_sampling_rate_line}"
+        f"{schema}"
         f"{provenance}"
         f"{timestamp_provenance}"
         f"{projection}"
@@ -1112,6 +1335,58 @@ def _validate_offset(offset: AlignmentOffset) -> None:
             "alignment did not succeed; no offset file was written"
         )
     _finite_float(offset.offset_us, name="offset_us")
+    if offset.offset_schema_version is not None:
+        schema_version = _nonnegative_int(
+            offset.offset_schema_version, name="offset_schema_version"
+        )
+        if schema_version != ALIGNMENT_OFFSET_SCHEMA_VERSION:
+            raise AlignmentOffsetExportError(
+                "offset_schema_version is unsupported"
+            )
+        domain = _offset_domain(offset.offset_domain)
+        if offset.canonical_offset_projection_success is None:
+            raise AlignmentOffsetExportError(
+                "schema-v2 offset must declare canonical_offset_projection_success"
+            )
+        if not isinstance(offset.canonical_offset_projection_success, bool):
+            raise AlignmentOffsetExportError(
+                "canonical_offset_projection_success must be a boolean"
+            )
+        if domain == ALIGNMENT_WORK_AXIS_DOMAIN:
+            if offset.work_axis_offset_us is None:
+                raise AlignmentOffsetExportError(
+                    "alignment_work_axis offset requires work_axis_offset_us"
+                )
+            work_offset = _finite_float(
+                offset.work_axis_offset_us, name="work_axis_offset_us"
+            )
+            if not math.isclose(work_offset, offset.offset_us, abs_tol=1e-6):
+                raise AlignmentOffsetExportError(
+                    "alignment_work_axis offset_us must equal work_axis_offset_us"
+                )
+            if offset.canonical_offset_projection_success:
+                if offset.canonical_offset_us is None:
+                    raise AlignmentOffsetExportError(
+                        "successful canonical projection requires canonical_offset_us"
+                    )
+            elif offset.canonical_offset_us is not None:
+                raise AlignmentOffsetExportError(
+                    "failed canonical projection must not publish canonical_offset_us"
+                )
+        elif offset.canonical_offset_us is not None and not math.isclose(
+            offset.canonical_offset_us, offset.offset_us, abs_tol=1e-6
+        ):
+            raise AlignmentOffsetExportError(
+                "canonical_timestamp canonical_offset_us must equal offset_us"
+            )
+    else:
+        _offset_domain(offset.offset_domain)
+    feature_sampling_rate = _optional_finite_float(
+        offset.feature_sampling_rate_hz,
+        name="feature_sampling_rate_hz",
+    )
+    if feature_sampling_rate is not None and feature_sampling_rate <= 0.0:
+        raise AlignmentOffsetExportError("feature_sampling_rate_hz must be positive")
     coverage = _optional_finite_float(
         offset.event_coverage_ratio, name="event_coverage_ratio"
     )
@@ -1182,11 +1457,12 @@ def _validate_offset(offset: AlignmentOffset) -> None:
             offset.timestamp_source_duplicate_step_count,
             name="timestamp_source_duplicate_step_count",
         )
-        if offset.alignment_time_axis_strategy not in {
-            "canonical_strict_copy",
-            "strict_reconstruction",
-            "raw_endpoint_reconstruction",
-        }:
+        allowed_strategies = {"endpoint_reconstruction"}
+        if offset.offset_schema_version is None:
+            allowed_strategies.update(
+                {"canonical_strict_copy", "strict_reconstruction", "raw_endpoint_reconstruction"}
+            )
+        if offset.alignment_time_axis_strategy not in allowed_strategies:
             raise AlignmentOffsetExportError(
                 "alignment_time_axis_strategy is unsupported"
             )
@@ -1210,8 +1486,7 @@ def _validate_offset(offset: AlignmentOffset) -> None:
             raise AlignmentOffsetExportError(
                 "canonical_timestamps_modified must be false"
             )
-    projection = (
-        offset.work_axis_offset_us,
+    projection_diagnostics = (
         offset.projection_delta_us,
         offset.projection_delta_median_us,
         offset.projection_delta_mad_us,
@@ -1220,15 +1495,29 @@ def _validate_offset(offset: AlignmentOffset) -> None:
         offset.projection_delta_range_us,
         offset.projection_contributing_match_count,
     )
-    if any(value is not None for value in projection):
-        if any(value is None for value in projection):
+    if any(value is not None for value in projection_diagnostics):
+        if offset.work_axis_offset_us is None or any(
+            value is None for value in projection_diagnostics
+        ):
             raise AlignmentOffsetExportError(
                 "canonical offset projection is incomplete"
             )
+        canonical_offset = (
+            offset.canonical_offset_us
+            if offset.offset_schema_version is not None
+            and offset.canonical_offset_us is not None
+            else (
+                offset.work_axis_offset_us + offset.projection_delta_us
+                if offset.offset_schema_version is not None
+                and offset.work_axis_offset_us is not None
+                and offset.projection_delta_us is not None
+                else offset.offset_us
+            )
+        )
         _validate_projection(
             AlignmentOffsetProjection(
                 work_axis_offset_us=offset.work_axis_offset_us,  # type: ignore[arg-type]
-                canonical_offset_us=offset.offset_us,
+                canonical_offset_us=canonical_offset,
                 projection_delta_us=offset.projection_delta_us,  # type: ignore[arg-type]
                 projection_delta_median_us=offset.projection_delta_median_us,  # type: ignore[arg-type]
                 projection_delta_mad_us=offset.projection_delta_mad_us,  # type: ignore[arg-type]
@@ -1298,6 +1587,14 @@ def _optional_nonempty_string(value: object, *, name: str) -> str | None:
         return None
     if not isinstance(value, str) or not value or value.strip() != value:
         raise AlignmentOffsetExportError(f"{name} must be a nonempty string")
+    return value
+
+
+def _offset_domain(value: object) -> str:
+    if not isinstance(value, str) or value not in _OFFSET_DOMAINS:
+        raise AlignmentOffsetExportError(
+            "offset_domain must be alignment_work_axis or canonical_timestamp"
+        )
     return value
 
 

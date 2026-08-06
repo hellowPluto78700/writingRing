@@ -86,11 +86,23 @@ def create_segmentation_verification_figure(
     boundary_mode: str,
     alignment_offset_us: float | None,
     feature_values: np.ndarray | None = None,
+    alignment_timestamps_us: np.ndarray | None = None,
+    alignment_time_axis_strategy: str | None = None,
+    canonical_offset_projection_success: bool | None = None,
 ) -> SegmentationVerificationResult:
     """Render panels from caller-supplied feature values and final boundaries."""
 
     _validate_config(config)
     timestamps = _timestamps(ring_timestamps_us)
+    display_timestamps = (
+        timestamps
+        if alignment_timestamps_us is None
+        else _timestamps(alignment_timestamps_us)
+    )
+    if len(display_timestamps) != len(timestamps):
+        raise SegmentationVerificationError(
+            "alignment_timestamps_us must match the canonical timestamp count"
+        )
     score = _score(transient_score, sample_count=len(timestamps))
     if feature_values is not None:
         try:
@@ -134,8 +146,8 @@ def create_segmentation_verification_figure(
     output = Path(output_path)
     _validate_output_path(output, overwrite=config.overwrite)
 
-    ring_start = float(timestamps[0])
-    elapsed = (timestamps - ring_start) / 1_000_000.0
+    display_start = float(display_timestamps[0])
+    elapsed = (display_timestamps - display_start) / 1_000_000.0
     duration = float(elapsed[-1])
     panel_count = max(1, math.ceil(duration / config.panel_duration_s))
     figure, axes = plt.subplots(
@@ -149,12 +161,14 @@ def create_segmentation_verification_figure(
     y_max = float(np.quantile(score, 0.995) * 1.1)
     if not math.isfinite(y_max) or y_max <= 0.0:
         y_max = max(float(np.max(score)), 1.0)
-    label_elapsed = np.asarray(
-        [(marker.timestamp_us - ring_start) / 1_000_000.0 for marker in markers],
-        dtype=np.float64,
+    label_elapsed = _label_elapsed_on_display(
+        markers,
+        canonical_timestamps_us=timestamps,
+        display_timestamps_us=display_timestamps,
+        display_start_us=display_start,
     )
     event_elapsed = (
-        events["aligned_event_timestamp_us"].to_numpy(dtype=np.float64) - ring_start
+        events["aligned_event_timestamp_us"].to_numpy(dtype=np.float64) - display_start
     ) / 1_000_000.0
     for panel_index, axis in enumerate(axes_array):
         panel_start = panel_index * config.panel_duration_s
@@ -172,7 +186,8 @@ def create_segmentation_verification_figure(
             axis,
             samples,
             timestamps_us=timestamps,
-            ring_start_us=ring_start,
+            display_timestamps_us=display_timestamps,
+            ring_start_us=display_start,
             panel_start_s=panel_start,
             panel_stop_s=panel_stop,
             alpha=config.segment_alpha,
@@ -223,6 +238,19 @@ def create_segmentation_verification_figure(
             if aligned_mode or overlay_events
             else ""
         )
+        + (
+            "\nAlignment domain: "
+            + (alignment_time_axis_strategy or "canonical_timestamp")
+            + " work axis; canonical projection: "
+            + (
+                "available"
+                if canonical_offset_projection_success is not False
+                else "unavailable"
+            )
+            + "; Board segmentation uses sample-index mapping on the work axis"
+            if aligned_mode
+            else ""
+        )
     )
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -252,6 +280,7 @@ def _draw_segments(
     samples: Sequence[SegmentedSample | BoardEventSegmentedSample],
     *,
     timestamps_us: np.ndarray,
+    display_timestamps_us: np.ndarray,
     ring_start_us: float,
     panel_start_s: float,
     panel_stop_s: float,
@@ -259,8 +288,13 @@ def _draw_segments(
     boundary_mode: str,
 ) -> None:
     for segment_index, sample in enumerate(samples):
-        start_us, stop_us = _sample_window_us(
-            sample, timestamps_us=timestamps_us, boundary_mode=boundary_mode
+        start_index = sample.start_sample_index
+        stop_index = sample.stop_sample_index_exclusive
+        start_us = float(display_timestamps_us[start_index])
+        stop_us = (
+            float(display_timestamps_us[stop_index])
+            if stop_index < len(display_timestamps_us)
+            else float(np.nextafter(display_timestamps_us[-1], np.inf))
         )
         start = (start_us - ring_start_us) / 1_000_000.0
         stop = (stop_us - ring_start_us) / 1_000_000.0
@@ -417,6 +451,37 @@ def _labels(values: Sequence[SegmentLabel]) -> tuple[SegmentLabel, ...]:
     return labels
 
 
+def _label_elapsed_on_display(
+    labels: Sequence[SegmentLabel],
+    *,
+    canonical_timestamps_us: np.ndarray,
+    display_timestamps_us: np.ndarray,
+    display_start_us: float,
+) -> np.ndarray:
+    if np.array_equal(canonical_timestamps_us, display_timestamps_us):
+        mapped = np.asarray([label.timestamp_us for label in labels], dtype=np.float64)
+    else:
+        mapped = np.asarray(
+            [
+                display_timestamps_us[
+                    min(
+                        int(
+                            np.searchsorted(
+                                canonical_timestamps_us,
+                                label.timestamp_us,
+                                side="left",
+                            )
+                        ),
+                        len(display_timestamps_us) - 1,
+                    )
+                ]
+                for label in labels
+            ],
+            dtype=np.float64,
+        )
+    return (mapped - display_start_us) / 1_000_000.0
+
+
 def _validate_samples(
     samples: Sequence[SegmentedSample | BoardEventSegmentedSample],
     timestamps: np.ndarray,
@@ -435,15 +500,19 @@ def _validate_samples(
             raise SegmentationVerificationError(
                 "label mode samples must be SegmentedSample values"
             )
-        start, end = _sample_window_us(
-            sample, timestamps_us=timestamps, boundary_mode=boundary_mode
-        )
-        if not start < end:
-            raise SegmentationVerificationError("final segmentation window is empty")
-        if previous_end is not None and previous_end > start:
-            raise SegmentationVerificationError("final segmentation windows overlap")
         if not 0 <= sample.start_sample_index < sample.stop_sample_index_exclusive <= len(timestamps):
             raise SegmentationVerificationError("segment sample indices are outside Ring range")
+        if boundary_mode == "aligned_board_events":
+            start = float(sample.start_sample_index)
+            end = float(sample.stop_sample_index_exclusive)
+        else:
+            start, end = _sample_window_us(
+                sample, timestamps_us=timestamps, boundary_mode=boundary_mode
+            )
+            if not start < end:
+                raise SegmentationVerificationError("final segmentation window is empty")
+        if previous_end is not None and previous_end > start:
+            raise SegmentationVerificationError("final segmentation windows overlap")
         previous_end = end
 
 

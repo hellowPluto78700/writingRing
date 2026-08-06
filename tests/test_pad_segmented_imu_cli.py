@@ -32,8 +32,8 @@ def test_padding_cli_skips_overflow_and_publishes_remaining_segments(tmp_path: P
         "--input-root", str(root), "--output-root", str(output), "--target-length", "4",
     ]) == 0
     padded = np.load(
-        output / "user_a" / "action_one" / "user_a_action_one_paddedIMU.npy",
+        output / "user_a" / "action_one" / "user_a_action_one_paddedSpikeIMU.npy",
         allow_pickle=False,
     )
-    assert padded.shape == (1, 4, 6)
+    assert padded.shape == (1, 4, 21)
     assert "skipped 1 overlong segments" in capsys.readouterr().out

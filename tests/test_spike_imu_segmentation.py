@@ -13,6 +13,7 @@ from scripts import align_ring_board, encode_spikes, segment_ring_imu
 from writingring.alignment_io import (
     AlignmentOffset,
     AlignmentOffsetExportError,
+    build_alignment_time_axes,
     read_alignment_offset_txt,
     write_alignment_offset_txt,
 )
@@ -22,6 +23,7 @@ from writingring.board_event_segmentation import (
     segment_user_action_by_aligned_board_events,
 )
 from writingring.discovery import discover_recordings
+from writingring.gravity import GravityRemovalConfig
 from writingring.imu_preprocessing import PREPROCESSED_IMU_COLUMNS
 from writingring.preprocessing_io import PREPROCESSED_IMU_UNITS, sha256_file
 from writingring.recording_features import (
@@ -29,6 +31,7 @@ from writingring.recording_features import (
     SPIKE_IMU_FEATURE_SCHEMA,
     SPIKE_IMU_TRANSIENT_CHANNEL_NAMES,
     RecordingFeatureInput,
+    load_raw_ring_features,
     load_spike_imu_features,
     validate_common_feature_sampling_rate,
 )
@@ -657,7 +660,10 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     assert offset.timestamp_sha256 == feature_input.timestamps_sha256
     assert offset.timestamp_source_sha256 == feature_input.timestamps_sha256
     assert offset.timestamp_source_duplicate_step_count == 1
-    assert offset.alignment_time_axis_strategy == "strict_reconstruction"
+    assert offset.alignment_time_axis_strategy == "endpoint_reconstruction"
+    assert offset.feature_sampling_rate_hz == pytest.approx(
+        feature_input.sampling_rate_hz
+    )
     assert offset.alignment_time_axis_sample_count == len(timestamps)
     assert offset.canonical_timestamps_modified is False
     assert offset.work_axis_offset_us == pytest.approx(0.0)
@@ -673,7 +679,16 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     assert report["source_hash_verified"] is True
     assert report["timestamp_source"]["sha256"] == feature_input.timestamps_sha256
     assert report["timestamp_source"]["duplicate_step_count"] == 1
-    assert report["alignment_time_axis"]["strategy"] == "strict_reconstruction"
+    assert report["feature_sampling_rate_hz"] == pytest.approx(
+        feature_input.sampling_rate_hz
+    )
+    assert report["alignment_time_axis"]["strategy"] == "endpoint_reconstruction"
+    assert report["alignment_time_axis"]["canonical_start_us"] == pytest.approx(
+        timestamps[0]
+    )
+    assert report["alignment_time_axis"]["canonical_stop_us"] == pytest.approx(
+        timestamps[-1]
+    )
     assert report["alignment_time_axis"]["canonical_timestamps_modified"] is False
     assert report["canonical_offset_projection"]["success"] is True
     assert report["canonical_offset_projection"]["exported_offset_us"] == pytest.approx(0.0)
@@ -702,7 +717,7 @@ def test_real_raw_alignment_accepts_duplicate_ring_timestamps(tmp_path: Path) ->
         .read_text(encoding="utf-8")
     )
     assert report["timestamp_source"]["duplicate_step_count"] > 0
-    assert report["alignment_time_axis"]["strategy"] == "raw_endpoint_reconstruction"
+    assert report["alignment_time_axis"]["strategy"] == "endpoint_reconstruction"
     assert report["alignment_time_axis"]["canonical_timestamps_modified"] is False
     offset = read_alignment_offset_txt(
         offset_root / "user_1" / "action_4" / "2_ring_board_offset.txt",
@@ -713,12 +728,145 @@ def test_real_raw_alignment_accepts_duplicate_ring_timestamps(tmp_path: Path) ->
     assert offset.timestamp_source_duplicate_step_count > 0
     assert offset.canonical_timestamps_modified is False
     assert offset.work_axis_offset_us is not None
-    assert offset.projection_delta_us is not None
-    assert offset.offset_us == pytest.approx(
-        offset.work_axis_offset_us + offset.projection_delta_us
+    assert offset.offset_domain == "alignment_work_axis"
+    assert offset.offset_us == pytest.approx(offset.work_axis_offset_us)
+    assert offset.canonical_offset_us is None
+    assert offset.canonical_offset_projection_success is False
+    assert report["work_axis_alignment_success"] is True
+    assert report["canonical_offset_projection_success"] is False
+    assert report["alignment_success"] is True
+    assert report["canonical_offset_projection"]["representable"] is False
+
+
+@pytest.mark.skipif(
+    not (
+        (Path("data") / "user_0" / "0" / "0_ring_0.bin").is_file()
+        and (
+            Path("outputs")
+            / "action0_pipeline"
+            / "raw"
+            / "aligned-board-events"
+            / "spikeEncoding"
+            / "custom-wavelet"
+            / "user_0"
+            / "0"
+            / "0"
+            / "spikeIMU.npy"
+        ).is_file()
+    ),
+    reason="real user_0/action_0/dataset_0 SpikeIMU artifact is unavailable",
+)
+def test_real_raw_and_spike_alignment_are_representation_invariant(
+    tmp_path: Path,
+) -> None:
+    data_root = Path("data")
+    spike_root = (
+        Path("outputs")
+        / "action0_pipeline"
+        / "raw"
+        / "aligned-board-events"
+        / "spikeEncoding"
+        / "custom-wavelet"
     )
-    report_offset = report["canonical_offset_projection"]["exported_offset_us"]
-    assert report_offset == pytest.approx(offset.offset_us)
+    recording = next(
+        item
+        for item in discover_recordings(data_root)
+        if item.user == "user_0" and item.action == "0" and item.dataset_id == 0
+    )
+    raw_features = load_raw_ring_features(
+        recording,
+        gravity_config=GravityRemovalConfig(
+            gravity_removal_method="raw",
+            strict_calibration=False,
+        ),
+    )
+    spike_features = load_spike_imu_features(recording, spike_root=spike_root)
+    np.testing.assert_array_equal(
+        raw_features.timestamps_us,
+        spike_features.timestamps_us,
+    )
+    np.testing.assert_allclose(
+        raw_features.values[:, 3:9],
+        spike_features.values[:, 15:21],
+        rtol=0.0,
+        atol=1e-6,
+    )
+    raw_axes = build_alignment_time_axes(
+        raw_features.timestamps_us,
+        input_kind="raw-ring",
+        sampling_rate_hz=raw_features.sampling_rate_hz,
+    )
+    spike_axes = build_alignment_time_axes(
+        spike_features.timestamps_us,
+        input_kind="spike-imu",
+        sampling_rate_hz=spike_features.sampling_rate_hz,
+    )
+    np.testing.assert_array_equal(
+        raw_axes.work_timestamps_us,
+        spike_axes.work_timestamps_us,
+    )
+
+    reports: dict[str, dict[str, object]] = {}
+    offsets: dict[str, AlignmentOffset] = {}
+    for input_kind in ("raw-ring", "spike-imu"):
+        output_root = tmp_path / input_kind
+        arguments = [
+            "--data-root", str(data_root),
+            "--user", "user_0", "--action", "0", "--dataset-id", "0",
+            "--input-kind", input_kind,
+            "--offset-output-root", str(output_root / "offsets"),
+            "--report-output-root", str(output_root / "reports"),
+            "--verification-output-root", str(output_root / "verification"),
+            "--overwrite-offset", "--overwrite-report", "--overwrite-verification",
+        ]
+        if input_kind == "spike-imu":
+            arguments.extend(["--spike-root", str(spike_root)])
+        assert align_ring_board.main(arguments) == 0
+        report_path = (
+            output_root / "reports" / "user_0" / "action_0" / "0_alignment_report.json"
+        )
+        reports[input_kind] = json.loads(report_path.read_text(encoding="utf-8"))
+        offsets[input_kind] = read_alignment_offset_txt(
+            output_root / "offsets" / "user_0" / "action_0" / "0_ring_board_offset.txt",
+            expected_user="user_0",
+            expected_action="0",
+            expected_dataset_id=0,
+        )
+
+    raw_report = reports["raw-ring"]
+    spike_report = reports["spike-imu"]
+    for key in (
+        "work_axis_alignment_success",
+        "alignment_success",
+        "canonical_offset_projection_success",
+        "matched_event_count",
+        "fully_matched_touch_pair_count",
+    ):
+        assert raw_report[key] == spike_report[key]
+    for key in (
+        "event_coverage_ratio",
+        "median_normalized_peak_distance",
+        "work_axis_offset_us",
+    ):
+        assert raw_report[key] == pytest.approx(spike_report[key])
+    assert raw_report["alignment_time_axis"] == spike_report["alignment_time_axis"]
+    assert raw_report["feature_sampling_rate_hz"] == pytest.approx(
+        raw_features.sampling_rate_hz
+    )
+    assert spike_report["feature_sampling_rate_hz"] == pytest.approx(
+        spike_features.sampling_rate_hz
+    )
+    assert offsets["raw-ring"].work_axis_offset_us == pytest.approx(
+        offsets["spike-imu"].work_axis_offset_us
+    )
+    assert offsets["raw-ring"].offset_us == pytest.approx(
+        offsets["spike-imu"].offset_us
+    )
+    assert offsets["raw-ring"].offset_domain == "alignment_work_axis"
+    assert offsets["raw-ring"].canonical_offset_us is None
+    assert offsets["raw-ring"].canonical_offset_projection_success is False
+    assert offsets["raw-ring"].offset_us == pytest.approx(84_340.875)
+    assert offsets["raw-ring"].work_axis_offset_us == pytest.approx(84_340.875)
 
 
 @pytest.mark.parametrize(

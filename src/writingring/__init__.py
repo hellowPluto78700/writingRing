@@ -36,6 +36,8 @@ from writingring.event_alignment import (
     smooth_transient_score,
 )
 from writingring.alignment_io import (
+    ALIGNMENT_OFFSET_SCHEMA_VERSION,
+    ALIGNMENT_WORK_AXIS_DOMAIN,
     AlignmentOffset,
     AlignmentOffsetExportError,
     AlignmentOffsetProjection,
@@ -45,6 +47,7 @@ from writingring.alignment_io import (
     build_alignment_offset_path,
     build_alignment_time_axes,
     build_alignment_timestamps,
+    build_offset_domain_timestamps,
     extract_alignment_offset,
     project_alignment_offset_to_canonical,
     read_alignment_offset_txt,
@@ -280,6 +283,8 @@ __all__ = [
     "AlignmentFailureError",
     "AlignmentLabel",
     "AlignmentOffset",
+    "ALIGNMENT_OFFSET_SCHEMA_VERSION",
+    "ALIGNMENT_WORK_AXIS_DOMAIN",
     "AlignmentOffsetExportError",
     "AlignmentOffsetProjection",
     "AlignmentTimeAxes",
@@ -299,6 +304,7 @@ __all__ = [
     "build_alignment_offset_path",
     "build_alignment_time_axes",
     "build_alignment_timestamps",
+    "build_offset_domain_timestamps",
     "build_alignment_verification_path",
     "build_touch_pair_match_diagnostics",
     "compute_transient_score",

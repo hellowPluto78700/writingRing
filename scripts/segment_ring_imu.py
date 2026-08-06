@@ -408,6 +408,7 @@ def _write_label_verifications(
 
     from writingring.alignment_io import (
         build_alignment_offset_path,
+        build_offset_domain_timestamps,
         validate_alignment_feature_provenance,
     )
     from writingring.board_event_segmentation import (
@@ -473,6 +474,9 @@ def _write_label_verifications(
         )
         events = None
         offset_us = None
+        alignment_timestamps = None
+        alignment_strategy = None
+        canonical_projection_success = None
         if overlay_aligned_board_events:
             assert alignment_offset_root is not None
             offset = read_recording_alignment_offset(
@@ -491,7 +495,15 @@ def _write_label_verifications(
             events, _ = align_board_event_tables(
                 prepared.events, prepared.touch_pairs, offset=offset
             )
-            offset_us = offset.offset_us
+            offset_us = offset.boundary_offset_us
+            alignment_timestamps = build_offset_domain_timestamps(
+                timestamps,
+                offset_domain=offset.offset_domain,
+                input_kind=feature_input.input_kind,
+                feature_sampling_rate_hz=feature_input.sampling_rate_hz,
+            )
+            alignment_strategy = offset.alignment_time_axis_strategy
+            canonical_projection_success = offset.canonical_offset_projection_success
         create_segmentation_verification_figure(
             ring_dataframe=None,
             feature_values=feature_input.values,
@@ -514,6 +526,9 @@ def _write_label_verifications(
             dataset_id=recording.dataset_id,
             boundary_mode="label",
             alignment_offset_us=offset_us,
+            alignment_timestamps_us=alignment_timestamps,
+            alignment_time_axis_strategy=alignment_strategy,
+            canonical_offset_projection_success=canonical_projection_success,
         )
     return len(recordings)
 

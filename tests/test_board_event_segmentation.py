@@ -231,6 +231,39 @@ def test_single_touch_generates_context_window_and_event_targets() -> None:
     assert {skipped.skip_reason for skipped in result.skipped} == {"no_complete_touch_pair"}
 
 
+def test_work_axis_boundary_lookup_slices_canonical_feature_indices() -> None:
+    canonical = np.array(
+        [0.0, 900_000.0, 1_100_000.0, 1_600_000.0, 2_500_000.0, 3_000_000.0]
+    )
+    work = np.array(
+        [0.0, 1_000_000.0, 1_250_000.0, 1_750_000.0, 2_500_000.0, 3_000_000.0]
+    )
+    imu = np.column_stack([np.arange(len(canonical), dtype=np.float64)] * 2)
+    events, pairs = _aligned_tables([(1_200_000.0, 1_800_000.0, False)])
+
+    result = segment_recording_by_aligned_board_events(
+        feature_values=imu,
+        timestamps_us=canonical,
+        labels=_labels((1_000_000.0, "a"), (3_000_000.0, "b")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+        boundary_timestamps_us=work,
+        config=BoardEventSegmentationConfig(
+            pre_press_context_us=0.0,
+            post_lift_context_us=0.0,
+        ),
+    )
+
+    assert len(result.samples) == 1
+    sample = result.samples[0]
+    assert (sample.start_sample_index, sample.stop_sample_index_exclusive) == (2, 4)
+    np.testing.assert_array_equal(sample.imu, imu[2:4])
+    assert sample.final_start_timestamp_us == pytest.approx(1_100_000.0)
+    assert sample.final_end_timestamp_us == pytest.approx(2_500_000.0)
+    assert sample.boundary_start_timestamp_us == pytest.approx(1_200_000.0)
+    assert sample.boundary_end_timestamp_us == pytest.approx(1_800_000.0)
+
+
 def test_multiple_touches_and_transient_events_are_preserved_in_targets() -> None:
     imu, timestamps = _ring()
     events, pairs = _aligned_tables(

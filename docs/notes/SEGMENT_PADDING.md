@@ -1,13 +1,23 @@
 # 全局 segment 长度分析与固定长度 padding
 
-`scripts/analyze_segment_lengths.py` 和 `scripts/pad_segmented_imu.py` 只读取已完成的 variable-length segmentation 输出；它们不读取任何 Ring/Board 原始数据、timestamp label、alignment offset 或 gravity-removal 配置。
+`scripts/analyze_segment_lengths.py` 和 `scripts/pad_segmented_imu.py` 只读取已完成的 variable-length SpikeIMU segmentation 输出；它们不读取任何 Ring/Board 原始数据、timestamp label、alignment offset 或 gravity-removal 配置。
 
-先对一种 segmentation/preprocessing 方法的一个根目录执行全局分析。Padding 保留输入 IMU 的通道数；新的九通道 schema 会得到 `(N, T, 9)`，并且同一输入根不得混用六通道与九通道导出：
+输入根下每个 user/action package 必须包含：
+
+```text
+<user>_action_<action>_spikeIMU.npy          # (sample_count, 21)
+<user>_action_<action>_labels.npy            # (segment_count,)
+<user>_action_<action>_segment_offsets.npy   # (segment_count + 1,)
+<user>_action_<action>_segment_lengths.npy   # (segment_count,)
+<user>_action_<action>_segmentation_summary.json
+```
+
+summary 必须声明 `input_kind=spike-imu`、`feature_schema=signed_wavelet_events_plus_imu_v1` 和 `channel_count=21`。旧的 `rawIMU`、6 通道或 9 通道 segmentation 输出不属于此 padding loader 的输入契约。
 
 ```bash
 conda run --no-capture-output -n writingring-viz \
   python scripts/analyze_segment_lengths.py \
-  --input-root outputs/segmentedIMU_LowPassFiltering
+  --input-root outputs/action0_pipeline/low-pass/label/segmentation
 ```
 
 默认输出到 `input_root/padding_analysis/`，包含 JSON 机器报告、全局统计和候选长度 CSV、可追溯异常 CSV，以及 histogram/ECDF Matplotlib 图。JSON 记录每个 lengths 文件的相对路径、segment 数和 maximum，因此 padding 会拒绝使用已过期的分析报告。
@@ -23,12 +33,12 @@ conda run --no-capture-output -n writingring-viz \
 ```bash
 conda run --no-capture-output -n writingring-viz \
   python scripts/pad_segmented_imu.py \
-  --input-root outputs/segmentedIMU_LowPassFiltering \
-  --analysis-report outputs/segmentedIMU_LowPassFiltering/padding_analysis/segment_length_analysis.json \
+  --input-root outputs/action0_pipeline/low-pass/label/segmentation \
+  --analysis-report outputs/action0_pipeline/low-pass/label/segmentation/padding_analysis/segment_length_analysis.json \
   --recommendation pure-padding
 ```
 
-默认输出为 `outputs/segmentedIMU_LowPassFiltering_padded_<target>/`。每个 user/action 会生成 `(N, T, 6)` 的 `paddedIMU`、对应的 retained labels、`valid_lengths`、boolean `valid_mask`、padding manifest 和 summary。Board-assisted 输入会额外生成 `(N, T, 4)` boolean target，padding 区域恒为 `False`。Manifest 对每个输入 segment 都保留一行，`exported=false` 和 `skip_reason=length_exceeds_target` 表示被跳过；`output_segment_index` 对应 padded arrays 的索引。
+默认输出为独立的 padded root。每个 user/action 会生成 `(segment_count, target_length, 21)` 的 `*_paddedSpikeIMU.npy`、对应的 retained labels、`valid_lengths`、boolean `valid_mask`、padding manifest 和 summary。Board-assisted 输入会额外生成 `(segment_count, target_length, 4)` boolean target，padding 区域恒为 `False`。Manifest 对每个输入 segment 都保留一行，`exported=false` 和 `skip_reason=length_exceeds_target` 表示被跳过；`output_segment_index` 对应 padded arrays 的索引。
 
 Padding 固定在右侧，超过 target 的 segment 不会截断或重采样，而是明确跳过且不会修改输入。所有包先完成验证，再写入临时根目录并一次性发布；失败不会留下部分输出。
 

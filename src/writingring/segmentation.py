@@ -656,6 +656,7 @@ def _summary(
         "channel_names": list(first_feature.channel_names),
         "units": list(first_feature.units),
         "sampling_rate_hz": sampling_rate_hz,
+        "feature_sampling_rate_hz": sampling_rate_hz,
         "sample_count_by_recording": {
             str(feature.dataset_id): feature.sample_count for feature in feature_inputs
         },

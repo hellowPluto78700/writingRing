@@ -511,6 +511,12 @@ expected_user_action_count = int(sys.argv[3])
 summary = json.loads(summary_path.read_text(encoding="utf-8"))
 if summary.get("input_root") != expected_input_root:
     raise SystemExit(f"padded summary input root mismatch: {summary_path}")
+if summary.get("input_kind") != "spike-imu":
+    raise SystemExit(f"padded summary is not SpikeIMU: {summary_path}")
+if summary.get("feature_schema") != "signed_wavelet_events_plus_imu_v1":
+    raise SystemExit(f"padded summary feature schema mismatch: {summary_path}")
+if summary.get("channel_count") != 21:
+    raise SystemExit(f"padded summary channel count is not 21: {summary_path}")
 if summary.get("processed_user_action_count") != expected_user_action_count:
     raise SystemExit(
         f"padded package count {summary.get('processed_user_action_count')} "

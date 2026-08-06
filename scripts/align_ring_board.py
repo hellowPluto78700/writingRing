@@ -106,6 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         detect_transient_peak_regions,
         select_board_interval_from_presses,
     )
+    from writingring.gravity import GravityRemovalConfig
     from writingring.recording_features import (
         RecordingFeatureError,
         load_recording_features,
@@ -131,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 spike_root=args.spike_root,
             )
             canonical_timestamps = feature_input.timestamps_us
-            alignment_sampling_rate_hz = feature_input.sampling_rate_hz
+            feature_sampling_rate_hz = feature_input.sampling_rate_hz
             timestamp_source_sha256 = feature_input.timestamps_sha256
             transient_score = compute_transient_score_array(
                 feature_input.values[:, feature_input.transient_channel_indices]
@@ -144,7 +145,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             canonical_timestamps = ring_data.dataframe["timestamp"].to_numpy(
                 dtype=float, copy=True
             )
-            alignment_sampling_rate_hz = ring_data.validation.inferred_sampling_rate_hz
+            # Raw alignment retains its historical direct Ring transient
+            # signal, whose nominal feature rate is the same 200 Hz contract
+            # used by raw feature preprocessing.  Timestamp-derived rate
+            # belongs exclusively to the alignment work axis below.
+            feature_sampling_rate_hz = float(GravityRemovalConfig().sampling_rate_hz)
             timestamp_source_sha256 = sha256_array(canonical_timestamps)
             transient_score = compute_transient_score(
                 ring_data.dataframe,
@@ -154,7 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         time_axes = build_alignment_time_axes(
             canonical_timestamps,
             input_kind=args.input_kind,
-            sampling_rate_hz=alignment_sampling_rate_hz,
+            sampling_rate_hz=feature_sampling_rate_hz,
         )
         canonical_timestamps = time_axes.canonical_timestamps_us
         alignment_timestamps = time_axes.work_timestamps_us
@@ -178,6 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         projection = None
+        projection_diagnostics = None
         projection_error: str | None = None
         if result.success:
             try:
@@ -185,19 +191,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     result,
                     canonical_timestamps,
                     alignment_timestamps,
-                    sampling_rate_hz=time_axes.sampling_rate_hz,
-                    # Raw Ring's legacy endpoint axis can span timestamp
-                    # quantisation/duplicate runs.  Keep the projection
-                    # diagnostic warning at half a sample, but use the
-                    # empirically validated raw-recording failure guard so
-                    # existing recordings are not rejected before Board
-                    # segmentation can consume their canonical offset.
-                    failure_threshold_samples=(
-                        20.0 if args.input_kind == "raw-ring" else 1.5
-                    ),
+                    sampling_rate_hz=time_axes.alignment_sampling_rate_hz,
                 )
             except AlignmentOffsetExportError as error:
                 projection_error = str(error)
+                projection_diagnostics = getattr(error, "projection_diagnostics", None)
         report_path = _report_path(
             args.report_output_root,
             user=args.user,
@@ -211,15 +209,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dataset_id": args.dataset_id,
             },
             "warnings": list(result.warnings),
-            "best_offset_us": (
-                result.best_offset_us
-                if projection is None
-                else projection.canonical_offset_us
-            ),
+            "best_offset_us": result.best_offset_us,
             "work_axis_offset_us": result.best_offset_us,
-            "alignment_success": result.success and projection is not None,
+            "canonical_offset_us": (
+                None if projection is None else projection.canonical_offset_us
+            ),
+            "offset_domain": "alignment_work_axis",
+            "work_axis_alignment_success": result.success,
+            "canonical_offset_projection_success": projection is not None,
+            "alignment_success": result.success,
             "time_mapping": "ring_timestamp_us = board_timestamp_us + offset_us",
             "label_time_domain": args.label_time_domain,
+            "feature_sampling_rate_hz": feature_sampling_rate_hz,
             "timestamp_source": {
                 "sha256": timestamp_source_sha256,
                 "ordering": alignment_time_axis["ordering"],
@@ -236,9 +237,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         if projection is None:
             alignment_report["canonical_offset_projection"] = {
                 "success": False,
+                "representable": False if projection_error is not None else None,
                 "error": projection_error
                 or "alignment did not produce a successful work-axis result",
             }
+            if projection_diagnostics is not None:
+                alignment_report["canonical_offset_projection"] |= {
+                    "work_axis_offset_us": projection_diagnostics.work_axis_offset_us,
+                    "projection_delta_us": projection_diagnostics.projection_delta_us,
+                    "projection_delta_median_us": projection_diagnostics.projection_delta_median_us,
+                    "projection_delta_mad_us": projection_diagnostics.projection_delta_mad_us,
+                    "projection_delta_min_us": projection_diagnostics.projection_delta_min_us,
+                    "projection_delta_max_us": projection_diagnostics.projection_delta_max_us,
+                    "projection_delta_range_us": projection_diagnostics.projection_delta_range_us,
+                    "contributing_match_count": projection_diagnostics.contributing_match_count,
+                }
+            if projection_error is not None:
+                alignment_report["warnings"] = [
+                    *result.warnings,
+                    f"canonical projection unavailable: {projection_error}",
+                ]
         else:
             alignment_report["canonical_offset_projection"] = {
                 "success": True,
@@ -272,17 +290,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "timestamp_source_hash_verified": True,
             }
         _write_report(report_path, alignment_report, overwrite=args.overwrite_report)
-        if not result.success or projection is None:
+        if not result.success:
             raise AlignmentFailureError(
-                projection_error
-                or "alignment did not succeed; offset and verification outputs were not created"
+                "alignment did not succeed; offset and verification outputs were not created"
             )
         offset = extract_alignment_offset(
-            result,
+            replace(result, report=alignment_report),
             user=args.user,
             action=args.action,
             dataset_id=args.dataset_id,
             projection=projection,
+            projection_diagnostics=projection_diagnostics,
         )
         if feature_input is not None:
             offset = replace(
@@ -294,9 +312,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timestamp_sha256=feature_input.timestamps_sha256,
                 transient_channel_indices=feature_input.transient_channel_indices,
                 spike_event_channels_used=False,
+                feature_sampling_rate_hz=feature_input.sampling_rate_hz,
             )
         offset = replace(
             offset,
+            feature_sampling_rate_hz=feature_sampling_rate_hz,
             timestamp_source_sha256=timestamp_source_sha256,
             timestamp_source_ordering=str(alignment_time_axis["ordering"]),
             timestamp_source_duplicate_step_count=int(
@@ -354,6 +374,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             user=args.user,
             action=args.action,
             dataset_id=args.dataset_id,
+            alignment_time_axis_strategy=time_axes.strategy,
+            canonical_offset_projection_success=projection is not None,
         )
         _write_report(
             report_path,

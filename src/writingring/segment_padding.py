@@ -1,4 +1,4 @@
-"""Validate, analyze, and right-pad completed variable-length IMU exports.
+"""Validate, analyze, and right-pad completed variable-length SpikeIMU exports.
 
 This module deliberately consumes only the files written by the segmentation
 exporters.  It neither discovers recordings nor reads raw Ring, Board, label,
@@ -24,6 +24,8 @@ DEFAULT_CANDIDATE_LENGTHS: Final[tuple[int, ...]] = (
     256, 320, 400, 480, 512, 600, 640, 768, 800, 1024,
 )
 DEFAULT_SAMPLING_RATE_HZ: Final[float] = 200.0
+SPIKE_IMU_FEATURE_SCHEMA: Final[str] = "signed_wavelet_events_plus_imu_v1"
+SPIKE_IMU_CHANNEL_COUNT: Final[int] = 21
 
 
 class SegmentPaddingError(ValueError):
@@ -32,16 +34,17 @@ class SegmentPaddingError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class SegmentedDatasetPaths:
-    """All known paths belonging to one variable-length user/action export."""
+    """Paths belonging to one variable-length SpikeIMU user/action export."""
 
     input_dir: Path
     user: str
     action: str
     stem: str
-    raw_imu_path: Path
+    spike_imu_path: Path
     labels_path: Path
     segment_offsets_path: Path
     segment_lengths_path: Path
+    segmentation_summary_path: Path
     manifest_path: Path | None
     board_event_targets_path: Path | None
 
@@ -62,13 +65,14 @@ class SegmentLengthRecord:
 
 @dataclass(frozen=True, slots=True)
 class ValidatedSegmentedDataset:
-    """Validated arrays and metadata from a single segmentation export."""
+    """Validated arrays and metadata from one SpikeIMU segmentation export."""
 
     paths: SegmentedDatasetPaths
-    raw_imu: np.ndarray
+    spike_imu: np.ndarray
     labels: np.ndarray
     segment_offsets: np.ndarray
     segment_lengths: np.ndarray
+    segmentation_summary: dict[str, object]
     board_event_targets: np.ndarray | None
     manifest: pd.DataFrame | None
 
@@ -78,7 +82,7 @@ class PaddingPackageResult:
     """Generated arrays and audit rows for one fixed-length package."""
 
     dataset: ValidatedSegmentedDataset
-    padded_imu: np.ndarray
+    padded_spike_imu: np.ndarray
     labels: np.ndarray
     valid_lengths: np.ndarray
     valid_mask: np.ndarray
@@ -112,10 +116,11 @@ def discover_segmented_datasets(input_root: Path) -> tuple[SegmentedDatasetPaths
         if key in seen_stems:
             raise SegmentPaddingError(f"duplicate segmentation stem {stem!r} in {directory}")
         seen_stems.add(key)
-        raw = directory / f"{stem}_rawIMU.npy"
+        spike_imu = directory / f"{stem}_spikeIMU.npy"
         labels = directory / f"{stem}_labels.npy"
         offsets = directory / f"{stem}_segment_offsets.npy"
-        missing = [path for path in (raw, labels, offsets) if not path.is_file()]
+        summary = directory / f"{stem}_segmentation_summary.json"
+        missing = [path for path in (spike_imu, labels, offsets, summary) if not path.is_file()]
         if missing:
             raise SegmentPaddingError(
                 f"user={user!r}, action={action!r}, lengths={lengths_path}: "
@@ -126,8 +131,9 @@ def discover_segmented_datasets(input_root: Path) -> tuple[SegmentedDatasetPaths
         found.append(
             SegmentedDatasetPaths(
                 input_dir=directory, user=user, action=action, stem=stem,
-                raw_imu_path=raw, labels_path=labels,
+                spike_imu_path=spike_imu, labels_path=labels,
                 segment_offsets_path=offsets, segment_lengths_path=lengths_path,
+                segmentation_summary_path=summary,
                 manifest_path=manifest if manifest.is_file() else None,
                 board_event_targets_path=targets if targets.is_file() else None,
             )
@@ -138,20 +144,28 @@ def discover_segmented_datasets(input_root: Path) -> tuple[SegmentedDatasetPaths
 
 
 def load_and_validate_segmented_dataset(paths: SegmentedDatasetPaths) -> ValidatedSegmentedDataset:
-    """Load one package without pickle support and enforce array invariants."""
+    """Load one SpikeIMU package without pickle support and enforce its contract."""
 
-    raw_imu = _load_array(paths.raw_imu_path, paths=paths, expected="a 2-D (N, C) array")
+    spike_imu = _load_array(paths.spike_imu_path, paths=paths, expected="a 2-D (N, 21) SpikeIMU array")
+    if spike_imu.ndim != 2 or spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT:
+        _shape_error(paths, paths.spike_imu_path, f"(sample_count, {SPIKE_IMU_CHANNEL_COUNT})", tuple(spike_imu.shape))
+    if not np.isfinite(spike_imu).all():
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.spike_imu_path}: "
+            "SpikeIMU values must be finite"
+        )
+    segmentation_summary = _load_segmentation_summary(paths)
     labels = _load_array(paths.labels_path, paths=paths, expected="a 1-D labels array")
     offsets = _load_array(paths.segment_offsets_path, paths=paths, expected="a 1-D offsets array")
     lengths = _load_array(paths.segment_lengths_path, paths=paths, expected="a 1-D lengths array")
-    _validate_dataset_arrays(paths, raw_imu, labels, offsets, lengths)
+    _validate_dataset_arrays(paths, spike_imu, labels, offsets, lengths)
     targets: np.ndarray | None = None
     if paths.board_event_targets_path is not None:
         targets = _load_array(
             paths.board_event_targets_path, paths=paths, expected="a 2-D (N, 4) Board-target array"
         )
         actual = tuple(targets.shape)
-        expected = (len(raw_imu), 4)
+        expected = (len(spike_imu), 4)
         if targets.ndim != 2 or actual != expected:
             _shape_error(paths, paths.board_event_targets_path, expected, actual)
         if not np.can_cast(targets.dtype, np.bool_, casting="safe"):
@@ -162,8 +176,9 @@ def load_and_validate_segmented_dataset(paths: SegmentedDatasetPaths) -> Validat
         targets = targets.astype(np.bool_, copy=False)
     manifest = _load_manifest(paths)
     return ValidatedSegmentedDataset(
-        paths=paths, raw_imu=raw_imu, labels=labels, segment_offsets=offsets,
-        segment_lengths=lengths, board_event_targets=targets, manifest=manifest,
+        paths=paths, spike_imu=spike_imu, labels=labels, segment_offsets=offsets,
+        segment_lengths=lengths, segmentation_summary=segmentation_summary,
+        board_event_targets=targets, manifest=manifest,
     )
 
 
@@ -171,11 +186,8 @@ def validate_segmented_root(input_root: Path) -> tuple[ValidatedSegmentedDataset
     """Discover and fully validate every package before any output is written."""
 
     datasets = tuple(load_and_validate_segmented_dataset(item) for item in discover_segmented_datasets(input_root))
-    if len({dataset.raw_imu.shape[1] for dataset in datasets}) != 1:
-        raise SegmentPaddingError(
-            "segmentation root mixes IMU channel schemas; split six- and "
-            "nine-channel exports before padding"
-        )
+    if any(dataset.spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT for dataset in datasets):
+        raise SegmentPaddingError("segmentation root contains a non-21-channel SpikeIMU package")
     return datasets
 
 
@@ -285,6 +297,9 @@ def write_segment_length_analysis(
     records = _analysis_records(analysis)
     payload = {
         "input_root": str(Path(input_root).resolve()),
+        "input_kind": "spike-imu",
+        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "channel_count": SPIKE_IMU_CHANNEL_COUNT,
         "sampling_rate_hz": analysis["sampling_rate_hz"],
         "segment_count": analysis["segment_count"],
         "user_action_count": analysis["user_action_count"],
@@ -340,8 +355,8 @@ def build_padding_package(
 
     target = _positive_integer(target_length, name="target_length")
     requested_value = _finite_float(padding_value, name="padding_value")
-    stored_value = _stored_padding_value(requested_value, dtype=dataset.raw_imu.dtype)
-    channel_count = int(dataset.raw_imu.shape[1])
+    stored_value = _stored_padding_value(requested_value, dtype=dataset.spike_imu.dtype)
+    channel_count = int(dataset.spike_imu.shape[1])
     lengths = dataset.segment_lengths
     maximum = int(np.max(lengths))
     retained_indices = np.flatnonzero(lengths <= target)
@@ -349,7 +364,7 @@ def build_padding_package(
     padded = np.full(
         (retained_count, target, channel_count),
         stored_value,
-        dtype=dataset.raw_imu.dtype,
+        dtype=dataset.spike_imu.dtype,
     )
     exported_labels = dataset.labels[retained_indices].copy()
     valid_lengths = lengths[retained_indices].astype(np.int32, copy=True)
@@ -362,7 +377,7 @@ def build_padding_package(
         start = int(dataset.segment_offsets[source_index])
         stop = int(dataset.segment_offsets[source_index + 1])
         length = int(lengths[source_index])
-        padded[output_index, :length] = dataset.raw_imu[start:stop]
+        padded[output_index, :length] = dataset.spike_imu[start:stop]
         valid_mask[output_index, :length] = True
         if padded_targets is not None:
             assert dataset.board_event_targets is not None
@@ -386,6 +401,8 @@ def build_padding_package(
             "was_padded": length < target if exported else False,
             "board_event_targets_present": padded_targets is not None,
             "channel_count": channel_count,
+            "input_kind": "spike-imu",
+            "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
             "source_input_directory": str(dataset.paths.input_dir),
         })
     total_valid = int(np.sum(valid_lengths, dtype=np.int64))
@@ -404,9 +421,15 @@ def build_padding_package(
         "overflow_policy": "skip",
         "board_event_targets_present": padded_targets is not None,
         "channel_count": channel_count,
+        "input_kind": "spike-imu",
+        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "channel_names": dataset.segmentation_summary["channel_names"],
+        "units": dataset.segmentation_summary.get("units"),
+        "channel_units": dataset.segmentation_summary.get("channel_units"),
+        "source_feature_filename": dataset.paths.spike_imu_path.name,
     }
     return PaddingPackageResult(
-        dataset=dataset, padded_imu=padded, labels=exported_labels,
+        dataset=dataset, padded_spike_imu=padded, labels=exported_labels,
         valid_lengths=valid_lengths, valid_mask=valid_mask,
         padded_board_event_targets=padded_targets, manifest=pd.DataFrame(rows), summary=summary,
     )
@@ -491,9 +514,9 @@ def _load_array(path: Path, *, paths: SegmentedDatasetPaths, expected: str) -> n
     return value
 
 
-def _validate_dataset_arrays(paths: SegmentedDatasetPaths, raw: np.ndarray, labels: np.ndarray, offsets: np.ndarray, lengths: np.ndarray) -> None:
-    if raw.ndim != 2 or raw.shape[1] <= 0:
-        _shape_error(paths, paths.raw_imu_path, "(sample_count, channel_count)", tuple(raw.shape))
+def _validate_dataset_arrays(paths: SegmentedDatasetPaths, spike_imu: np.ndarray, labels: np.ndarray, offsets: np.ndarray, lengths: np.ndarray) -> None:
+    if spike_imu.ndim != 2 or spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT:
+        _shape_error(paths, paths.spike_imu_path, f"(sample_count, {SPIKE_IMU_CHANNEL_COUNT})", tuple(spike_imu.shape))
     if labels.ndim != 1:
         _shape_error(paths, paths.labels_path, "(segment_count,)", tuple(labels.shape))
     if lengths.ndim != 1:
@@ -519,10 +542,10 @@ def _validate_dataset_arrays(paths: SegmentedDatasetPaths, raw: np.ndarray, labe
         )
     if count == 0:
         raise SegmentPaddingError(f"user={paths.user!r}, action={paths.action!r}, file={paths.segment_lengths_path}: no segments")
-    if int(offsets[0]) != 0 or int(offsets[-1]) != len(raw):
+    if int(offsets[0]) != 0 or int(offsets[-1]) != len(spike_imu):
         raise SegmentPaddingError(
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segment_offsets_path}: "
-            f"expected first=0 and last={len(raw)}, actual first={int(offsets[0])}, last={int(offsets[-1])}"
+            f"expected first=0 and last={len(spike_imu)}, actual first={int(offsets[0])}, last={int(offsets[-1])}"
         )
     if np.any(np.diff(offsets) < 0):
         raise SegmentPaddingError(f"user={paths.user!r}, action={paths.action!r}, file={paths.segment_offsets_path}: offsets must be nondecreasing")
@@ -556,6 +579,45 @@ def _load_manifest(paths: SegmentedDatasetPaths) -> pd.DataFrame | None:
             f"user={paths.user!r}, action={paths.action!r}, file={paths.manifest_path}: expected column segment_index"
         )
     return manifest
+
+
+def _load_segmentation_summary(paths: SegmentedDatasetPaths) -> dict[str, object]:
+    try:
+        summary = json.loads(
+            paths.segmentation_summary_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            f"could not read segmentation summary: {error}"
+        ) from error
+    if not isinstance(summary, dict):
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            "segmentation summary must be a JSON object"
+        )
+    if summary.get("input_kind") != "spike-imu":
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            "padding only supports input_kind='spike-imu'"
+        )
+    if summary.get("feature_schema") != SPIKE_IMU_FEATURE_SCHEMA:
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            f"expected feature_schema={SPIKE_IMU_FEATURE_SCHEMA!r}"
+        )
+    if summary.get("channel_count") != SPIKE_IMU_CHANNEL_COUNT:
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            f"expected channel_count={SPIKE_IMU_CHANNEL_COUNT}"
+        )
+    channel_names = summary.get("channel_names")
+    if not isinstance(channel_names, list) or len(channel_names) != SPIKE_IMU_CHANNEL_COUNT:
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            f"expected {SPIKE_IMU_CHANNEL_COUNT} channel_names"
+        )
+    return summary
 
 
 def _manifest_metadata_by_index(dataset: ValidatedSegmentedDataset) -> dict[int, Mapping[str, Any]]:
@@ -648,7 +710,11 @@ def _package_fingerprints(datasets: Sequence[ValidatedSegmentedDataset], *, inpu
     root = input_root.resolve()
     return [{
         "relative_lengths_path": str(dataset.paths.segment_lengths_path.resolve().relative_to(root)),
-        "segment_count": len(dataset.segment_lengths), "maximum_length": int(np.max(dataset.segment_lengths)),
+        "relative_spike_imu_path": str(dataset.paths.spike_imu_path.resolve().relative_to(root)),
+        "segment_count": len(dataset.segment_lengths),
+        "maximum_length": int(np.max(dataset.segment_lengths)),
+        "channel_count": SPIKE_IMU_CHANNEL_COUNT,
+        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
     } for dataset in datasets]
 
 
@@ -688,6 +754,12 @@ def _validate_analysis_report(report: Mapping[str, object], *, datasets: Sequenc
         raise SegmentPaddingError(
             f"analysis report input_root={report_root!r} does not match current input root {str(input_root.resolve())!r}; rerun analysis"
         )
+    if report.get("input_kind") != "spike-imu":
+        raise SegmentPaddingError("analysis report is not for SpikeIMU input; rerun analysis")
+    if report.get("feature_schema") != SPIKE_IMU_FEATURE_SCHEMA:
+        raise SegmentPaddingError("analysis report feature schema is not SpikeIMU; rerun analysis")
+    if report.get("channel_count") != SPIKE_IMU_CHANNEL_COUNT:
+        raise SegmentPaddingError("analysis report channel count is not 21; rerun analysis")
     if report.get("segment_count") != sum(len(dataset.segment_lengths) for dataset in datasets):
         raise SegmentPaddingError("analysis report segment count differs from current input; rerun analysis")
     expected = _package_fingerprints(datasets, input_root=input_root)
@@ -737,7 +809,7 @@ def _stored_padding_value(requested_value: float, *, dtype: np.dtype) -> object:
 def _write_padding_package(directory: Path, result: PaddingPackageResult) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     stem = result.dataset.paths.stem
-    _save_npy(directory / f"{stem}_paddedIMU.npy", result.padded_imu)
+    _save_npy(directory / f"{stem}_paddedSpikeIMU.npy", result.padded_spike_imu)
     _save_npy(directory / f"{stem}_labels.npy", result.labels)
     _save_npy(directory / f"{stem}_valid_lengths.npy", result.valid_lengths)
     _save_npy(directory / f"{stem}_valid_mask.npy", result.valid_mask)
@@ -756,7 +828,12 @@ def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root
     return {
         "input_root": str(input_root.resolve()), "output_root": str(output_root.resolve()),
         "target_length": target_length, "sampling_rate_hz": sampling_rate_hz,
-        "channel_count": results[0].padded_imu.shape[2],
+        "channel_count": results[0].padded_spike_imu.shape[2],
+        "input_kind": "spike-imu",
+        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "channel_names": results[0].summary["channel_names"],
+        "units": results[0].summary.get("units"),
+        "channel_units": results[0].summary.get("channel_units"),
         "processed_user_action_count": len(results), "source_segment_count": source_segments,
         "segment_count": exported_segments,
         "skipped_segment_count": source_segments - exported_segments,
