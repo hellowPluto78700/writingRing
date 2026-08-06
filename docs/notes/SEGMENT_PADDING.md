@@ -32,6 +32,33 @@ conda run --no-capture-output -n writingring-viz \
 
 Padding 固定在右侧，超过 target 的 segment 不会截断或重采样，而是明确跳过且不会修改输入。所有包先完成验证，再写入临时根目录并一次性发布；失败不会留下部分输出。
 
+## 在 Action-0 Bash pipeline 中自动执行
+
+`scripts/action0_pipeline/` 下的 8 个入口都通过共享的 `_common.bash`
+自动执行以下顺序：完成 variable-length segmentation，扫描整棵
+segmentation root，写出分析报告，再根据报告发布固定长度 padding 输出。
+默认配置为满足至少 99% segment coverage 的最小候选长度：
+
+```bash
+PADDING_COVERAGE=0.99 \
+PADDING_RECOMMENDATION=balanced \
+scripts/action0_pipeline/03_lowpass_label.sh
+```
+
+可在 Bash 环境中覆盖：
+
+- `PADDING_COVERAGE`：传给 `--minimum-coverage`，默认 `0.99`。
+- `PADDING_RECOMMENDATION`：`balanced`、`p99` 或 `pure-padding`，默认
+  `balanced`。
+- `PADDING_ROUND_TO`、`PADDING_VALUE`：传给对应的分析/补齐 CLI。
+- `PADDING_ANALYSIS_DIR`、`PADDING_OUTPUT_ROOT`：覆盖报告和 padded root
+  的路径。
+
+默认 `balanced` 使用 `DEFAULT_CANDIDATE_LENGTHS` 中满足 coverage 的最小
+候选值；`p99` 使用经验 P99 向上取整后的长度。两种选择都不会截断超长
+segment，而是把它们记录为 skipped。`OVERWRITE=1` 同时允许覆盖分析报告
+和 padded 输出。
+
 ## 与 upstream 的关系
 
 upstream `vendor/WritingRing/` 没有这类 completed-segmentation 输出解析器，因此这里没有可复用的 upstream 数据加载逻辑。实现仅验证本项目 `segmentation.py` 和 `board_event_segmentation.py` 的已发布 `.npy`/CSV schema；唯一有意的兼容性选择是将 `*_segments.csv` 视为可选 provenance 元数据，缺失时仍能以 labels 和 arrays 安全完成 padding，但 outlier/manifest 中的 `dataset_id` 将为空。

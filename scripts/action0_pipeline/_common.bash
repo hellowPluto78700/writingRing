@@ -3,8 +3,8 @@
 # Shared implementation for the eight action-0 pipeline entry points.
 #
 # The wrappers deliberately invoke the existing Python CLIs.  This file owns
-# only discovery, orchestration, logging, and post-run contract checks; it is
-# not a second Ring or Board parser.
+# only discovery, orchestration, logging, padding, and post-run contract
+# checks; it is not a second Ring or Board parser.
 
 set -Eeuo pipefail
 
@@ -103,6 +103,10 @@ pipeline_init() {
     MADGWICK_BETA="${MADGWICK_BETA:-0.1}"
     MADGWICK_PROVISIONAL="${MADGWICK_PROVISIONAL:-0}"
     OUTPUT_BASE="$(_pipeline_resolve_path "${OUTPUT_BASE:-outputs/action0_pipeline}")"
+    PADDING_COVERAGE="${PADDING_COVERAGE:-0.99}"
+    PADDING_RECOMMENDATION="${PADDING_RECOMMENDATION:-balanced}"
+    PADDING_ROUND_TO="${PADDING_ROUND_TO:-1}"
+    PADDING_VALUE="${PADDING_VALUE:-0.0}"
 
     if [[ "$ENCODER" != "custom-wavelet" ]]; then
         pipeline_die "action-0 scripts require ENCODER=custom-wavelet"
@@ -113,6 +117,10 @@ pipeline_init() {
     if [[ "$MADGWICK_PROVISIONAL" != "0" && "$MADGWICK_PROVISIONAL" != "1" ]]; then
         pipeline_die "MADGWICK_PROVISIONAL must be 0 or 1"
     fi
+    case "$PADDING_RECOMMENDATION" in
+        pure-padding|p99|balanced) ;;
+        *) pipeline_die "PADDING_RECOMMENDATION must be pure-padding, p99, or balanced" ;;
+    esac
     if [[ ! "$SAMPLING_RATE" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$SAMPLING_RATE" == 0 || "$SAMPLING_RATE" == 0.0 ]]; then
         pipeline_die "SAMPLING_RATE must be a positive number"
     fi
@@ -126,10 +134,13 @@ pipeline_init() {
     ALIGNMENT_REPORT_ROOT="$ALIGNMENT_ROOT/reports"
     ALIGNMENT_VERIFICATION_ROOT="$ALIGNMENT_ROOT/verification"
     SEGMENT_ROOT="$COMBINATION_ROOT/segmentation"
+    PADDING_ANALYSIS_DIR="$(_pipeline_resolve_path "${PADDING_ANALYSIS_DIR:-$SEGMENT_ROOT/padding_analysis}")"
+    PADDING_OUTPUT_ROOT="$(_pipeline_resolve_path "${PADDING_OUTPUT_ROOT:-$COMBINATION_ROOT/segmentation_padded}")"
     LOG_ROOT="$COMBINATION_ROOT/logs"
     DISCOVERY_LOG="$LOG_ROOT/discovery.log"
     ENCODE_LOG="$LOG_ROOT/encode.log"
     QA_LOG="$LOG_ROOT/qa.log"
+    PADDING_LOG="$LOG_ROOT/padding.log"
 
     mkdir -p "$LOG_ROOT" "$LOG_ROOT/preprocess" "$LOG_ROOT/segmentation"
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
@@ -390,6 +401,39 @@ pipeline_segment() {
     done
 }
 
+pipeline_padding() {
+    local analysis_report="$PADDING_ANALYSIS_DIR/segment_length_analysis.json"
+    local -a analysis_args=(
+        "${PYTHON_CMD[@]}" scripts/analyze_segment_lengths.py
+        --input-root "$SEGMENT_ROOT"
+        --output-dir "$PADDING_ANALYSIS_DIR"
+        --sampling-rate "$SAMPLING_RATE"
+        --minimum-coverage "$PADDING_COVERAGE"
+        --round-to "$PADDING_ROUND_TO"
+    )
+    if [[ "$OVERWRITE" == "1" ]]; then
+        analysis_args+=(--overwrite)
+    fi
+    pipeline_run_logged "$PADDING_LOG" "${analysis_args[@]}"
+    pipeline_require_file "$analysis_report" "segment-length analysis report"
+
+    local -a padding_args=(
+        "${PYTHON_CMD[@]}" scripts/pad_segmented_imu.py
+        --input-root "$SEGMENT_ROOT"
+        --output-root "$PADDING_OUTPUT_ROOT"
+        --analysis-report "$analysis_report"
+        --recommendation "$PADDING_RECOMMENDATION"
+        --sampling-rate "$SAMPLING_RATE"
+        --padding-value "$PADDING_VALUE"
+    )
+    if [[ "$OVERWRITE" == "1" ]]; then
+        padding_args+=(--overwrite)
+    fi
+    pipeline_run_logged "$PADDING_LOG" "${padding_args[@]}"
+    pipeline_require_file "$PADDING_OUTPUT_ROOT/padding_dataset_summary.json" "padded dataset summary"
+    pipeline_require_file "$PADDING_OUTPUT_ROOT/padding_dataset_manifest.csv" "padded dataset manifest"
+}
+
 pipeline_validate_spike_artifact() {
     local values_path="$1"
     local metadata_path="$2"
@@ -453,12 +497,48 @@ print(f"validated segmented SpikeIMU rows={len(values)} channels=21: {values_pat
     fi
 }
 
+pipeline_validate_padding_artifact() {
+    local summary_path="$1"
+    local expected_user_action_count="$2"
+    pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import sys
+
+summary_path = Path(sys.argv[1])
+expected_input_root = str(Path(sys.argv[2]).resolve())
+expected_user_action_count = int(sys.argv[3])
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+if summary.get("input_root") != expected_input_root:
+    raise SystemExit(f"padded summary input root mismatch: {summary_path}")
+if summary.get("processed_user_action_count") != expected_user_action_count:
+    raise SystemExit(
+        f"padded package count {summary.get('processed_user_action_count')} "
+        f"!= user count {expected_user_action_count}"
+    )
+source_count = summary.get("source_segment_count")
+exported_count = summary.get("segment_count")
+skipped_count = summary.get("skipped_segment_count")
+if not all(isinstance(value, int) and value >= 0 for value in (source_count, exported_count, skipped_count)):
+    raise SystemExit(f"invalid padded segment counts: {summary_path}")
+if exported_count + skipped_count != source_count:
+    raise SystemExit(f"padded segment counts do not reconcile: {summary_path}")
+if not isinstance(summary.get("target_length"), int) or summary["target_length"] <= 0:
+    raise SystemExit(f"invalid padded target length: {summary_path}")
+print(
+    f"validated padded output segments={exported_count} skipped={skipped_count} "
+    f"target={summary['target_length']}: {summary_path}"
+)
+' "$summary_path" "$SEGMENT_ROOT" "$expected_user_action_count"
+}
+
 pipeline_qa() {
     local ring_count="${#RING_FILES[@]}"
-    local preprocessing_count spike_count offset_count summary_count
+    local preprocessing_count spike_count offset_count summary_count padded_summary_count
     preprocessing_count="$(pipeline_count_files "$PREPROCESS_ROOT" '*_preprocessing.json')"
     spike_count="$(pipeline_count_files "$SPIKE_ROOT" 'spikeIMU.npy')"
     summary_count="$(pipeline_count_files "$SEGMENT_ROOT" '*_segmentation_summary.json')"
+    padded_summary_count="$(pipeline_count_files "$PADDING_OUTPUT_ROOT" 'padding_dataset_summary.json')"
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
         offset_count="$(pipeline_count_files "$OFFSET_ROOT" '*_ring_board_offset.txt')"
     else
@@ -470,6 +550,7 @@ pipeline_qa() {
     printf 'spikeIMU_matrices=%s\n' "$spike_count" >>"$QA_LOG"
     printf 'alignment_offsets=%s\n' "$offset_count" >>"$QA_LOG"
     printf 'segmentation_summaries=%s\n' "$summary_count" >>"$QA_LOG"
+    printf 'padded_dataset_summaries=%s\n' "$padded_summary_count" >>"$QA_LOG"
 
     if [[ "$preprocessing_count" -ne "$ring_count" ]]; then
         pipeline_die "preprocessing summary count ${preprocessing_count} != ring_0 count ${ring_count}"
@@ -482,6 +563,9 @@ pipeline_qa() {
     fi
     if [[ "$summary_count" -ne "${#PIPELINE_USERS[@]}" ]]; then
         pipeline_die "segmentation summary count ${summary_count} != user count ${#PIPELINE_USERS[@]}"
+    fi
+    if [[ "$padded_summary_count" -ne 1 ]]; then
+        pipeline_die "padded dataset summary count ${padded_summary_count} != 1"
     fi
 
     local index record_user record_action dataset_id segment_directory
@@ -539,8 +623,13 @@ pipeline_qa() {
         fi
     done
 
+    pipeline_validate_padding_artifact \
+        "$PADDING_OUTPUT_ROOT/padding_dataset_summary.json" \
+        "${#PIPELINE_USERS[@]}"
+
     printf 'QA passed for %s ring_0 recording(s), %s user(s).\n' "$ring_count" "${#PIPELINE_USERS[@]}"
     printf 'Output root: %s\n' "$COMBINATION_ROOT"
+    printf 'Padded output root: %s\n' "$PADDING_OUTPUT_ROOT"
     printf 'Logs: %s\n' "$LOG_ROOT"
 }
 
@@ -555,5 +644,6 @@ run_action0_pipeline() {
         pipeline_align
     fi
     pipeline_segment
+    pipeline_padding
     pipeline_qa
 }

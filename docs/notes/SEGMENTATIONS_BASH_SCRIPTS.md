@@ -32,6 +32,8 @@ ring_0 discovery
   → one independent Custom Wavelet encoding per complete recording
   → SpikeIMU label segmentation, or per-recording SpikeIMU alignment followed
     by one aligned-Board segmentation per user
+  → global segment-length scan
+  → right-padding to the configured coverage target
 ```
 
 The default configuration is `DATA_ROOT=data`, `ACTION=0`, `SAMPLING_RATE=200`,
@@ -40,9 +42,17 @@ The default configuration is `DATA_ROOT=data`, `ACTION=0`, `SAMPLING_RATE=200`,
 `CONDA_ENV=writingring-viz`, and `OVERWRITE=0`. Relative paths are resolved
 from the project root. `LOW_PASS_CUTOFF_HZ`, `MADGWICK_BETA`,
 `MADGWICK_PROVISIONAL=1`, `OUTPUT_BASE`, and the other defaults can be
-overridden with environment variables. Xylo entry points preflight the
-Rockpool Xylo imports and fail with the repository installation hint when the
-optional dependency is unavailable.
+overridden with environment variables. Padding is enabled for every entry
+point after segmentation. Its defaults are `PADDING_COVERAGE=0.99`,
+`PADDING_RECOMMENDATION=balanced`, `PADDING_ROUND_TO=1`, and
+`PADDING_VALUE=0.0`. `PADDING_ANALYSIS_DIR` and `PADDING_OUTPUT_ROOT` can
+override the analysis and padded-output locations. Set
+`PADDING_RECOMMENDATION=p99` to use the exact empirical P99 target instead of
+the smallest configured candidate that meets the requested coverage; use
+`pure-padding` to retain every segment. `OVERWRITE=1` also replaces the
+analysis and padded outputs. Xylo entry points preflight the Rockpool Xylo
+imports and fail with the repository installation hint when the optional
+dependency is unavailable.
 
 Each gravity/boundary combination is isolated under (the Xylo selector uses
 the shorter plan directory name `xylo`):
@@ -56,8 +66,17 @@ outputs/action0_pipeline/<gravity>/<boundary>/
 │   ├── reports/
 │   └── verification/
 ├── segmentation/
+│   └── padding_analysis/
+├── segmentation_padded/
 └── logs/
 ```
+
+`segmentation/padding_analysis/` contains the global JSON/CSV/Matplotlib
+length report. `segmentation_padded/` contains the fixed-length arrays,
+valid-length masks, manifests, and the root padding summary. Padding is on the
+right; segments longer than the selected target are retained in the manifest
+with `exported=false` and skipped rather than truncated. Therefore the summary
+always exposes the exact exported/skipped counts for the chosen coverage.
 
 The scripts use strict fail-fast execution. A failed preprocessing, encoding,
 alignment, or user segmentation command stops the run. `OVERWRITE=1` adds the
@@ -66,11 +85,13 @@ corresponding overwrite flags to the Python CLIs. Label mode adds only
 Board mode additionally passes `--overwrite-verification`.
 
 Before reporting success, the shared QA checks compare discovered `ring_0`,
-preprocessing-summary, SpikeIMU, Board-offset (aligned mode), and per-user
-segmentation-summary counts. It also verifies canonical timestamp sidecars,
-metadata, matrices, manifests, Board targets/audits, and the `(N, 21)`
-SpikeIMU contract. Logs contain discovery, per-recording preprocessing and
-alignment, one encoding log, per-user segmentation, and QA output.
+preprocessing-summary, SpikeIMU, Board-offset (aligned mode), per-user
+segmentation-summary, and padded-summary counts. It also verifies canonical
+timestamp sidecars, metadata, matrices, manifests, Board targets/audits, the
+`(N, 21)` SpikeIMU contract, and that padded source/exported/skipped counts
+reconcile. Logs contain discovery, per-recording preprocessing and alignment,
+one encoding log, per-user segmentation, padding analysis/publish output, and
+QA output.
 
 The scripts intentionally differ from the upstream plotting scripts in their
 workflow policy: upstream `board_plot.py` globs every action-level gzip file
