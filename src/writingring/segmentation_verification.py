@@ -51,17 +51,27 @@ def build_segmentation_verification_path(
     output_root: Path,
     *,
     dataset_id: int,
+    input_kind: str = "raw-ring",
 ) -> Path:
-    """Return the aligned-mode PNG path within an already scoped output root."""
+    """Return the verification PNG path within an already scoped output root."""
 
     if isinstance(dataset_id, bool) or not isinstance(dataset_id, int) or dataset_id < 0:
         raise SegmentationVerificationError("dataset_id must be a nonnegative integer")
-    return Path(output_root) / f"{dataset_id}_ring_0_segmentation_verification.png"
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise SegmentationVerificationError(
+            "input_kind must be raw-ring or spike-imu"
+        )
+    suffix = (
+        "_segmentation_verification.png"
+        if input_kind == "spike-imu"
+        else "_ring_0_segmentation_verification.png"
+    )
+    return Path(output_root) / f"{dataset_id}{suffix}"
 
 
 def create_segmentation_verification_figure(
     *,
-    ring_dataframe: pd.DataFrame,
+    ring_dataframe: pd.DataFrame | None = None,
     ring_timestamps_us: np.ndarray,
     transient_score: np.ndarray,
     aligned_board_events: pd.DataFrame | None,
@@ -75,15 +85,33 @@ def create_segmentation_verification_figure(
     dataset_id: int,
     boundary_mode: str,
     alignment_offset_us: float | None,
+    feature_values: np.ndarray | None = None,
 ) -> SegmentationVerificationResult:
-    """Render all recording panels from caller-supplied final boundaries only."""
+    """Render panels from caller-supplied feature values and final boundaries."""
 
     _validate_config(config)
     timestamps = _timestamps(ring_timestamps_us)
     score = _score(transient_score, sample_count=len(timestamps))
-    if not isinstance(ring_dataframe, pd.DataFrame) or len(ring_dataframe) != len(timestamps):
+    if feature_values is not None:
+        try:
+            feature_array = np.asarray(feature_values, dtype=np.float64)
+        except (TypeError, ValueError) as error:
+            raise SegmentationVerificationError("feature_values must be numeric") from error
+        if (
+            feature_array.ndim != 2
+            or feature_array.shape[0] != len(timestamps)
+            or feature_array.shape[1] == 0
+            or not np.isfinite(feature_array).all()
+        ):
+            raise SegmentationVerificationError(
+                "feature_values must be finite and have one row per timestamp"
+            )
+    if ring_dataframe is not None and (
+        not isinstance(ring_dataframe, pd.DataFrame)
+        or len(ring_dataframe) != len(timestamps)
+    ):
         raise SegmentationVerificationError(
-            "ring_dataframe must have one row per Ring timestamp"
+            "ring_dataframe must have one row per feature timestamp"
         )
     if boundary_mode not in {"label", "aligned_board_events"}:
         raise SegmentationVerificationError(

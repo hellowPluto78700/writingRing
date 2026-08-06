@@ -42,6 +42,13 @@ class AlignmentOffset:
     event_coverage_ratio: float | None
     matched_event_count: int | None
     total_valid_event_count: int | None
+    alignment_signal_source: str | None = None
+    feature_schema: str | None = None
+    feature_values_sha256: str | None = None
+    feature_metadata_sha256: str | None = None
+    timestamp_sha256: str | None = None
+    transient_channel_indices: tuple[int, ...] | None = None
+    spike_event_channels_used: bool | None = None
 
     @property
     def offset_ms(self) -> float:
@@ -99,6 +106,33 @@ def extract_alignment_offset(
         total_valid_event_count=_optional_nonnegative_int(
             report.get("total_valid_event_count"),
             name="total_valid_event_count",
+        ),
+        alignment_signal_source=_optional_nonempty_string(
+            report.get("alignment_signal_source"),
+            name="alignment_signal_source",
+        ),
+        feature_schema=_optional_nonempty_string(
+            report.get("feature_schema"),
+            name="feature_schema",
+        ),
+        feature_values_sha256=_optional_sha256(
+            report.get("feature_values_sha256"),
+            name="feature_values_sha256",
+        ),
+        feature_metadata_sha256=_optional_sha256(
+            report.get("feature_metadata_sha256"),
+            name="feature_metadata_sha256",
+        ),
+        timestamp_sha256=_optional_sha256(
+            report.get("timestamp_sha256"),
+            name="timestamp_sha256",
+        ),
+        transient_channel_indices=_optional_channel_indices(
+            report.get("transient_channel_indices")
+        ),
+        spike_event_channels_used=_optional_bool(
+            report.get("spike_event_channels_used"),
+            name="spike_event_channels_used",
         ),
     )
 
@@ -236,6 +270,32 @@ def read_alignment_offset_txt(
             fields.get("total_valid_event_count"),
             name="total_valid_event_count",
         ),
+        alignment_signal_source=_optional_nonempty_string(
+            fields.get("alignment_signal_source"),
+            name="alignment_signal_source",
+        ),
+        feature_schema=_optional_nonempty_string(
+            fields.get("feature_schema"), name="feature_schema"
+        ),
+        feature_values_sha256=_optional_sha256(
+            fields.get("feature_values_sha256"),
+            name="feature_values_sha256",
+        ),
+        feature_metadata_sha256=_optional_sha256(
+            fields.get("feature_metadata_sha256"),
+            name="feature_metadata_sha256",
+        ),
+        timestamp_sha256=_optional_sha256(
+            fields.get("timestamp_sha256"),
+            name="timestamp_sha256",
+        ),
+        transient_channel_indices=_optional_channel_indices(
+            fields.get("transient_channel_indices")
+        ),
+        spike_event_channels_used=_optional_bool(
+            fields.get("spike_event_channels_used"),
+            name="spike_event_channels_used",
+        ),
     )
     _validate_offset(offset)
     expected = (expected_user, expected_action, expected_dataset_id)
@@ -275,6 +335,67 @@ def apply_board_to_ring_offset(
     return timestamps.copy() + _finite_float(offset_us, name="offset_us")
 
 
+def validate_alignment_feature_provenance(
+    offset: AlignmentOffset,
+    feature_input: object,
+) -> None:
+    """Require an alignment offset to describe the exact feature input.
+
+    Legacy offsets intentionally remain readable for raw-ring workflows.  A
+    SpikeIMU overlay, however, must prove that its offset was produced from
+    the same recording, feature schema, values, metadata, timestamps, and
+    transient-channel contract as the feature matrix being rendered.
+    """
+
+    from writingring.recording_features import RecordingFeatureInput
+
+    if not isinstance(offset, AlignmentOffset):
+        raise AlignmentOffsetExportError("offset must be an AlignmentOffset")
+    if not isinstance(feature_input, RecordingFeatureInput):
+        raise AlignmentOffsetExportError(
+            "feature_input must be a RecordingFeatureInput"
+        )
+    _validate_offset(offset)
+    identity = (offset.user, offset.action, offset.dataset_id)
+    expected_identity = (
+        feature_input.user,
+        feature_input.action,
+        feature_input.dataset_id,
+    )
+    if identity != expected_identity:
+        raise AlignmentOffsetExportError(
+            "alignment offset recording identity does not match feature input"
+        )
+    if offset.alignment_signal_source != feature_input.input_kind:
+        raise AlignmentOffsetExportError(
+            "alignment offset signal source does not match feature input"
+        )
+    if offset.feature_schema != feature_input.feature_schema:
+        raise AlignmentOffsetExportError(
+            "alignment offset feature schema does not match feature input"
+        )
+    if offset.feature_values_sha256 != feature_input.values_sha256:
+        raise AlignmentOffsetExportError(
+            "alignment offset feature values SHA-256 does not match feature input"
+        )
+    if offset.feature_metadata_sha256 != feature_input.metadata_sha256:
+        raise AlignmentOffsetExportError(
+            "alignment offset feature metadata SHA-256 does not match feature input"
+        )
+    if offset.timestamp_sha256 != feature_input.timestamps_sha256:
+        raise AlignmentOffsetExportError(
+            "alignment offset timestamp SHA-256 does not match feature input"
+        )
+    if offset.transient_channel_indices != feature_input.transient_channel_indices:
+        raise AlignmentOffsetExportError(
+            "alignment offset transient channel indices do not match feature input"
+        )
+    if feature_input.input_kind == "spike-imu" and offset.spike_event_channels_used is not False:
+        raise AlignmentOffsetExportError(
+            "SpikeIMU alignment offset must declare spike_event_channels_used=false"
+        )
+
+
 def _format_offset(offset: AlignmentOffset) -> str:
     coverage = (
         "" if offset.event_coverage_ratio is None else f"{offset.event_coverage_ratio:.6f}"
@@ -285,6 +406,25 @@ def _format_offset(offset: AlignmentOffset) -> str:
         if offset.total_valid_event_count is None
         else str(offset.total_valid_event_count)
     )
+    provenance = ""
+    if offset.alignment_signal_source is not None:
+        assert offset.feature_schema is not None
+        assert offset.feature_values_sha256 is not None
+        assert offset.feature_metadata_sha256 is not None
+        assert offset.timestamp_sha256 is not None
+        assert offset.transient_channel_indices is not None
+        assert offset.spike_event_channels_used is not None
+        provenance = (
+            f"alignment_signal_source={offset.alignment_signal_source}\n"
+            f"feature_schema={offset.feature_schema}\n"
+            f"feature_values_sha256={offset.feature_values_sha256}\n"
+            f"feature_metadata_sha256={offset.feature_metadata_sha256}\n"
+            f"timestamp_sha256={offset.timestamp_sha256}\n"
+            "transient_channel_indices="
+            f"{','.join(str(index) for index in offset.transient_channel_indices)}\n"
+            "spike_event_channels_used="
+            f"{'true' if offset.spike_event_channels_used else 'false'}\n"
+        )
     return (
         f"user={offset.user}\n"
         f"action={offset.action}\n"
@@ -299,6 +439,7 @@ def _format_offset(offset: AlignmentOffset) -> str:
         f"event_coverage_ratio={coverage}\n"
         f"matched_event_count={matched}\n"
         f"total_valid_event_count={total}\n"
+        f"{provenance}"
     )
 
 
@@ -330,6 +471,39 @@ def _validate_offset(offset: AlignmentOffset) -> None:
     _optional_nonnegative_int(
         offset.total_valid_event_count, name="total_valid_event_count"
     )
+    provenance = (
+        offset.alignment_signal_source,
+        offset.feature_schema,
+        offset.feature_values_sha256,
+        offset.feature_metadata_sha256,
+        offset.timestamp_sha256,
+        offset.transient_channel_indices,
+        offset.spike_event_channels_used,
+    )
+    if any(value is not None for value in provenance):
+        if any(value is None for value in provenance):
+            raise AlignmentOffsetExportError(
+                "alignment feature provenance is incomplete"
+            )
+        _optional_nonempty_string(
+            offset.alignment_signal_source,
+            name="alignment_signal_source",
+        )
+        _optional_nonempty_string(offset.feature_schema, name="feature_schema")
+        _sha256_digest(
+            offset.feature_values_sha256,
+            name="feature_values_sha256",
+        )
+        _sha256_digest(
+            offset.feature_metadata_sha256,
+            name="feature_metadata_sha256",
+        )
+        _sha256_digest(offset.timestamp_sha256, name="timestamp_sha256")
+        _channel_indices(offset.transient_channel_indices)
+        if not isinstance(offset.spike_event_channels_used, bool):
+            raise AlignmentOffsetExportError(
+                "spike_event_channels_used must be a boolean"
+            )
 
 
 def _validate_identity(*, user: str, action: str, dataset_id: int) -> None:
@@ -383,3 +557,67 @@ def _optional_nonnegative_int(value: object, *, name: str) -> int | None:
     if value is None or value == "":
         return None
     return _nonnegative_int(value, name=name)
+
+
+def _optional_nonempty_string(value: object, *, name: str) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or not value or value.strip() != value:
+        raise AlignmentOffsetExportError(f"{name} must be a nonempty string")
+    return value
+
+
+def _sha256_digest(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64:
+        raise AlignmentOffsetExportError(f"{name} must be a SHA-256 hex digest")
+    if any(character not in "0123456789abcdefABCDEF" for character in value):
+        raise AlignmentOffsetExportError(f"{name} must be a SHA-256 hex digest")
+    return value.lower()
+
+
+def _optional_sha256(value: object, *, name: str) -> str | None:
+    if value is None or value == "":
+        return None
+    return _sha256_digest(value, name=name)
+
+
+def _channel_indices(value: object) -> tuple[int, ...]:
+    if not isinstance(value, (tuple, list)):
+        raise AlignmentOffsetExportError(
+            "transient_channel_indices must be a nonempty integer list"
+        )
+    if not value:
+        raise AlignmentOffsetExportError(
+            "transient_channel_indices must be a nonempty integer list"
+        )
+    indices = tuple(_nonnegative_int(item, name="transient_channel_indices") for item in value)
+    if len(set(indices)) != len(indices):
+        raise AlignmentOffsetExportError(
+            "transient_channel_indices must not contain duplicates"
+        )
+    return indices
+
+
+def _optional_channel_indices(value: object) -> tuple[int, ...] | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        parts = value.split(",")
+        if any(not part.strip() for part in parts):
+            raise AlignmentOffsetExportError(
+                "transient_channel_indices must be comma-separated integers"
+            )
+        value = tuple(part.strip() for part in parts)
+    return _channel_indices(value)
+
+
+def _optional_bool(value: object, *, name: str) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise AlignmentOffsetExportError(f"{name} must be a boolean")

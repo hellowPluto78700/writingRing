@@ -116,6 +116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{result.recording.dataset_id}: {len(result.imu)} samples"
         )
         print(f"  IMU: {result.output_paths.imu_path}")
+        print(f"  Timestamps: {result.output_paths.timestamps_path}")
         print(f"  Summary: {result.output_paths.summary_path}")
     print(
         f"Exported {len(results)} complete recording(s) with "

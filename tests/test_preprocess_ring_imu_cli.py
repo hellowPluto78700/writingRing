@@ -43,16 +43,21 @@ def test_cli_exports_one_complete_recording_and_summary(tmp_path: Path, capsys) 
 
     directory = output_root / "user_a" / "letters" / "3"
     imu_path = directory / "3_preprocessedIMU.npy"
+    timestamps_path = directory / "3_timestamps_us.npy"
     summary_path = directory / "3_preprocessing.json"
     values = np.load(imu_path, allow_pickle=False)
+    timestamps = np.load(timestamps_path, allow_pickle=False)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert values.shape == (12, 9)
+    np.testing.assert_array_equal(timestamps, 1_000_000.0 + np.arange(12) * 5_000.0)
     assert summary["sample_count"] == 12
     assert summary["channel_names"] == list(PREPROCESSED_IMU_COLUMNS)
     assert summary["units"] == list(PREPROCESSED_IMU_UNITS)
     assert summary["gravity_removal_method"] == "raw"
     assert summary["recording"] == {"user": "user_a", "action": "letters", "data_id": 3}
     assert "source_file_sha256" in summary
+    assert summary["timestamps_path"] == str(timestamps_path.resolve())
+    assert summary["timestamps_sha256"]
     assert "Exported 1 complete recording(s)" in capsys.readouterr().out
 
 

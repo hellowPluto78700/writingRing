@@ -119,6 +119,7 @@ def load_and_validate_timestamps(
     *,
     sample_count: int,
     sampling_rate_hz: float,
+    check_sampling_interval: bool = True,
 ) -> np.ndarray:
     """Load optional numeric timestamps and validate their recording alignment.
 
@@ -144,17 +145,20 @@ def load_and_validate_timestamps(
     if not np.isfinite(values).all():
         raise SpikeEncodingError("timestamps must contain only finite values")
     intervals = np.diff(values)
-    if len(intervals) and np.any(intervals <= 0.0):
-        raise SpikeEncodingError("timestamps must be strictly increasing")
-    expected_interval = 1.0 / _optional_finite_positive(
-        sampling_rate_hz, name="sampling_rate_hz"
-    )
-    if len(intervals) and not math.isclose(
-        float(np.median(intervals)), expected_interval, rel_tol=0.05, abs_tol=0.0
-    ):
+    if len(intervals) and np.any(intervals < 0.0):
         raise SpikeEncodingError(
-            "timestamp sampling interval is inconsistent with sampling_rate_hz"
+            "timestamps must be nondecreasing (strictly increasing is not required)"
         )
+    if check_sampling_interval:
+        expected_interval = 1.0 / _optional_finite_positive(
+            sampling_rate_hz, name="sampling_rate_hz"
+        )
+        if len(intervals) and not math.isclose(
+            float(np.median(intervals)), expected_interval, rel_tol=0.05, abs_tol=0.0
+        ):
+            raise SpikeEncodingError(
+                "timestamp sampling interval is inconsistent with sampling_rate_hz"
+            )
     values.setflags(write=False)
     return values
 

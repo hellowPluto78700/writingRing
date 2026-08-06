@@ -14,6 +14,7 @@ from writingring.preprocessing_io import (
     load_preprocessing_summary,
     sha256_file,
     validate_preprocessed_imu,
+    validate_timestamp_source_provenance,
 )
 
 
@@ -122,6 +123,30 @@ def test_loader_rejects_source_hash_and_sampling_mismatches(tmp_path: Path) -> N
     summary_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PreprocessingIOError, match="source_file_sha256"):
         load_preprocessed_imu(imu_path, allow_gravity_included=True)
+
+
+def test_timestamp_source_provenance_rejects_same_shape_replacement(
+    tmp_path: Path,
+) -> None:
+    imu_path = tmp_path / "3_preprocessedIMU.npy"
+    summary_path = tmp_path / "3_preprocessing.json"
+    timestamps_path = tmp_path / "3_timestamps_us.npy"
+    np.save(imu_path, _imu(), allow_pickle=False)
+    timestamps = np.arange(4, dtype=np.float64) * 5_000.0
+    np.save(timestamps_path, timestamps, allow_pickle=False)
+    _write_summary(summary_path, imu_path=imu_path, sample_count=4)
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["timestamps_path"] = str(timestamps_path.resolve())
+    payload["timestamps_sha256"] = sha256_file(timestamps_path)
+    summary_path.write_text(json.dumps(payload), encoding="utf-8")
+    summary = load_preprocessing_summary(summary_path)
+
+    assert validate_timestamp_source_provenance(timestamps_path, summary) == sha256_file(
+        timestamps_path
+    )
+    np.save(timestamps_path, timestamps + 1_000_000.0, allow_pickle=False)
+    with pytest.raises(PreprocessingIOError, match="timestamp source SHA-256"):
+        validate_timestamp_source_provenance(timestamps_path, summary)
 
 
 @pytest.mark.parametrize("field", (

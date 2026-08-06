@@ -89,6 +89,22 @@ def test_duplicate_ring_timestamps_belong_to_the_later_boundary_segment() -> Non
     )
 
 
+def test_label_slicing_accepts_canonical_21_channel_spike_features() -> None:
+    timestamps = np.array([100, 200, 300, 400], dtype=np.float64)
+    features = np.arange(84, dtype=np.float64).reshape(4, 21)
+
+    samples = segment_recording_by_labels(
+        feature_values=features,
+        timestamps_us=timestamps,
+        labels=_labels((100, "a"), (300, "b")),
+        config=SegmentationConfig(minimum_label_interval_us=0),
+    )
+
+    assert [sample.feature_values.shape for sample in samples] == [(2, 21), (2, 21)]
+    np.testing.assert_array_equal(samples[0].feature_values, features[:2])
+    np.testing.assert_array_equal(samples[1].feature_values, features[2:])
+
+
 def test_no_padding_or_truncation_preserves_all_segment_samples() -> None:
     short_timestamps = np.arange(100, 520, dtype=np.float64)
     short = segment_recording_by_labels(

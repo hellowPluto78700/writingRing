@@ -168,6 +168,10 @@ def _run_one(
         single_array_offsets,
         spike_encoding_output_paths,
     )
+    from writingring.preprocessing_io import (
+        sha256_file,
+        validate_timestamp_source_provenance,
+    )
 
     settings = load_encoder_settings(args.encoder_settings)
     if args.output_dtype is not None:
@@ -185,12 +189,33 @@ def _run_one(
         expected_sampling_rate_hz=float(settings["sampling_rate_hz"]),
         expected_recording=expected_recording,
     )
-    if args.timestamps_path is not None:
+    timestamp_path = _resolve_timestamp_path(
+        args,
+        input_path=input_path,
+        source_summary=source_summary,
+    )
+    if timestamp_path is not None:
         load_and_validate_timestamps(
-            args.timestamps_path,
+            timestamp_path,
             sample_count=len(input_data.preprocessed_imu),
             sampling_rate_hz=float(settings["sampling_rate_hz"]),
+            check_sampling_interval=(
+                _timestamp_unit(source_summary) != "microseconds"
+            ),
         )
+    timestamp_source_hash = None
+    timestamp_source_hash_verified = False
+    if timestamp_path is not None:
+        timestamp_source_hash = sha256_file(timestamp_path)
+        if source_summary is not None and (
+            source_summary.timestamps_path is not None
+            or source_summary.timestamps_sha256 is not None
+        ):
+            timestamp_source_hash = validate_timestamp_source_provenance(
+                timestamp_path,
+                source_summary,
+            )
+            timestamp_source_hash_verified = True
     mode, offsets_path, boundary_semantics = _resolved_boundaries(args)
     offsets = (
         load_sequence_offsets(offsets_path, sample_count=len(input_data.acceleration_g))
@@ -219,6 +244,13 @@ def _run_one(
         recording_id=(None if recording_relative_path is None else recording_relative_path.name),
         canonical=canonical,
     )
+    use_legacy_sidecars = not (
+        canonical
+        or (
+            args.encoder == "custom-wavelet"
+            and input_data.source_imu_path.name.endswith("_preprocessedIMU.npy")
+        )
+    )
     summary = publish_spike_encoding(
         output=result,
         input_data=input_data,
@@ -232,15 +264,15 @@ def _run_one(
         output_dtype=output_dtype,
         paths=paths,
         overwrite=args.overwrite,
-        source_metadata_paths=(
-            None
-            if canonical or (
-                args.encoder == "custom-wavelet"
-                and input_data.source_imu_path.name.endswith("_preprocessedIMU.npy")
-            )
-            else _source_metadata_paths(args, input_data.source_imu_path)
+        source_metadata_paths=_source_metadata_paths(
+            args,
+            input_data.source_imu_path,
+            timestamp_path=timestamp_path,
+            include_legacy_sidecars=use_legacy_sidecars,
         ),
         allow_gravity_included=args.allow_gravity_included,
+        timestamp_source_hash=timestamp_source_hash,
+        timestamp_source_hash_verified=timestamp_source_hash_verified,
     )
     summary["published_directory"] = str(paths.output_directory.resolve())
     return summary
@@ -364,15 +396,53 @@ def _resolved_boundaries(args: argparse.Namespace) -> tuple[str, Path | None, st
     return mode, args.sequence_offsets, "sequence"
 
 
-def _source_metadata_paths(args: argparse.Namespace, source_imu_path: Path) -> dict[str, Path]:
-    """Reference supplied or colocated immutable legacy sidecars."""
+def _resolve_timestamp_path(
+    args: argparse.Namespace,
+    *,
+    input_path: Path,
+    source_summary: object | None,
+) -> Path | None:
+    """Resolve the canonical timestamp sidecar before publishing metadata."""
+
+    if args.timestamps_path is not None:
+        return Path(args.timestamps_path)
+    summary_path = getattr(source_summary, "timestamps_path", None)
+    if summary_path is not None:
+        return Path(summary_path)
+    if input_path.name.endswith("_preprocessedIMU.npy"):
+        stem = input_path.name.removesuffix("_preprocessedIMU.npy")
+        candidates = (
+            input_path.with_name(f"{stem}_timestamps_us.npy"),
+            input_path.with_name(f"{stem}_timestamps.npy"),
+            input_path.with_name(f"{stem}_timestamp.npy"),
+        )
+        return next((path for path in candidates if path.is_file()), None)
+    return None
+
+
+def _timestamp_unit(source_summary: object | None) -> str | None:
+    payload = getattr(source_summary, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("timestamp_unit")
+    return value if isinstance(value, str) else None
+
+
+def _source_metadata_paths(
+    args: argparse.Namespace,
+    source_imu_path: Path,
+    *,
+    timestamp_path: Path | None = None,
+    include_legacy_sidecars: bool = True,
+) -> dict[str, Path]:
+    """Reference canonical timestamps and optional immutable legacy sidecars."""
 
     stem = _derived_stem(source_imu_path)
     explicit = {
         "labels_path": args.labels_path,
         "segment_offsets_path": args.segment_offsets_path,
         "segment_lengths_path": args.segment_lengths_path,
-        "timestamp_source_path": args.timestamps_path,
+        "timestamp_source_path": timestamp_path,
         "segments_manifest_path": args.segments_manifest_path,
     }
     candidates = {
@@ -380,6 +450,7 @@ def _source_metadata_paths(args: argparse.Namespace, source_imu_path: Path) -> d
         "segment_offsets_path": (source_imu_path.parent / f"{stem}_segment_offsets.npy",),
         "segment_lengths_path": (source_imu_path.parent / f"{stem}_segment_lengths.npy",),
         "timestamp_source_path": (
+            source_imu_path.parent / f"{stem}_timestamps_us.npy",
             source_imu_path.parent / f"{stem}_timestamps.npy",
             source_imu_path.parent / f"{stem}_timestamp.npy",
         ),
@@ -390,6 +461,8 @@ def _source_metadata_paths(args: argparse.Namespace, source_imu_path: Path) -> d
     }
     resolved: dict[str, Path] = {}
     for key, candidate_paths in candidates.items():
+        if not include_legacy_sidecars and key != "timestamp_source_path":
+            continue
         explicit_path = explicit[key]
         if explicit_path is not None:
             resolved[key] = explicit_path

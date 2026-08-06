@@ -37,10 +37,11 @@ class PreprocessingExportError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class PreprocessingOutputPaths:
-    """The two files owned by one complete-recording export."""
+    """The canonical feature, timestamp, and summary files for one recording."""
 
     output_directory: Path
     imu_path: Path
+    timestamps_path: Path
     summary_path: Path
 
 
@@ -67,6 +68,7 @@ def build_preprocessing_output_paths(
     return PreprocessingOutputPaths(
         output_directory=directory,
         imu_path=directory / f"{stem}_preprocessedIMU.npy",
+        timestamps_path=directory / f"{stem}_timestamps_us.npy",
         summary_path=directory / f"{stem}_preprocessing.json",
     )
 
@@ -96,6 +98,10 @@ def export_recording_preprocessing(
             f"{recording.dataset_id}: {error}"
         ) from error
     values = np.asarray(result.imu, dtype=dtype).copy()
+    timestamps = _validated_timestamps(
+        ring.dataframe["timestamp"].to_numpy(dtype=np.float64, copy=True),
+        sample_count=len(values),
+    )
     try:
         validate_preprocessed_imu(values)
     except PreprocessingIOError as error:
@@ -106,10 +112,18 @@ def export_recording_preprocessing(
         result=result,
         gravity_config=gravity_config,
         values=values,
+        timestamps=timestamps,
         output_dtype=dtype,
         output_path=paths.imu_path,
+        timestamps_path=paths.timestamps_path,
     )
-    _publish_artifact(paths, values=values, summary=summary, overwrite=overwrite)
+    _publish_artifact(
+        paths,
+        values=values,
+        timestamps=timestamps,
+        summary=summary,
+        overwrite=overwrite,
+    )
     try:
         published = load_preprocessed_imu(
             paths.imu_path,
@@ -185,8 +199,10 @@ def _build_summary(
     result: object,
     gravity_config: GravityRemovalConfig,
     values: np.ndarray,
+    timestamps: np.ndarray,
     output_dtype: np.dtype,
     output_path: Path,
+    timestamps_path: Path,
 ) -> dict[str, object]:
     method = str(result.method)
     gravity_removed = method != "raw"
@@ -214,6 +230,9 @@ def _build_summary(
         "units": list(PREPROCESSED_IMU_UNITS),
         "source_file": str(output_path.resolve()),
         "source_imu_path": str(output_path.resolve()),
+        "timestamps_path": str(timestamps_path.resolve()),
+        "timestamp_source_path": str(timestamps_path.resolve()),
+        "timestamp_unit": "microseconds",
         "source": {
             "ring_0_path": str(source_ring),
             "ring_0_sha256": sha256_file(source_ring),
@@ -236,6 +255,8 @@ def _build_summary(
     # The artifact hash is filled after the NPY has been staged.  Publication
     # updates this same dictionary before writing the JSON sidecar.
     summary["source_file_sha256"] = "pending"
+    summary["timestamps_sha256"] = "pending"
+    summary["timestamp_sha256"] = "pending"
     return summary
 
 
@@ -243,6 +264,7 @@ def _publish_artifact(
     paths: PreprocessingOutputPaths,
     *,
     values: np.ndarray,
+    timestamps: np.ndarray,
     summary: dict[str, object],
     overwrite: bool,
 ) -> None:
@@ -255,7 +277,11 @@ def _publish_artifact(
             f"preprocessing output already exists; use --overwrite: {destination}"
         )
     if destination.exists():
-        owned = {paths.imu_path.name, paths.summary_path.name}
+        owned = {
+            paths.imu_path.name,
+            paths.timestamps_path.name,
+            paths.summary_path.name,
+        }
         unexpected = sorted(path.name for path in destination.iterdir() if path.name not in owned)
         if unexpected:
             raise PreprocessingExportError(
@@ -267,16 +293,28 @@ def _publish_artifact(
     try:
         assert staging is not None
         staged_imu = staging / paths.imu_path.name
+        staged_timestamps = staging / paths.timestamps_path.name
         staged_summary = staging / paths.summary_path.name
         with staged_imu.open("wb") as stream:
             np.save(stream, values, allow_pickle=False)
+        with staged_timestamps.open("wb") as stream:
+            np.save(stream, timestamps, allow_pickle=False)
         summary["source_file_sha256"] = sha256_file(staged_imu)
         summary["source_imu_sha256"] = summary["source_file_sha256"]
+        summary["timestamps_sha256"] = sha256_file(staged_timestamps)
+        summary["timestamp_sha256"] = summary["timestamps_sha256"]
         staged_summary.write_text(
             json.dumps(summary, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
             encoding="utf-8",
         )
-        _verify_staged(staged_imu, staged_summary, values=values, summary=summary)
+        _verify_staged(
+            staged_imu,
+            staged_timestamps,
+            staged_summary,
+            values=values,
+            timestamps=timestamps,
+            summary=summary,
+        )
         backup = destination.with_name(f".{destination.name}.backup")
         if backup.exists():
             raise PreprocessingExportError(f"cannot publish while backup exists: {backup}")
@@ -300,15 +338,23 @@ def _publish_artifact(
 
 def _verify_staged(
     imu_path: Path,
+    timestamps_path: Path,
     summary_path: Path,
     *,
     values: np.ndarray,
+    timestamps: np.ndarray,
     summary: dict[str, object],
 ) -> None:
     stored = np.load(imu_path, allow_pickle=False)
     if stored.shape != values.shape or stored.dtype != values.dtype:
         raise PreprocessingExportError("staged preprocessing NPY failed verification")
     validate_preprocessed_imu(stored)
+    stored_timestamps = np.load(timestamps_path, allow_pickle=False)
+    if stored_timestamps.shape != timestamps.shape or not np.array_equal(
+        stored_timestamps, timestamps
+    ):
+        raise PreprocessingExportError("staged canonical timestamps failed verification")
+    _validated_timestamps(stored_timestamps, sample_count=len(values))
     try:
         loaded_summary = json.loads(summary_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -327,6 +373,22 @@ def _validated_output_dtype(value: str) -> np.dtype:
     if value not in {"float32", "float64"}:
         raise PreprocessingExportError("output_dtype must be float32 or float64")
     return np.dtype(value)
+
+
+def _validated_timestamps(values: np.ndarray, *, sample_count: int) -> np.ndarray:
+    try:
+        timestamps = np.asarray(values, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise PreprocessingExportError("Ring timestamps must be numeric") from error
+    if timestamps.ndim != 1 or len(timestamps) != sample_count or len(timestamps) == 0:
+        raise PreprocessingExportError(
+            "canonical timestamps must be a nonempty vector aligned with preprocessing rows"
+        )
+    if not np.isfinite(timestamps).all():
+        raise PreprocessingExportError("canonical timestamps must be finite")
+    if np.any(np.diff(timestamps) < 0.0):
+        raise PreprocessingExportError("canonical timestamps must be nondecreasing")
+    return np.array(timestamps, copy=True)
 
 
 def _validate_identity(recording: Recording) -> None:

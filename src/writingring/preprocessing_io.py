@@ -77,6 +77,8 @@ class PreprocessedIMUSummary:
     units: tuple[str, ...] | None
     source_file: Path | None
     source_file_sha256: str | None
+    timestamps_path: Path | None
+    timestamps_sha256: str | None
     recording: dict[str, object] | None
 
 
@@ -317,6 +319,48 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_timestamp_source_provenance(
+    timestamp_path: Path,
+    preprocessing_summary: PreprocessedIMUSummary,
+) -> str:
+    """Hash a timestamp artifact and compare it with its source summary.
+
+    Structural timestamp validation is intentionally separate from this
+    function.  This check closes the provenance boundary after shape and
+    monotonicity have been verified, so a replacement file with the same
+    number of rows cannot silently become the canonical time axis.
+    """
+
+    if not isinstance(preprocessing_summary, PreprocessedIMUSummary):
+        raise PreprocessingIOError(
+            "preprocessing_summary must be a PreprocessedIMUSummary"
+        )
+    source = Path(timestamp_path)
+    expected_path = preprocessing_summary.timestamps_path
+    if expected_path is not None and source.resolve() != expected_path.resolve():
+        raise PreprocessingIOError(
+            "timestamp path does not match preprocessing summary timestamps_path"
+        )
+    expected_hash = preprocessing_summary.timestamps_sha256
+    if expected_hash is None:
+        raise PreprocessingIOError(
+            "preprocessing summary does not declare timestamps_sha256"
+        )
+    if (
+        len(expected_hash) != 64
+        or any(character not in "0123456789abcdef" for character in expected_hash)
+    ):
+        raise PreprocessingIOError(
+            "preprocessing summary timestamps_sha256 must be a SHA-256 hex digest"
+        )
+    actual_hash = sha256_file(source)
+    if actual_hash != expected_hash:
+        raise PreprocessingIOError(
+            "timestamp source SHA-256 does not match preprocessing summary"
+        )
+    return actual_hash
+
+
 def _parse_summary(
     path: Path,
     payload: dict[str, object],
@@ -429,6 +473,12 @@ def _parse_summary(
         len(source_hash) != 64 or any(character not in "0123456789abcdef" for character in source_hash)
     ):
         raise PreprocessingIOError("preprocessing summary source_file_sha256 must be a SHA-256 hex digest")
+    timestamps_path, timestamps_hash = _summary_timestamps(path, payload)
+    if timestamps_hash is not None and (
+        len(timestamps_hash) != 64
+        or any(character not in "0123456789abcdef" for character in timestamps_hash)
+    ):
+        raise PreprocessingIOError("preprocessing summary timestamps_sha256 must be a SHA-256 hex digest")
     recording = _summary_recording(payload)
     summary = PreprocessedIMUSummary(
         path=path,
@@ -444,6 +494,8 @@ def _parse_summary(
         units=units,
         source_file=source_file,
         source_file_sha256=source_hash,
+        timestamps_path=timestamps_path,
+        timestamps_sha256=timestamps_hash,
         recording=recording,
     )
     if declared_preprocessed_artifact:
@@ -498,6 +550,36 @@ def _summary_recording(payload: Mapping[str, object]) -> dict[str, object] | Non
         if key in result and not isinstance(result[key], (str, int)):
             raise PreprocessingIOError(f"preprocessing summary recording.{key} is invalid")
     return result
+
+
+def _summary_timestamps(
+    summary_path: Path,
+    payload: Mapping[str, object],
+) -> tuple[Path | None, str | None]:
+    nested = payload.get("source")
+    source = nested if isinstance(nested, dict) else {}
+    path_value = _first_value(
+        payload,
+        source,
+        "timestamps_path",
+        "timestamp_source_path",
+        "timestamps_us_path",
+    )
+    timestamp_path: Path | None = None
+    if path_value is not None:
+        if not isinstance(path_value, str) or not path_value:
+            raise PreprocessingIOError("preprocessing summary timestamps_path must be a nonempty string")
+        timestamp_path = Path(path_value)
+        if not timestamp_path.is_absolute():
+            timestamp_path = summary_path.parent / timestamp_path
+    hash_value = _first_value(
+        payload,
+        source,
+        "timestamps_sha256",
+        "timestamp_sha256",
+    )
+    timestamp_hash = None if hash_value is None else str(hash_value).lower()
+    return timestamp_path, timestamp_hash
 
 
 def _summary_includes_gravity(summary: PreprocessedIMUSummary) -> bool:

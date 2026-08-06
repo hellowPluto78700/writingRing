@@ -35,6 +35,11 @@ from writingring.imu_preprocessing import (
     preprocess_ring_imu,
 )
 from writingring.ring_loader import RingLoadError, load_ring
+from writingring.recording_features import (
+    RecordingFeatureError,
+    RecordingFeatureInput,
+    load_recording_features,
+)
 
 
 # Compatibility alias for source columns. Exported segmentation data always
@@ -92,6 +97,12 @@ class SegmentedSample:
     label_timestamp_us: float
     next_label_timestamp_us: float | None
 
+    @property
+    def feature_values(self) -> np.ndarray:
+        """Compatibility-neutral name for the sliced feature matrix."""
+
+        return self.imu
+
 
 @dataclass(frozen=True, slots=True)
 class SegmentationOutputPaths:
@@ -103,6 +114,12 @@ class SegmentationOutputPaths:
     segment_lengths_path: Path
     segments_csv_path: Path
     summary_json_path: Path
+
+    @property
+    def feature_values_path(self) -> Path:
+        """Return the feature artifact path without assuming Ring channels."""
+
+        return self.raw_imu_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +135,12 @@ class UserActionSegmentationResult:
     manifest: pd.DataFrame
     summary: dict[str, object]
     output_paths: SegmentationOutputPaths
+
+    @property
+    def feature_values(self) -> np.ndarray:
+        """Return the contiguous feature values under the generic name."""
+
+        return self.raw_imu
 
 
 def load_timestamp_labels(path: Path) -> tuple[SegmentLabel, ...]:
@@ -166,15 +189,27 @@ def load_timestamp_labels(path: Path) -> tuple[SegmentLabel, ...]:
 
 def segment_recording_by_labels(
     *,
-    ring_imu: np.ndarray,
-    ring_timestamps_us: np.ndarray,
+    feature_values: np.ndarray | None = None,
+    timestamps_us: np.ndarray | None = None,
     labels: Sequence[SegmentLabel],
     config: SegmentationConfig = SegmentationConfig(),
+    ring_imu: np.ndarray | None = None,
+    ring_timestamps_us: np.ndarray | None = None,
 ) -> tuple[SegmentedSample, ...]:
-    """Split one Ring stream at labels without padding or truncation."""
+    """Split any finite feature matrix at timestamp labels.
+
+    ``ring_imu`` and ``ring_timestamps_us`` remain accepted as deprecated
+    keyword aliases for existing callers.
+    """
 
     dtype = _validated_config(config)
-    imu, timestamps = _validated_ring_inputs(ring_imu, ring_timestamps_us)
+    feature_values, timestamps_us = _resolve_feature_arguments(
+        feature_values=feature_values,
+        timestamps_us=timestamps_us,
+        ring_imu=ring_imu,
+        ring_timestamps_us=ring_timestamps_us,
+    )
+    imu, timestamps = _validated_feature_inputs(feature_values, timestamps_us)
     markers = _validated_labels(labels)
     _validate_label_range(markers, timestamps)
     skip_reasons = label_start_skip_reasons(
@@ -239,14 +274,18 @@ def build_segmentation_output_paths(
     *,
     user: str,
     action: str,
+    input_kind: str = "raw-ring",
 ) -> SegmentationOutputPaths:
     """Return deterministic paths without creating or overwriting anything."""
 
     _validate_identity(user=user, action=action)
     base = Path(output_root) / user / f"action_{action}"
     stem = f"{user}_action_{action}"
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise SegmentationError("input_kind must be 'raw-ring' or 'spike-imu'")
+    feature_suffix = "rawIMU" if input_kind == "raw-ring" else "spikeIMU"
     return SegmentationOutputPaths(
-        raw_imu_path=base / f"{stem}_rawIMU.npy",
+        raw_imu_path=base / f"{stem}_{feature_suffix}.npy",
         labels_path=base / f"{stem}_labels.npy",
         segment_offsets_path=base / f"{stem}_segment_offsets.npy",
         segment_lengths_path=base / f"{stem}_segment_lengths.npy",
@@ -264,14 +303,32 @@ def segment_user_action(
     config: SegmentationConfig = SegmentationConfig(),
     gravity_config: GravityRemovalConfig | None = None,
     overwrite: bool = False,
+    input_kind: str = "raw-ring",
+    spike_root: Path | None = None,
+    expected_sampling_rate_hz: float | None = None,
+    label_overlay_requested: bool = False,
 ) -> UserActionSegmentationResult:
-    """Remove gravity, then aggregate variable-length segments and save them."""
+    """Load one feature kind, then aggregate timestamp-label segments."""
 
     dtype = _validated_config(config)
-    effective_gravity_config = _effective_gravity_config(gravity_config)
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise SegmentationError("input_kind must be 'raw-ring' or 'spike-imu'")
+    if input_kind == "spike-imu" and spike_root is None:
+        raise SegmentationError("spike_root is required for input_kind='spike-imu'")
+    if input_kind == "raw-ring" and spike_root is not None:
+        raise SegmentationError("spike_root is only valid for input_kind='spike-imu'")
+    if input_kind == "spike-imu" and gravity_config is not None:
+        raise SegmentationError(
+            "gravity preprocessing settings are not valid for input_kind='spike-imu'"
+        )
+    effective_gravity_config = (
+        _effective_gravity_config(gravity_config) if input_kind == "raw-ring" else None
+    )
     _validate_identity(user=user, action=action)
     if not isinstance(overwrite, bool):
         raise SegmentationError("overwrite must be a boolean")
+    if not isinstance(label_overlay_requested, bool):
+        raise SegmentationError("label_overlay_requested must be a boolean")
     try:
         recordings = discover_recordings(data_root)
     except DiscoveryError as error:
@@ -290,13 +347,24 @@ def segment_user_action(
         )
 
     all_samples: list[SegmentedSample] = []
+    feature_inputs: list[RecordingFeatureInput] = []
     manifest_rows: list[dict[str, object]] = []
     skipped_label_counts: dict[str, int] = {}
     source_label_count = 0
     for recording in selected:
-        ring_imu, timestamps = _recording_ring_arrays(
-            recording, gravity_config=effective_gravity_config
-        )
+        try:
+            feature_input = load_recording_features(
+                recording,
+                input_kind=input_kind,
+                gravity_config=effective_gravity_config,
+                spike_root=spike_root,
+                expected_sampling_rate_hz=expected_sampling_rate_hz,
+            )
+        except RecordingFeatureError as error:
+            raise SegmentationError(str(error)) from error
+        feature_values = feature_input.values
+        timestamps = feature_input.timestamps_us
+        feature_inputs.append(feature_input)
         if recording.timestamp_path is None:
             raise SegmentationError(
                 f"dataset {recording.dataset_id} is missing its timestamp label file"
@@ -311,8 +379,8 @@ def segment_user_action(
             if reason is not None:
                 skipped_label_counts[reason] = skipped_label_counts.get(reason, 0) + 1
         samples = segment_recording_by_labels(
-            ring_imu=ring_imu,
-            ring_timestamps_us=timestamps,
+            feature_values=feature_values,
+            timestamps_us=timestamps,
             labels=markers,
             config=config,
         )
@@ -328,6 +396,7 @@ def segment_user_action(
                     sample=sample,
                     timestamps=timestamps,
                     gravity_config=effective_gravity_config,
+                    feature_input=feature_input,
                 )
             )
 
@@ -351,8 +420,16 @@ def segment_user_action(
         minimum_label_interval_us=config.minimum_label_interval_us,
         maximum_segment_duration_us=config.maximum_segment_duration_us,
         gravity_config=effective_gravity_config,
+        feature_input_kind=input_kind,
+        feature_inputs=feature_inputs,
+        label_overlay_requested=label_overlay_requested,
     )
-    paths = build_segmentation_output_paths(output_root, user=user, action=action)
+    paths = build_segmentation_output_paths(
+        output_root,
+        user=user,
+        action=action,
+        input_kind=input_kind,
+    )
     _write_outputs(
         paths,
         raw_imu=raw_imu,
@@ -392,7 +469,27 @@ def _recording_ring_arrays(
             f"{recording.dataset_id} primary Ring: {error}"
         ) from error
     timestamps = ring.dataframe[_TIMESTAMP_COLUMN].to_numpy(copy=True)
-    return _validated_ring_inputs(imu, timestamps)
+    return _validated_feature_inputs(imu, timestamps)
+
+
+def _resolve_feature_arguments(
+    *,
+    feature_values: np.ndarray | None,
+    timestamps_us: np.ndarray | None,
+    ring_imu: np.ndarray | None,
+    ring_timestamps_us: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if feature_values is not None and ring_imu is not None:
+        raise SegmentationError("feature_values and deprecated ring_imu cannot both be supplied")
+    if timestamps_us is not None and ring_timestamps_us is not None:
+        raise SegmentationError(
+            "timestamps_us and deprecated ring_timestamps_us cannot both be supplied"
+        )
+    values = feature_values if feature_values is not None else ring_imu
+    timestamps = timestamps_us if timestamps_us is not None else ring_timestamps_us
+    if values is None or timestamps is None:
+        raise SegmentationError("feature_values and timestamps_us are required")
+    return values, timestamps
 
 
 def _manifest_row(
@@ -404,10 +501,11 @@ def _manifest_row(
     label_index: int,
     sample: SegmentedSample,
     timestamps: np.ndarray,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
+    feature_input: RecordingFeatureInput,
 ) -> dict[str, object]:
     stop = sample.stop_sample_index_exclusive
-    return {
+    row: dict[str, object] = {
         "segment_index": segment_index,
         "user": user,
         "action": action,
@@ -421,25 +519,18 @@ def _manifest_row(
         "first_sample_timestamp_us": float(timestamps[sample.start_sample_index]),
         "last_sample_timestamp_us": float(timestamps[stop - 1]),
         "sample_count": sample.sample_count,
-        "gravity_removal_method": gravity_config.gravity_removal_method,
-        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
-        "channel_schema": "dual_acceleration_units_v1",
-        "acceleration_semantics": _acceleration_semantics(
-            gravity_config.gravity_removal_method
-        ),
-        "acceleration_g_unit": "g",
-        "acceleration_m_s2_unit": "m/s^2",
-        "gyroscope_unit": "rad/s",
-        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
-        "gravity_low_pass_cutoff_hz": (
+        "input_kind": feature_input.input_kind,
+        "feature_schema": feature_input.feature_schema,
+        "channel_count": feature_input.channel_count,
+        "channel_names": list(feature_input.channel_names),
+        "units": list(feature_input.units),
+        "transient_channel_indices": list(feature_input.transient_channel_indices),
+        "transient_channel_names": list(feature_input.transient_channel_names),
+        "timestamps_sha256": feature_input.timestamps_sha256,
+        "timestamps_path": (
             None
-            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-            else gravity_config.low_pass_cutoff_hz
-        ),
-        "gravity_madgwick_beta": (
-            None
-            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-            else gravity_config.madgwick_beta
+            if feature_input.timestamps_path is None
+            else str(feature_input.timestamps_path)
         ),
         "is_last_label": sample.next_label_timestamp_us is None,
         "segment_end_source": (
@@ -450,6 +541,40 @@ def _manifest_row(
         "ring_source_path": str(recording.ring_0_path),
         "label_source_path": str(recording.timestamp_path),
     }
+    if gravity_config is None:
+        row.update(
+            {
+                "gravity_removal_method": None,
+                "acceleration_semantics": None,
+                "standard_gravity_m_s2": None,
+                "gravity_low_pass_cutoff_hz": None,
+                "gravity_madgwick_beta": None,
+            }
+        )
+    else:
+        row.update(
+            {
+                "gravity_removal_method": gravity_config.gravity_removal_method,
+                "acceleration_semantics": _acceleration_semantics(
+                    gravity_config.gravity_removal_method
+                ),
+                "acceleration_g_unit": "g",
+                "acceleration_m_s2_unit": "m/s^2",
+                "gyroscope_unit": "rad/s",
+                "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
+                "gravity_low_pass_cutoff_hz": (
+                    None
+                    if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                    else gravity_config.low_pass_cutoff_hz
+                ),
+                "gravity_madgwick_beta": (
+                    None
+                    if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+                    else gravity_config.madgwick_beta
+                ),
+            }
+        )
+    return row
 
 
 def _summary(
@@ -463,11 +588,33 @@ def _summary(
     skipped_label_counts: dict[str, int],
     minimum_label_interval_us: float,
     maximum_segment_duration_us: float,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
+    feature_input_kind: str,
+    feature_inputs: Sequence[RecordingFeatureInput],
+    label_overlay_requested: bool,
 ) -> dict[str, object]:
     lengths = np.asarray([sample.sample_count for sample in samples], dtype=np.int64)
-    return {
+    if not feature_inputs:
+        raise SegmentationError("at least one feature input is required")
+    first_feature = feature_inputs[0]
+    if any(
+        feature.input_kind != feature_input_kind
+        or feature.feature_schema != first_feature.feature_schema
+        or feature.channel_names != first_feature.channel_names
+        or feature.units != first_feature.units
+        for feature in feature_inputs
+    ):
+        raise SegmentationError("feature inputs do not share one segmentation schema")
+    summary: dict[str, object] = {
         "boundary_mode": "label",
+        "boundary_source": "timestamp_labels",
+        "alignment_required": False,
+        "aligned_board_overlay": {
+            "requested": label_overlay_requested,
+            "affects_boundaries": False,
+        },
+        "input_kind": feature_input_kind,
+        "feature_schema": first_feature.feature_schema,
         "user": user,
         "action": action,
         "recording_count": len(recordings),
@@ -478,50 +625,77 @@ def _summary(
         "skipped_label_counts_by_reason": dict(sorted(skipped_label_counts.items())),
         "minimum_label_interval_us": minimum_label_interval_us,
         "maximum_segment_duration_us": maximum_segment_duration_us,
-        "gravity_removal": {
-            "method": gravity_config.gravity_removal_method,
-            "sampling_rate_hz": (
-                None
-                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-                else gravity_config.sampling_rate_hz
-            ),
-            "low_pass_cutoff_hz": (
-                None
-                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-                else gravity_config.low_pass_cutoff_hz
-            ),
-            "madgwick_beta": (
-                None
-                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-                else gravity_config.madgwick_beta
-            ),
-            "strict_calibration": (
-                None
-                if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
-                else gravity_config.strict_calibration
-            ),
-        },
+        "gravity_removal": _gravity_summary(gravity_config),
         "total_imu_sample_count": int(np.sum(lengths)),
         "output_schema_version": 3,
-        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
-        "channel_names": list(PREPROCESSED_IMU_COLUMNS),
-        "units": {
-            "acceleration_x_g": "g", "acceleration_y_g": "g", "acceleration_z_g": "g",
-            "acceleration_x": "m/s^2", "acceleration_y": "m/s^2", "acceleration_z": "m/s^2",
-            "gyro_x": "rad/s", "gyro_y": "rad/s", "gyro_z": "rad/s",
+        "channel_count": first_feature.channel_count,
+        "channel_names": list(first_feature.channel_names),
+        "units": list(first_feature.units),
+        "sampling_rate_hz": first_feature.sampling_rate_hz,
+        "sample_count_by_recording": {
+            str(feature.dataset_id): feature.sample_count for feature in feature_inputs
         },
-        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
-        "acceleration_semantics": _acceleration_semantics(
-            gravity_config.gravity_removal_method
+        "transient_channel_indices": list(first_feature.transient_channel_indices),
+        "transient_channel_names": list(first_feature.transient_channel_names),
+        "event_channel_slice": (
+            [0, 15] if feature_input_kind == "spike-imu" else None
         ),
+        "acceleration_m_s2_channel_slice": (
+            [15, 18] if feature_input_kind == "spike-imu" else [3, 6]
+        ),
+        "gyroscope_channel_slice": (
+            [18, 21] if feature_input_kind == "spike-imu" else [6, 9]
+        ),
+        "timestamps": {
+            "unit": "microseconds",
+            "sample_count": first_feature.sample_count,
+            "paths": sorted(
+                {
+                    str(feature.timestamps_path)
+                    for feature in feature_inputs
+                    if feature.timestamps_path is not None
+                }
+            ),
+            "sha256": sorted({feature.timestamps_sha256 for feature in feature_inputs}),
+        },
+        "feature_provenance": [
+            {
+                "dataset_id": feature.dataset_id,
+                "values_path": str(feature.values_path),
+                "values_sha256": feature.values_sha256,
+                "metadata_path": (
+                    None if feature.metadata_path is None else str(feature.metadata_path)
+                ),
+                "metadata_sha256": feature.metadata_sha256,
+                "timestamps_path": (
+                    None
+                    if feature.timestamps_path is None
+                    else str(feature.timestamps_path)
+                ),
+                "timestamps_sha256": feature.timestamps_sha256,
+                "sampling_rate_hz": feature.sampling_rate_hz,
+            }
+            for feature in feature_inputs
+        ],
         "minimum_segment_length": int(np.min(lengths)),
         "maximum_segment_length": int(np.max(lengths)),
         "median_segment_length": float(np.median(lengths)),
         "output_dtype": dtype.name,
         "time_mapping": "segment_i = [label_i_timestamp, label_(i+1)_timestamp)",
         "padding_or_truncation": "disabled",
-        "storage": "rawIMU is contiguous; segment_offsets delimit each segment",
+        "storage": (
+            "spikeIMU is contiguous; segment_offsets delimit each segment"
+            if feature_input_kind == "spike-imu"
+            else "rawIMU is contiguous; segment_offsets delimit each segment"
+        ),
     }
+    if gravity_config is not None:
+        summary["standard_gravity_m_s2"] = STANDARD_GRAVITY_M_S2
+        summary["acceleration_semantics"] = _acceleration_semantics(
+            gravity_config.gravity_removal_method
+        )
+    summary["time_mapping"] = "segment_i = [label_i_timestamp, label_(i+1)_timestamp)"
+    return summary
 
 
 def _write_outputs(
@@ -564,7 +738,12 @@ def _write_outputs(
 
 
 def _legacy_output_paths(paths: SegmentationOutputPaths) -> tuple[Path, Path]:
-    stem = paths.raw_imu_path.name.removesuffix("_rawIMU.npy")
+    filename = paths.raw_imu_path.name
+    stem = filename
+    for suffix in ("_rawIMU.npy", "_spikeIMU.npy"):
+        if filename.endswith(suffix):
+            stem = filename.removesuffix(suffix)
+            break
     return (
         paths.raw_imu_path.with_name(f"{stem}_valid_lengths.npy"),
         paths.raw_imu_path.with_name(f"{stem}_valid_mask.npy"),
@@ -676,6 +855,36 @@ def _effective_gravity_config(
     return gravity_config
 
 
+def _gravity_summary(
+    gravity_config: GravityRemovalConfig | None,
+) -> dict[str, object] | None:
+    if gravity_config is None:
+        return None
+    return {
+        "method": gravity_config.gravity_removal_method,
+        "sampling_rate_hz": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.sampling_rate_hz
+        ),
+        "low_pass_cutoff_hz": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.low_pass_cutoff_hz
+        ),
+        "madgwick_beta": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.madgwick_beta
+        ),
+        "strict_calibration": (
+            None
+            if gravity_config.gravity_removal_method == _RAW_IMU_METHOD
+            else gravity_config.strict_calibration
+        ),
+    }
+
+
 def _acceleration_semantics(method: str) -> str:
     if method == _RAW_IMU_METHOD:
         return "measured_acceleration_with_gravity"
@@ -684,24 +893,33 @@ def _acceleration_semantics(method: str) -> str:
     return "gravity_removed_linear_acceleration"
 
 
+def _validated_feature_inputs(
+    feature_values: np.ndarray,
+    timestamps_us: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        values = np.asarray(feature_values, dtype=np.float64)
+        timestamps = np.asarray(timestamps_us, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise SegmentationError("feature values and timestamps must be numeric") from error
+    if values.ndim != 2 or values.shape[1] == 0 or len(values) == 0:
+        raise SegmentationError("feature values must have nonempty shape (M, C)")
+    if timestamps.ndim != 1 or len(timestamps) != len(values):
+        raise SegmentationError("timestamps must be a length-M vector")
+    if not np.isfinite(values).all() or not np.isfinite(timestamps).all():
+        raise SegmentationError("feature values and timestamps must be finite")
+    if np.any(np.diff(timestamps) < 0.0):
+        raise SegmentationError("timestamps must be nondecreasing")
+    return values.copy(), timestamps.copy()
+
+
 def _validated_ring_inputs(
     ring_imu: np.ndarray,
     ring_timestamps_us: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    try:
-        imu = np.asarray(ring_imu, dtype=np.float64)
-        timestamps = np.asarray(ring_timestamps_us, dtype=np.float64)
-    except (TypeError, ValueError) as error:
-        raise SegmentationError("Ring IMU and timestamps must be numeric") from error
-    if imu.ndim != 2 or imu.shape[1] not in {len(IMU_CHANNEL_COLUMNS), len(PREPROCESSED_IMU_COLUMNS)} or len(imu) == 0:
-        raise SegmentationError("Ring IMU must have nonempty shape (M, 6) or (M, 9)")
-    if timestamps.ndim != 1 or len(timestamps) != len(imu):
-        raise SegmentationError("Ring timestamps must be a length-M vector")
-    if not np.isfinite(imu).all() or not np.isfinite(timestamps).all():
-        raise SegmentationError("Ring IMU and timestamps must be finite")
-    if np.any(np.diff(timestamps) < 0.0):
-        raise SegmentationError("Ring timestamps must be nondecreasing")
-    return imu.copy(), timestamps.copy()
+    """Deprecated compatibility wrapper for the generic feature validator."""
+
+    return _validated_feature_inputs(ring_imu, ring_timestamps_us)
 
 
 def _validated_labels(labels: Sequence[SegmentLabel]) -> tuple[SegmentLabel, ...]:

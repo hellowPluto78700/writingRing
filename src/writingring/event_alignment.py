@@ -477,8 +477,20 @@ def compute_transient_score(
         )
     except (TypeError, ValueError) as error:
         raise EventAlignmentError("Ring transient signals must be numeric") from error
+    return compute_transient_score_array(signals)
+
+
+def compute_transient_score_array(values: np.ndarray) -> np.ndarray:
+    """Return the same robust transient score for an arbitrary feature matrix."""
+
+    try:
+        signals = np.asarray(values, dtype=np.float64)
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError("transient feature values must be numeric") from error
+    if signals.ndim != 2 or signals.shape[0] == 0 or signals.shape[1] == 0:
+        raise EventAlignmentError("transient feature values must have nonempty shape (N, C)")
     if not np.isfinite(signals).all():
-        raise EventAlignmentError("Ring transient signals must be finite")
+        raise EventAlignmentError("transient feature values must be finite")
     differences = np.diff(signals, axis=0, prepend=signals[[0]])
     median = np.median(differences, axis=0)
     mad = np.median(np.abs(differences - median), axis=0)

@@ -27,6 +27,7 @@ from writingring.spike_encoding.io import (
     validate_sequence_offsets,
 )
 from writingring.preprocessing_io import (
+    PREPROCESSED_IMU_UNITS,
     PreprocessingIOError,
     sha256_file,
     validate_preprocessing_summary,
@@ -43,6 +44,7 @@ _SEQUENCE_FIELDS = (
     "negative_event_count",
     "event_density",
 )
+_SPIKE_IMU_EVENT_UNITS = ("event",) * 15
 
 
 class SpikeEncodingPublishError(SpikeEncodingError):
@@ -138,6 +140,8 @@ def publish_spike_encoding(
     overwrite: bool,
     source_metadata_paths: Mapping[str, Path | None] | None = None,
     allow_gravity_included: bool = False,
+    timestamp_source_hash: str | None = None,
+    timestamp_source_hash_verified: bool = False,
 ) -> dict[str, object]:
     """Stage, verify, and atomically publish one complete encoding result."""
 
@@ -184,6 +188,8 @@ def publish_spike_encoding(
         spike_imu=spike_imu,
         offset_semantics=offset_semantics,
         offsets_artifact=offsets_path.name,
+        timestamp_source_hash=timestamp_source_hash,
+        timestamp_source_hash_verified=timestamp_source_hash_verified,
     )
     _publish_staged(
         paths,
@@ -303,6 +309,8 @@ def _build_summary(
     spike_imu: np.ndarray | None,
     offset_semantics: str,
     offsets_artifact: str,
+    timestamp_source_hash: str | None,
+    timestamp_source_hash_verified: bool,
 ) -> dict[str, object]:
     metadata = getattr(encoder, "encoding_metadata", None)
     settings = dict(metadata) if isinstance(metadata, Mapping) else dict(effective_settings)
@@ -320,8 +328,15 @@ def _build_summary(
     }
     if "channel_order" in output_metadata:
         output_section["channel_order"] = output_metadata["channel_order"]
+    metadata_paths = dict(source_metadata_paths or {})
+    if (
+        source_summary is not None
+        and source_summary.timestamps_path is not None
+        and "timestamp_source_path" not in metadata_paths
+    ):
+        metadata_paths["timestamp_source_path"] = source_summary.timestamps_path
     try:
-        metadata_references = validate_source_metadata_paths(source_metadata_paths)
+        metadata_references = validate_source_metadata_paths(metadata_paths)
     except SpikeEncodingError as error:
         raise SpikeEncodingPublishError(str(error)) from error
     source_hash = (
@@ -334,6 +349,48 @@ def _build_summary(
         else dict(source_summary.recording)
     )
     has_metadata_references = any(value is not None for value in metadata_references.values())
+    timestamp_reference = metadata_references["timestamp_source_path"]
+    timestamp_hash = (
+        None
+        if timestamp_reference is None
+        else sha256_file(Path(timestamp_reference))
+    )
+    if not isinstance(timestamp_source_hash_verified, bool):
+        raise SpikeEncodingPublishError(
+            "timestamp_source_hash_verified must be a boolean"
+        )
+    if timestamp_source_hash is not None:
+        if (
+            not isinstance(timestamp_source_hash, str)
+            or len(timestamp_source_hash) != 64
+            or any(
+                character not in "0123456789abcdefABCDEF"
+                for character in timestamp_source_hash
+            )
+        ):
+            raise SpikeEncodingPublishError(
+                "timestamp_source_hash must be a SHA-256 hex digest"
+            )
+        timestamp_source_hash = timestamp_source_hash.lower()
+        if timestamp_hash is None:
+            raise SpikeEncodingPublishError(
+                "timestamp_source_hash requires a timestamp source path"
+            )
+        if timestamp_hash != timestamp_source_hash:
+            raise SpikeEncodingPublishError(
+                "timestamp source hash changed before publication"
+            )
+    if timestamp_source_hash_verified and timestamp_source_hash is None:
+        raise SpikeEncodingPublishError(
+            "timestamp_source_hash_verified requires a verified timestamp hash"
+        )
+    timestamp_unit = (
+        None
+        if source_summary is None
+        else source_summary.payload.get("timestamp_unit")
+    )
+    if timestamp_unit is not None and not isinstance(timestamp_unit, str):
+        raise SpikeEncodingPublishError("input summary timestamp_unit must be a string")
     source_section: dict[str, object] = {
         "source_imu_path": str(input_data.source_imu_path.resolve()),
         "preprocessed_imu_path": str(input_data.source_imu_path.resolve()),
@@ -345,6 +402,13 @@ def _build_summary(
         "acceleration_semantics": None if source_summary is None else source_summary.acceleration_semantics,
         "metadata_references": metadata_references,
         "recording": source_recording,
+        "timestamps_path": timestamp_reference,
+        "timestamp_source_path": timestamp_reference,
+        "timestamps_sha256": timestamp_hash,
+        "timestamp_sha256": timestamp_hash,
+        "timestamp_unit": timestamp_unit,
+        "source_hash_verified": bool(timestamp_source_hash_verified),
+        "timestamp_source_hash_verified": bool(timestamp_source_hash_verified),
     }
     summary = {
         "schema_version": 3,
@@ -353,6 +417,12 @@ def _build_summary(
         "source": source_section,
         "source_imu_path": str(input_data.source_imu_path.resolve()),
         "source_file_sha256": source_hash,
+        "timestamps_path": timestamp_reference,
+        "timestamps_sha256": timestamp_hash,
+        "timestamp_sha256": timestamp_hash,
+        "timestamp_unit": timestamp_unit,
+        "source_hash_verified": bool(timestamp_source_hash_verified),
+        "timestamp_source_hash_verified": bool(timestamp_source_hash_verified),
         "recording": source_recording,
         "input_channel_names": list(PREPROCESSED_IMU_COLUMNS),
         "encoder_input_channel_names": list(PREPROCESSED_IMU_COLUMNS[:3]),
@@ -417,6 +487,9 @@ def _build_summary(
             "dtype": spike_imu.dtype.name,
             "source_imu_columns": [3, 4, 5, 6, 7, 8],
             "source_raw_imu_columns": [3, 4, 5, 6, 7, 8],
+            "units": list(_SPIKE_IMU_EVENT_UNITS + PREPROCESSED_IMU_UNITS[3:]),
+            "sha256": "pending",
+            "spike_imu_sha256": "pending",
         }
     if output.encoder_name == "custom-wavelet":
         summary["source"]["metadata_usage"] = {
@@ -472,6 +545,15 @@ def _publish_staged(
         _save_npy(staged.spike_events_path, values)
         if spike_imu is not None:
             _save_npy(staged.spike_imu_path, spike_imu)
+            spike_imu_hash = sha256_file(staged.spike_imu_path)
+            spike_section = summary.get("spike_imu")
+            if not isinstance(spike_section, dict):
+                raise SpikeEncodingPublishError(
+                    "spikeIMU output is missing its metadata section"
+                )
+            spike_section["sha256"] = spike_imu_hash
+            spike_section["spike_imu_sha256"] = spike_imu_hash
+            summary["spike_imu_sha256"] = spike_imu_hash
         _save_npy(_staged_offset_path(staged, offsets_path), offsets)
         staged.sequences_csv_path.write_text(_csv_text(statistics), encoding="utf-8")
         staged.summary_json_path.write_text(
@@ -579,6 +661,13 @@ def _verify_staged(
         raise SpikeEncodingPublishError("staged summary JSON failed verification") from error
     if not isinstance(loaded_summary, dict):
         raise SpikeEncodingPublishError("staged summary JSON failed verification")
+    if spike_imu is not None:
+        spike_section = loaded_summary.get("spike_imu")
+        if not isinstance(spike_section, dict):
+            raise SpikeEncodingPublishError("staged spikeIMU metadata failed verification")
+        expected_hash = spike_section.get("sha256")
+        if expected_hash != sha256_file(paths.spike_imu_path):
+            raise SpikeEncodingPublishError("staged spikeIMU hash failed verification")
 
 
 def _publish_directory(staging: Path, *, destination: Path, overwrite: bool) -> None:

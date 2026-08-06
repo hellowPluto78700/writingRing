@@ -114,7 +114,7 @@ python scripts/segment_ring_imu.py \
   --output-root outputs/segmentedIMU
 ```
 
-The default `--boundary-mode label` writes contiguous preprocessed IMU plus
+The default `--boundary-mode label` writes contiguous preprocessed Ring IMU plus
 segment offsets and lengths, string labels, an audit CSV, and JSON summary. Use
 `--gravity-removal-method madgwick` for IMU-only sensor fusion; it writes to
 `outputs/segmentedIMU_Madgwick` by default. It is strict about
@@ -155,7 +155,7 @@ python scripts/segment_ring_imu.py \
 See [docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 for the required offset layout, Board-event rules, and output schema.
 
-All segmentation methods write the same nine preprocessed channels, in this
+Raw-ring segmentation writes the same nine preprocessed channels, in this
 order:
 `acceleration_x_g`, `acceleration_y_g`, `acceleration_z_g`,
 `acceleration_x`, `acceleration_y`, `acceleration_z`, `gyro_x`, `gyro_y`,
@@ -171,6 +171,41 @@ selected method and acceleration semantics.
 contiguous preprocessed feature tensor rather than necessarily raw acceleration
 and does not contain the Ring timestamp column. See
 [docs/notes/XYLO_GRAVITY_REMOVAL.md](docs/notes/XYLO_GRAVITY_REMOVAL.md) for the Xylo mode.
+
+### SpikeIMU label segmentation
+
+Preprocessed export also writes the canonical timestamp sidecar
+`<data_id>_timestamps_us.npy` next to `<data_id>_preprocessedIMU.npy` and its
+JSON summary. Batch spike encoding carries that same timestamp artifact into
+the published metadata. The `spike-imu` input path consumes the published
+`spikeIMU.npy` directly; it never removes gravity, resamples, or reads the
+Board stream to determine label boundaries:
+
+```bash
+python scripts/segment_ring_imu.py \
+  --data-root data_sample/data \
+  --user user_0 --action 0 \
+  --input-kind spike-imu \
+  --spike-root outputs/spikeEncoding/custom-wavelet \
+  --boundary-mode label \
+  --output-root outputs/segmentedSpikeIMU/label
+```
+
+The loader validates the recording identity, `(N, 21)` schema, finite values,
+canonical units, sample count, SHA-256 hashes, and nondecreasing canonical
+timestamps. Label boundaries use `searchsorted` on those timestamps, so the
+resulting `*_spikeIMU.npy` keeps all 21 columns and the original row order.
+Gravity options are invalid in this mode; an explicitly supplied
+`--sampling-rate` is only checked against SpikeIMU metadata. Board-assisted
+SpikeIMU boundaries are reserved for the later alignment implementation and
+are rejected explicitly.
+
+For a diagnostic figure, add `--write-label-verification`. The transient score
+uses only columns `15:21` (m/s² acceleration and rad/s gyro). Optional
+`--overlay-aligned-board-events` plus `--alignment-offset-root` adds Board
+events to the figure only; it does not change segment offsets, lengths, labels,
+or the exported feature matrix. See
+[docs/notes/SPIKE_SEGMENTATION_PIPELINE.md](docs/notes/SPIKE_SEGMENTATION_PIPELINE.md).
 
 Xylo is optional; raw, low-pass, and Madgwick installs do not require its
 runtime. Install it only before selecting `xylo-rotate-and-remove-gravity`:
@@ -578,7 +613,7 @@ Install the test extra and run:
 python -m pytest -q
 ```
 
-The latest complete acceptance run verified `174 passed`.
+The latest complete acceptance run verified `416 passed`.
 
 ## Project structure
 
