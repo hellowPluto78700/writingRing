@@ -8,6 +8,7 @@ visualizing the WritingRing dataset. It includes:
 - Board chunk loading with structured validation;
 - reusable Matplotlib plots;
 - command-line listing, inspection, and plotting tools; and
+- complete-recording IMU preprocessing and spike-encoding exports; and
 - a Jupyter notebook for interactive exploration.
 
 The implementation is intentionally conservative: it preserves the stored
@@ -34,7 +35,72 @@ python scripts/align_ring_board.py \
 See [docs/notes/ALIGNMENT_OUTPUTS.md](docs/notes/ALIGNMENT_OUTPUTS.md) for the output
 layout, label-time-domain behavior, and overwrite policy.
 
-## IMU segmentation: label or aligned Board events
+## Complete gravity-to-spike workflow
+
+The primary handoff to spike encoding is one complete, gravity-preprocessed
+recording. It does not require timestamp labels or segmentation sidecars:
+
+```text
+primary Ring recording
+    → IMU preprocessing / gravity removal
+    → complete preprocessed IMU (N, 9)
+    → Custom Wavelet spike encoding
+```
+
+Export every discovered recording (or add `--user`, `--action`, and
+`--dataset-id` to select one) with:
+
+```bash
+python scripts/preprocess_ring_imu.py \
+  --data-root data_sample/data \
+  --output-root outputs/preprocessedIMU \
+  --gravity-removal-method low-pass
+```
+
+Each recording is written without resampling or segmentation as
+`<user>/<action>/<data_id>/<data_id>_preprocessedIMU.npy` plus a colocated
+`<data_id>_preprocessing.json`. The summary records the method, units,
+sampling rate, recording identity, and the NPY SHA-256 digest. The canonical
+channels are:
+
+```text
+0: acceleration_x_g       1: acceleration_y_g       2: acceleration_z_g
+3: acceleration_x (m/s²)  4: acceleration_y (m/s²)  5: acceleration_z (m/s²)
+6: gyro_x (rad/s)         7: gyro_y (rad/s)         8: gyro_z (rad/s)
+```
+
+The first three channels are the only encoder input. Channels 3--5 must
+equal channels 0--2 multiplied by `9.80665`; malformed or legacy
+`(acceleration, gyro, magnetometer)` arrays are rejected. The default Custom
+Wavelet sampling rate is 200 Hz and no automatic resampling is performed.
+The low-level Xylo result `(N, 3)` is not a valid spike input; use the full
+`preprocess_ring_imu(...).imu`/exported nine-channel artifact instead.
+
+Batch encode the complete-recording tree while preserving its relative
+recording directories:
+
+```bash
+python scripts/encode_spikes.py \
+  --input-root outputs/preprocessedIMU \
+  --pattern '*_preprocessedIMU.npy' \
+  --output-root outputs/spikeEncoding \
+  --encoder custom-wavelet \
+  --encoder-settings configs/spike_encoding/custom_wavelet.json
+```
+
+The result is published under
+`outputs/spikeEncoding/custom-wavelet/<user>/<action>/<data_id>/` with
+`spikes.npy`, `spikeIMU.npy`, `recording_offsets.npy`, `sequences.csv`, and
+`metadata.json`. Each file is encoded independently, resets once, and keeps
+exactly its original `N` rows. Measured acceleration that still includes
+gravity is rejected by default; pass `--allow-gravity-included` only when
+that is intentional.
+
+See [docs/notes/GRAVITY_TO_SPIKE_PIPELINE.md](docs/notes/GRAVITY_TO_SPIKE_PIPELINE.md),
+[docs/notes/SPIKE_ENCODING.md](docs/notes/SPIKE_ENCODING.md), and
+[docs/notes/XYLO_GRAVITY_REMOVAL.md](docs/notes/XYLO_GRAVITY_REMOVAL.md).
+
+## Optional IMU segmentation: label or aligned Board events
 
 Remove gravity and export variable-length primary-Ring IMU segments for all
 datasets of one user/action, using each dataset's timestamp labels as
@@ -140,32 +206,26 @@ output, and transactional publishing contract.
 
 ## Spike encoding with Custom Wavelet
 
-Encode the first three g-domain acceleration channels from an existing
-nine-channel `*_rawIMU.npy` segmentation output. This is a read-only
-post-processing step: it does not remove gravity again, resample, alter
-segment boundaries, or modify the source IMU, labels, offsets, summaries, or
-padding outputs.
+For a single complete preprocessed recording, the same read-only encoder can
+be invoked directly. It does not remove gravity again, resample, or alter the
+source IMU or its summary:
 
 ```bash
 python scripts/encode_spikes.py \
-  --input-imu outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_rawIMU.npy \
-  --input-summary outputs/segmentedIMU_LowPassFiltering/user_0/action_0/user_0_action_0_segmentation_summary.json \
+  --input-imu outputs/preprocessedIMU/user_0/0/0/0_preprocessedIMU.npy \
   --encoder custom-wavelet \
   --encoder-settings configs/spike_encoding/custom_wavelet.json
 ```
 
-The complete input is exactly one recording. Custom Wavelet rejects sequence,
-recording, label, and segment-offset sidecars, so label boundaries can never
-reset the IIR state. It derives a reflect-padding width from its extrema half-window (30
-samples at 200 Hz), restores signed extrema to their occurrence rows, and
-publishes both 15-channel events and a 21-channel spike IMU: the events plus
-the original m/s² acceleration and gyro channels. Results are written
-atomically under the input file's parent as
-`custom-wavelet/<output-stem>/`; use `--overwrite` only to replace a prior
-spike-encoding result in that same directory. Custom Wavelet events are signed
-local-extrema amplitudes, not binary spike trains. See
-[docs/notes/SPIKE_ENCODING.md](docs/notes/SPIKE_ENCODING.md) for settings, sampling-rate,
-and output-schema details.
+One input file is exactly one recording. Custom Wavelet rejects sequence,
+recording, label, and segment-offset sidecars, so no label boundary can reset
+the IIR state. It derives a reflect-padding width from its extrema half-window
+(30 samples at 200 Hz), restores signed extrema to their occurrence rows, and
+publishes 15 signed event channels plus the original six m/s²/gyro channels
+as a 21-channel `spikeIMU`. Results are atomic and never overwrite without
+`--overwrite`. Custom Wavelet events are signed local-extrema amplitudes, not
+binary spike trains. See [docs/notes/SPIKE_ENCODING.md](docs/notes/SPIKE_ENCODING.md)
+for settings and output-schema details.
 
 ## Important data rules
 

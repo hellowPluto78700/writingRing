@@ -57,7 +57,11 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     imu = tmp_path / "input_rawIMU.npy"
     settings = tmp_path / "dummy.json"
     offsets = tmp_path / "offsets.npy"
-    np.save(imu, np.ones((3, 9), dtype=np.float32), allow_pickle=False)
+    acceleration_g = np.ones((3, 3), dtype=np.float32)
+    values = np.column_stack(
+        (acceleration_g, acceleration_g * 9.80665, np.zeros((3, 3), dtype=np.float32))
+    )
+    np.save(imu, values, allow_pickle=False)
     settings.write_text(json.dumps({"sampling_rate_hz": 200.0}), encoding="utf-8")
     np.save(offsets, np.array([0, 1, 3], dtype=np.int64), allow_pickle=False)
     return imu, settings, offsets
@@ -107,6 +111,8 @@ def test_cli_publishes_custom_wavelet_with_summary_and_dynamic_channels(
     samples = np.zeros((80, 9), dtype=np.float32)
     samples[:, 0] = np.sin(np.arange(80) / 3.0)
     samples[:, 1] = -samples[:, 0]
+    samples[:, 2] = np.cos(np.arange(80) / 5.0)
+    samples[:, 3:6] = samples[:, :3] * 9.80665
     np.save(imu, samples, allow_pickle=False)
     settings.write_text(
         json.dumps({"sampling_rate_hz": 200.0}),

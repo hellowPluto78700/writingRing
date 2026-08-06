@@ -56,6 +56,7 @@ def test_spike_imu_replaces_only_g_channels_and_references_unchanged_sidecars(tm
             np.sin(np.arange(90) / 9.0),
         )
     )
+    raw[:, 3:6] = raw[:, :3] * 9.80665
     raw_before = raw.copy()
     np.save(raw_path, raw, allow_pickle=False)
     labels = tmp_path / "recording_labels.npy"

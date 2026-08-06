@@ -12,6 +12,13 @@ from typing import Final
 import numpy as np
 
 from writingring.imu_preprocessing import PREPROCESSED_IMU_COLUMNS
+from writingring.preprocessing_io import (
+    PreprocessedIMUSummary,
+    PreprocessingIOError,
+    load_preprocessed_imu,
+    load_preprocessing_summary,
+    validate_preprocessing_summary,
+)
 from writingring.spike_encoding.contracts import SpikeEncodingError
 
 
@@ -21,6 +28,7 @@ SUPPORTED_METHOD_SEMANTICS: Final[dict[str, str]] = {
     "low-pass": "gravity_removed_linear_acceleration",
     "madgwick": "gravity_removed_linear_acceleration",
     "xylo-rotate-and-remove-gravity": "xylo_gravity_removed_acceleration",
+    "xylo": "xylo_gravity_removed_acceleration",
 }
 SOURCE_METADATA_PATH_KEYS: Final[tuple[str, ...]] = (
     "labels_path",
@@ -33,54 +41,57 @@ SOURCE_METADATA_PATH_KEYS: Final[tuple[str, ...]] = (
 
 @dataclass(frozen=True, slots=True)
 class SpikeEncodingInput:
-    """Validated immutable source values for one encoding run."""
+    """Validated immutable source values for one complete recording."""
 
-    raw_imu_path: Path
-    raw_imu: np.ndarray
+    source_imu_path: Path
+    preprocessed_imu: np.ndarray
     acceleration_g: np.ndarray
 
+    @property
+    def raw_imu_path(self) -> Path:
+        """Deprecated compatibility alias for the preprocessed source path."""
 
-@dataclass(frozen=True, slots=True)
-class SpikeEncodingSourceSummary:
-    """Validated optional segmentation metadata consumed without modification."""
+        return self.source_imu_path
 
-    path: Path
-    payload: dict[str, object]
-    sampling_rate_hz: float | None
-    gravity_removal_method: str | None
-    acceleration_semantics: str | None
+    @property
+    def raw_imu(self) -> np.ndarray:
+        """Deprecated compatibility alias for the preprocessed source array."""
+
+        return self.preprocessed_imu
 
 
-def load_spike_encoding_input(path: Path) -> SpikeEncodingInput:
-    """Load one nine-channel segmentation output without modifying it."""
+SpikeEncodingSourceSummary = PreprocessedIMUSummary
 
-    source = Path(path)
-    if not source.is_file():
-        raise SpikeEncodingError(f"input IMU file is not a regular file: {source}")
+
+def load_spike_encoding_input(
+    path: Path,
+    *,
+    summary_path: Path | None = None,
+    allow_gravity_included: bool = False,
+    expected_sampling_rate_hz: float | None = None,
+    expected_recording: Mapping[str, object] | None = None,
+) -> SpikeEncodingInput:
+    """Load one complete nine-channel preprocessed recording.
+
+    The physical dual-acceleration-unit contract is always checked.  When a
+    summary is supplied (or colocated for the new artifact naming scheme),
+    its provenance and gravity-removal semantics are checked as well.
+    """
+
     try:
-        raw_imu = np.load(source, allow_pickle=False)
-    except (OSError, ValueError) as error:
-        raise SpikeEncodingError(f"could not load input IMU {source}: {error}") from error
-    if not isinstance(raw_imu, np.ndarray):
-        raise SpikeEncodingError(f"input IMU is not an ndarray: {source}")
-    if raw_imu.ndim != 2 or raw_imu.shape[1] != len(PREPROCESSED_IMU_COLUMNS) or len(raw_imu) == 0:
-        raise SpikeEncodingError("input IMU must have nonempty shape (N, 9)")
-    if not np.issubdtype(raw_imu.dtype, np.number):
-        raise SpikeEncodingError("input IMU dtype must be numeric")
-    try:
-        values = np.asarray(raw_imu, dtype=np.float64)
-    except (TypeError, ValueError) as error:
-        raise SpikeEncodingError("input IMU must be numeric") from error
-    if not np.isfinite(values).all():
-        raise SpikeEncodingError("input IMU must contain only finite values")
-    stored = np.array(raw_imu, copy=True)
-    acceleration_g = np.array(stored[:, :3], dtype=np.float64, copy=True)
-    stored.setflags(write=False)
-    acceleration_g.setflags(write=False)
+        artifact = load_preprocessed_imu(
+            path,
+            summary_path=summary_path,
+            allow_gravity_included=allow_gravity_included,
+            expected_sampling_rate_hz=expected_sampling_rate_hz,
+            expected_recording=expected_recording,
+        )
+    except PreprocessingIOError as error:
+        raise SpikeEncodingError(str(error)) from error
     return SpikeEncodingInput(
-        raw_imu_path=source,
-        raw_imu=stored,
-        acceleration_g=acceleration_g,
+        source_imu_path=artifact.path,
+        preprocessed_imu=artifact.imu,
+        acceleration_g=artifact.acceleration_g,
     )
 
 
@@ -211,42 +222,18 @@ def load_encoder_settings(path: Path) -> dict[str, object]:
 
 
 def load_spike_encoding_source_summary(path: Path) -> SpikeEncodingSourceSummary:
-    """Read compatible segmentation metadata without changing its source file."""
+    """Read source-independent preprocessing metadata.
 
-    source = Path(path)
-    if not source.is_file():
-        raise SpikeEncodingError(f"input summary is not a regular file: {source}")
+    The old function name is retained for callers that still have a
+    segmentation summary.  The parser accepts that legacy shape while using
+    the same method, channel, and provenance checks as new summaries.
+    """
+
     try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise SpikeEncodingError(f"could not parse input summary {source}: {error}") from error
-    if not isinstance(payload, dict):
-        raise SpikeEncodingError("input summary JSON must be an object")
-    _validate_summary_schema(payload)
-    gravity = payload.get("gravity_removal")
-    if gravity is not None and not isinstance(gravity, dict):
-        raise SpikeEncodingError("input summary gravity_removal must be an object")
-    gravity_payload = gravity if isinstance(gravity, dict) else {}
-    sampling_rate = _optional_finite_positive(
-        gravity_payload.get("sampling_rate_hz", payload.get("sampling_rate_hz")),
-        name="input summary sampling_rate_hz",
-    )
-    nested_method = gravity_payload.get("method")
-    root_method = payload.get("gravity_removal_method")
-    if nested_method is not None and root_method is not None and nested_method != root_method:
-        raise SpikeEncodingError(
-            "input summary gravity removal method conflicts between nested and root fields"
-        )
-    method = nested_method if nested_method is not None else root_method
-    semantics = payload.get("acceleration_semantics")
-    _validate_method_semantics(method, semantics)
-    return SpikeEncodingSourceSummary(
-        path=source,
-        payload=dict(payload),
-        sampling_rate_hz=sampling_rate,
-        gravity_removal_method=method,
-        acceleration_semantics=semantics,
-    )
+        return load_preprocessing_summary(path)
+    except PreprocessingIOError as error:
+        message = str(error).replace("preprocessing summary", "input summary")
+        raise SpikeEncodingError(message) from error
 
 
 def resolve_sampling_rate_hz(

@@ -33,3 +33,26 @@ gyro_x, gyro_y, gyro_z
 For Xylo, the g triplet is canonical and the m/s² triplet is exactly the
 canonical values multiplied by `9.80665`. The output summary uses
 `acceleration_semantics: xylo_gravity_removed_acceleration`.
+
+## Spike encoding handoff
+
+The valid handoff is the complete result:
+
+```python
+preprocess_ring_imu(...).imu  # shape (N, 9)
+```
+
+The low-level value below is acceleration-only and cannot be passed directly
+to `scripts/encode_spikes.py`:
+
+```python
+xylo_rotate_and_remove_gravity(...).linear_acceleration_g  # shape (N, 3)
+```
+
+Preprocessing preserves `N`, retains the Ring gyroscope triplet, and writes
+the same g/m/s² dual-acceleration schema used by the spike loader. A complete
+file is one recording; `user/action/data_id` directories are organizational
+only and do not reset encoder state. The recommended files are
+`<data_id>_preprocessedIMU.npy` and `<data_id>_preprocessing.json`; the summary
+must identify the method, sampling rate, units, channel names, sample count,
+recording identity, source path, and NPY digest.

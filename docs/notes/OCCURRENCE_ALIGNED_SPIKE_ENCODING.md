@@ -1,5 +1,8 @@
 # Occurrence-aligned spike encoding
 
+This document describes an optional downstream segmentation/alignment workflow
+and is not part of the complete-recording gravity-to-spike path.
+
 Custom Wavelet encoding treats one input file as one complete recording, not a
 label segment. It resets once for the whole array, reflect-pads the recording
 by half of its actual odd extrema window, and returns events to their

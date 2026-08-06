@@ -26,7 +26,10 @@ def _write_imu(path: Path, values: np.ndarray) -> None:
 
 def test_input_loader_reads_only_valid_nine_channel_finite_data(tmp_path: Path) -> None:
     source = tmp_path / "input_rawIMU.npy"
-    values = np.arange(45, dtype=np.float32).reshape(5, 9)
+    acceleration_g = np.arange(15, dtype=np.float32).reshape(5, 3) / 10.0
+    values = np.column_stack(
+        (acceleration_g, acceleration_g * 9.80665, np.arange(15, dtype=np.float32).reshape(5, 3))
+    )
     _write_imu(source, values)
 
     loaded = load_spike_encoding_input(source)

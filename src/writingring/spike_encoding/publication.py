@@ -26,6 +26,11 @@ from writingring.spike_encoding.io import (
     validate_source_metadata_paths,
     validate_sequence_offsets,
 )
+from writingring.preprocessing_io import (
+    PreprocessingIOError,
+    sha256_file,
+    validate_preprocessing_summary,
+)
 
 
 _SEQUENCE_FIELDS = (
@@ -59,31 +64,63 @@ class SpikeEncodingOutputPaths:
 
 def spike_encoding_output_paths(
     *,
-    raw_imu_path: Path,
-    encoder_name: str,
-    output_stem: str | None,
-    output_root: Path | None,
+    raw_imu_path: Path | None = None,
+    encoder_name: str = "",
+    output_stem: str | None = None,
+    output_root: Path | None = None,
+    source_imu_path: Path | None = None,
+    recording_relative_path: Path | str | None = None,
+    recording_id: str | None = None,
+    canonical: bool = False,
 ) -> SpikeEncodingOutputPaths:
-    """Derive the documented input-root-local namespace and owned filenames."""
+    """Derive output paths for one encoding.
 
-    source = Path(raw_imu_path)
-    source_root = source.parent.resolve()
-    if output_root is not None and Path(output_root).resolve() != source_root:
-        raise SpikeEncodingPublishError(
-            "--output-root must match the input IMU parent directory; "
-            "spike-encoding outputs are stored beside the input root"
-        )
+    The legacy single-file call remains input-root-local and uses the original
+    descriptive filenames.  Batch callers provide ``recording_relative_path``
+    and request canonical filenames so an output root can mirror an arbitrary
+    preprocessed-recording tree.
+    """
+
+    source_value = source_imu_path if source_imu_path is not None else raw_imu_path
+    if source_value is None:
+        raise SpikeEncodingPublishError("source_imu_path is required")
+    source = Path(source_value)
     name = _safe_component(encoder_name, name="encoder name")
     stem = _safe_component(output_stem or _derived_stem(source), name="output stem")
-    directory = source_root / name / stem
+    if recording_relative_path is not None:
+        relative = _safe_relative_path(recording_relative_path, name="recording relative path")
+        base = Path(output_root) if output_root is not None else source.parent
+        directory = base / name / relative
+        if recording_id is not None:
+            _safe_component(recording_id, name="recording id")
+        canonical = True
+    else:
+        base = Path(output_root) if output_root is not None else source.parent
+        directory = base / name / stem
+        if recording_id is not None:
+            _safe_component(recording_id, name="recording id")
+    if canonical:
+        events_name = "spikes.npy"
+        spike_imu_name = "spikeIMU.npy"
+        sequence_offsets_name = "sequence_offsets.npy"
+        recording_offsets_name = "recording_offsets.npy"
+        sequences_name = "sequences.csv"
+        summary_name = "metadata.json"
+    else:
+        events_name = f"{stem}_spikeEvents.npy"
+        spike_imu_name = f"{stem}_spikeIMU.npy"
+        sequence_offsets_name = f"{stem}_spike_sequence_offsets.npy"
+        recording_offsets_name = f"{stem}_spike_recording_offsets.npy"
+        sequences_name = f"{stem}_spike_sequences.csv"
+        summary_name = f"{stem}_spike_encoding_summary.json"
     return SpikeEncodingOutputPaths(
         output_directory=directory,
-        spike_events_path=directory / f"{stem}_spikeEvents.npy",
-        spike_imu_path=directory / f"{stem}_spikeIMU.npy",
-        sequence_offsets_path=directory / f"{stem}_spike_sequence_offsets.npy",
-        recording_offsets_path=directory / f"{stem}_spike_recording_offsets.npy",
-        sequences_csv_path=directory / f"{stem}_spike_sequences.csv",
-        summary_json_path=directory / f"{stem}_spike_encoding_summary.json",
+        spike_events_path=directory / events_name,
+        spike_imu_path=directory / spike_imu_name,
+        sequence_offsets_path=directory / sequence_offsets_name,
+        recording_offsets_path=directory / recording_offsets_name,
+        sequences_csv_path=directory / sequences_name,
+        summary_json_path=directory / summary_name,
     )
 
 
@@ -100,6 +137,7 @@ def publish_spike_encoding(
     paths: SpikeEncodingOutputPaths,
     overwrite: bool,
     source_metadata_paths: Mapping[str, Path | None] | None = None,
+    allow_gravity_included: bool = False,
 ) -> dict[str, object]:
     """Stage, verify, and atomically publish one complete encoding result."""
 
@@ -109,13 +147,24 @@ def publish_spike_encoding(
         channel_count=len(output.channel_names),
         output_dtype=output_dtype,
     )
+    if source_summary is not None:
+        try:
+            validate_preprocessing_summary(
+                source_summary,
+                input_path=input_data.source_imu_path,
+                sample_count=len(input_data.preprocessed_imu),
+                expected_sampling_rate_hz=float(effective_settings["sampling_rate_hz"]),
+                allow_gravity_included=allow_gravity_included,
+            )
+        except (KeyError, TypeError, ValueError, PreprocessingIOError) as error:
+            raise SpikeEncodingPublishError(str(error)) from error
     offsets = validate_sequence_offsets(output.sequence_offsets, sample_count=len(values))
     statistics = _validated_statistics(output.sequence_statistics, sequence_count=len(offsets) - 1)
     offset_semantics = _offset_semantics(output)
     offsets_path = _offsets_path(paths, offset_semantics=offset_semantics)
     spike_imu = (
-        _build_spike_imu(values, input_data.raw_imu)
-        if _publishes_signed_wavelet_spike_imu(output, input_data.raw_imu, values)
+        _build_spike_imu(values, input_data.preprocessed_imu)
+        if _publishes_signed_wavelet_spike_imu(output, input_data.preprocessed_imu, values)
         else None
     )
     if sequence_mode not in {"offsets", "single-array"}:
@@ -275,20 +324,49 @@ def _build_summary(
         metadata_references = validate_source_metadata_paths(source_metadata_paths)
     except SpikeEncodingError as error:
         raise SpikeEncodingPublishError(str(error)) from error
+    source_hash = (
+        source_summary.source_file_sha256
+        if source_summary is not None and source_summary.source_file_sha256 is not None
+        else sha256_file(input_data.source_imu_path)
+    )
+    source_recording = (
+        None if source_summary is None or source_summary.recording is None
+        else dict(source_summary.recording)
+    )
+    has_metadata_references = any(value is not None for value in metadata_references.values())
+    source_section: dict[str, object] = {
+        "source_imu_path": str(input_data.source_imu_path.resolve()),
+        "preprocessed_imu_path": str(input_data.source_imu_path.resolve()),
+        "raw_imu_path": str(input_data.source_imu_path.resolve()),
+        "source_file_sha256": source_hash,
+        "summary_path": None if source_summary is None else str(source_summary.path.resolve()),
+        "source_summary_path": None if source_summary is None else str(source_summary.path.resolve()),
+        "gravity_removal_method": None if source_summary is None else source_summary.gravity_removal_method,
+        "acceleration_semantics": None if source_summary is None else source_summary.acceleration_semantics,
+        "metadata_references": metadata_references,
+        "recording": source_recording,
+    }
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "metadata_schema": "spike_encoding_v3",
         "encoder": {"name": output.encoder_name, "representation": output.representation},
-        "source": {
-            "raw_imu_path": str(input_data.raw_imu_path.resolve()),
-            "summary_path": None if source_summary is None else str(source_summary.path.resolve()),
-            "gravity_removal_method": None if source_summary is None else source_summary.gravity_removal_method,
-            "acceleration_semantics": None if source_summary is None else source_summary.acceleration_semantics,
-            "metadata_references": metadata_references,
-        },
+        "source": source_section,
+        "source_imu_path": str(input_data.source_imu_path.resolve()),
+        "source_file_sha256": source_hash,
+        "recording": source_recording,
+        "input_channel_names": list(PREPROCESSED_IMU_COLUMNS),
+        "encoder_input_channel_names": list(PREPROCESSED_IMU_COLUMNS[:3]),
+        "gravity_removal_method": (
+            None if source_summary is None else source_summary.gravity_removal_method
+        ),
+        "sampling_rate_hz": effective_settings["sampling_rate_hz"],
         "input": {
             "sample_count": len(input_data.acceleration_g),
+            "channel_count": len(PREPROCESSED_IMU_COLUMNS),
             "channel_indices": [0, 1, 2],
-            "channel_names": list(PREPROCESSED_IMU_COLUMNS[:3]),
+            "channel_names": list(PREPROCESSED_IMU_COLUMNS),
+            "encoder_input_channel_names": list(PREPROCESSED_IMU_COLUMNS[:3]),
+            "encoder_input_unit": "g",
             "unit": "g",
             "sampling_rate_hz": effective_settings["sampling_rate_hz"],
         },
@@ -304,11 +382,14 @@ def _build_summary(
         },
         "output": output_section,
         "alignment": {
+            "row_aligned_with_source_imu": True,
             "row_aligned_with_source_raw_imu": True,
             "sample_count_preserved": True,
-            "timestamps_reused_without_shift": True,
-            "labels_reused_without_shift": True,
-            "segment_offsets_reused_without_shift": True,
+            "timestamps_reused_without_shift": metadata_references["timestamp_source_path"] is not None,
+            "labels_reused_without_shift": metadata_references["labels_path"] is not None,
+            "segment_offsets_reused_without_shift": (
+                metadata_references["segment_offsets_path"] is not None
+            ),
         },
         "statistics": {
             "nonzero_event_count": nonzero,
@@ -318,19 +399,30 @@ def _build_summary(
         },
     }
     if spike_imu is not None:
+        trailing_channel_names = [
+            "acceleration_x_m_s2",
+            "acceleration_y_m_s2",
+            "acceleration_z_m_s2",
+            "gyro_x_rad_s",
+            "gyro_y_rad_s",
+            "gyro_z_rad_s",
+        ]
         summary["spike_imu"] = {
             "schema": "signed_wavelet_events_plus_imu_v1",
             "sample_count": len(spike_imu),
             "channel_count": spike_imu.shape[1],
-            "channel_names": list(output.channel_names) + list(PREPROCESSED_IMU_COLUMNS[3:]),
+            "channel_names": list(output.channel_names) + trailing_channel_names,
+            "trailing_channel_names": trailing_channel_names,
+            "source_channel_names": list(PREPROCESSED_IMU_COLUMNS[3:]),
             "dtype": spike_imu.dtype.name,
+            "source_imu_columns": [3, 4, 5, 6, 7, 8],
             "source_raw_imu_columns": [3, 4, 5, 6, 7, 8],
         }
     if output.encoder_name == "custom-wavelet":
         summary["source"]["metadata_usage"] = {
             "used_by_encoder": False,
             "used_as_reset_boundaries": False,
-            "reused_for_downstream_alignment": True,
+            "reused_for_downstream_alignment": has_metadata_references,
             "indices_shifted": False,
         }
     try:
@@ -509,9 +601,12 @@ def _publish_directory(staging: Path, *, destination: Path, overwrite: bool) -> 
         shutil.rmtree(backup)
 
 
-def _derived_stem(raw_imu_path: Path) -> str:
-    name = raw_imu_path.name
-    return name.removesuffix("_rawIMU.npy").removesuffix(".npy")
+def _derived_stem(source_imu_path: Path) -> str:
+    name = source_imu_path.name
+    for suffix in ("_preprocessedIMU.npy", "_rawIMU.npy", ".npy"):
+        if name.endswith(suffix):
+            return name.removesuffix(suffix)
+    return source_imu_path.stem
 
 
 def _safe_component(value: str, *, name: str) -> str:
@@ -520,3 +615,16 @@ def _safe_component(value: str, *, name: str) -> str:
     if Path(value).name != value:
         raise SpikeEncodingPublishError(f"{name} must be a single path component")
     return value
+
+
+def _safe_relative_path(value: Path | str, *, name: str) -> Path:
+    """Validate a batch recording namespace without allowing path escape."""
+
+    relative = Path(value)
+    if relative.is_absolute() or not relative.parts:
+        raise SpikeEncodingPublishError(f"{name} must be a nonempty relative path")
+    if any(part in {"", ".", ".."} for part in relative.parts):
+        raise SpikeEncodingPublishError(f"{name} must not contain empty or parent components")
+    for part in relative.parts:
+        _safe_component(part, name=name)
+    return relative

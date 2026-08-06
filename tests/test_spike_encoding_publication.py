@@ -50,7 +50,10 @@ def _completed_encoding(
     encoder: _PublicationEncoder | None = None,
 ):
     raw_path = tmp_path / "user_0_action_0_rawIMU.npy"
-    raw = np.arange(54, dtype=np.float32).reshape(6, 9)
+    acceleration_g = np.arange(18, dtype=np.float32).reshape(6, 3) / 10.0
+    raw = np.column_stack(
+        (acceleration_g, acceleration_g * 9.80665, np.arange(18, dtype=np.float32).reshape(6, 3))
+    )
     np.save(raw_path, raw, allow_pickle=False)
     input_data = load_spike_encoding_input(raw_path)
     encoder = encoder or _PublicationEncoder()
