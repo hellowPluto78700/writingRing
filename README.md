@@ -21,8 +21,16 @@ format reference.
 `scripts/align_ring_board.py` estimates one constant offset only when the
 sequence matcher succeeds, writes a directed microsecond TXT record, and
 generates a six-panel verification image. The shared convention is
-`ring_timestamp_us = board_timestamp_us + offset_us`; both artifacts use the
-same `best_offset_us` and never change raw timestamps.
+`ring_timestamp_us = board_timestamp_us + offset_us`; the verification image
+uses the selected work-axis offset, while the exported `offset_us` is projected
+back into the canonical timestamp domain used by segmentation. Neither axis
+changes raw timestamps. Raw Ring always uses endpoint reconstruction for its
+strict work axis; SpikeIMU copies a strict canonical axis or reconstructs one
+for duplicate timestamps. If a SpikeIMU alignment call does not supply a rate,
+it infers one from valid timestamp endpoints or fails with an explicit
+`AlignmentOffsetExportError`. SpikeIMU alignment scores only columns `15:21`
+and records both axis policies, projection diagnostics, and feature/metadata
+hashes in the report and offset.
 
 ```bash
 python scripts/align_ring_board.py \
@@ -57,11 +65,20 @@ python scripts/preprocess_ring_imu.py \
   --gravity-removal-method low-pass
 ```
 
-Each recording is written without resampling or segmentation as
-`<user>/<action>/<data_id>/<data_id>_preprocessedIMU.npy` plus a colocated
-`<data_id>_preprocessing.json`. The summary records the method, units,
-sampling rate, recording identity, and the NPY SHA-256 digest. The canonical
-channels are:
+Each recording is written without resampling or segmentation into three
+colocated artifacts:
+
+```text
+<user>/<action>/<data_id>/<data_id>_preprocessedIMU.npy
+<user>/<action>/<data_id>/<data_id>_timestamps_us.npy
+<user>/<action>/<data_id>/<data_id>_preprocessing.json
+```
+
+The timestamp sidecar preserves the Ring timestamp rows, including allowed
+duplicate values, and its SHA-256 is recorded in the summary. The summary also
+records the method, acceleration semantics, exact units, sampling rate,
+recording identity, source Ring path/digest, sample count, and IMU artifact
+digest. The canonical channels are:
 
 ```text
 0: acceleration_x_g       1: acceleration_y_g       2: acceleration_z_g
@@ -75,6 +92,14 @@ equal channels 0--2 multiplied by `9.80665`; malformed or legacy
 Wavelet sampling rate is 200 Hz and no automatic resampling is performed.
 The low-level Xylo result `(N, 3)` is not a valid spike input; use the full
 `preprocess_ring_imu(...).imu`/exported nine-channel artifact instead.
+
+`--gravity-removal-method` accepts `raw`, `low-pass`, `madgwick`, or
+`xylo-rotate-and-remove-gravity`; `--sampling-rate` defaults to 200 Hz.
+`--provisional` is available for Madgwick calibration failures, and
+`--overwrite` is required to replace an existing complete recording artifact.
+Supply `--user`, `--action`, and `--dataset-id` together to export one exact
+recording; omit all three to export discovered recordings in deterministic
+order.
 
 Batch encode the complete-recording tree while preserving its relative
 recording directories:
@@ -195,10 +220,39 @@ The loader validates the recording identity, `(N, 21)` schema, finite values,
 canonical units, sample count, SHA-256 hashes, and nondecreasing canonical
 timestamps. Label boundaries use `searchsorted` on those timestamps, so the
 resulting `*_spikeIMU.npy` keeps all 21 columns and the original row order.
-Gravity options are invalid in this mode; an explicitly supplied
-`--sampling-rate` is only checked against SpikeIMU metadata. Board-assisted
-SpikeIMU boundaries are reserved for the later alignment implementation and
-are rejected explicitly.
+Gravity options are invalid in this mode. An explicitly supplied
+`--sampling-rate` is checked against each recording's SpikeIMU metadata. When
+more than one recording is selected for the same user/action, all metadata
+sampling rates must also agree within `1e-12`; a mixed-rate action fails before
+segmentation or aggregation and does not publish partial output. The summary's
+`sampling_rate_hz` is therefore one validated common rate. The same input can
+drive Board-assisted segmentation after a matching SpikeIMU alignment offset
+has been created:
+
+```bash
+python scripts/align_ring_board.py \
+  --data-root data_sample/data \
+  --user user_0 --action 0 --dataset-id 0 \
+  --input-kind spike-imu \
+  --spike-root outputs/spikeEncoding/custom-wavelet \
+  --offset-output-root outputs/alignment/offsets
+
+python scripts/segment_ring_imu.py \
+  --data-root data_sample/data \
+  --user user_0 --action 0 \
+  --input-kind spike-imu \
+  --spike-root outputs/spikeEncoding/custom-wavelet \
+  --boundary-mode aligned-board-events \
+  --alignment-offset-root outputs/alignment/offsets \
+  --output-root outputs/segmentedSpikeIMU/aligned-board-events
+```
+
+The Board-assisted path validates recording identity, feature schema, values
+hash, metadata hash, transient-channel contract, and canonical timestamp hash
+before slicing. It performs the same all-recording sampling-rate preflight
+before creating its staging output. It publishes `*_spikeIMU.npy` and an
+equally long `*_board_event_targets.npy`; label-overlay provenance is checked
+separately and never changes label boundaries.
 
 For a diagnostic figure, add `--write-label-verification`. The transient score
 uses only columns `15:21` (m/s² acceleration and rad/s gyro). Optional

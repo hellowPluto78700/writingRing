@@ -148,6 +148,12 @@ class SequenceAlignmentResult:
     report: dict[str, object]
     warnings: tuple[str, ...]
 
+    @property
+    def work_axis_offset_us(self) -> float:
+        """Return the offset selected in the strict alignment work axis."""
+
+        return self.best_offset_us
+
 
 @dataclass(frozen=True, slots=True)
 class EventVisibility:
@@ -1223,6 +1229,8 @@ def _validated_board_frames(frames: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validated_strict_timestamps(values: np.ndarray) -> np.ndarray:
+    """Validate a strictly increasing internal alignment/plotting time axis."""
+
     array = _validated_finite_vector(values, name="timestamps")
     if not np.all(np.diff(array) > 0.0):
         raise EventAlignmentError("timestamps must be strictly increasing")
@@ -1658,6 +1666,7 @@ def _build_alignment_report(
         "structural_success": True,
         "alignment_success": success,
         "best_offset_us": float(best["offset_us"]),
+        "work_axis_offset_us": float(best["offset_us"]),
         "second_best_offset_us": (
             None if second is None else float(second["offset_us"])
         ),

@@ -10,6 +10,10 @@ aligned-board-events  # explicit; labels, Board events, and a saved offset
 The default mode remains documented in [IMU_SEGMENTATION.md](IMU_SEGMENTATION.md).
 It does not read Board data or alignment offsets.
 
+The same Board boundary implementation supports `--input-kind spike-imu`.
+In that mode `--spike-root` supplies the published `(N, 21)` matrix and the
+canonical timestamp source; preprocessing/gravity flags are invalid.
+
 ## Run aligned mode
 
 Create a successful Ring--Board offset for every recording first. The offset
@@ -39,6 +43,15 @@ conda run --no-capture-output -n writingring-viz \
 The command never estimates an offset. A missing, unsuccessful, malformed, or
 identity-mismatched offset fails the run; it does not fall back to `label`.
 Use `--overwrite` to replace an existing complete aligned output set.
+
+For `--input-kind spike-imu`, all selected artifacts are loaded before staging
+is created. Each artifact is checked against an explicitly supplied
+`--sampling-rate` when present, then the metadata rates are compared across the
+user/action with absolute tolerance `1e-12`. Mixed rates fail with both
+conflicting dataset IDs and rates, and no aggregate or staging directory is
+published. A successful aggregate records the validated common rate in its
+top-level `sampling_rate_hz`; raw-ring mode retains its existing processing and
+offset-validation order.
 
 ## Boundary semantics
 
@@ -134,6 +147,14 @@ boolean `board_event_targets.npy` has the same row count and channel order:
 ```text
 valid_press, valid_lift, transient_press, transient_lift
 ```
+
+For SpikeIMU mode the feature file is named `*_spikeIMU.npy`, has shape
+`(total_samples, 21)`, and `board_event_targets.npy` has exactly the same row
+count. The output summary records `feature_schema`, channel slices
+`[0,15]`, `[15,18]`, `[18,21]`, and per-recording feature/metadata/timestamp
+hashes, plus the single validated common `sampling_rate_hz`. Before Board
+loading or slicing, the offset must prove the same recording identity and all
+of those hashes; a raw-ring or stale SpikeIMU offset is rejected.
 
 Each verification image covers the full Ring recording in vertically stacked
 10-second panels. It shows the caller-final segment boundaries only, plus the

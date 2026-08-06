@@ -168,13 +168,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             madgwick_beta=madgwick_beta,
             strict_calibration=(gravity_method == "madgwick" and not provisional),
         )
-    if args.input_kind == "spike-imu" and args.boundary_mode == "aligned-board-events":
-        print(
-            "error: spike-imu + aligned-board-events requires the Board-assist "
-            "implementation from PR 4",
-            file=sys.stderr,
-        )
-        return 2
     output_root = (
         args.output_root
         if args.output_root is not None
@@ -276,6 +269,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 overwrite=args.overwrite_verification,
             ),
             gravity_config=gravity_config,
+            input_kind=args.input_kind,
+            spike_root=args.spike_root,
+            expected_sampling_rate_hz=(
+                args.sampling_rate if args.input_kind == "spike-imu" else None
+            ),
             overwrite=args.overwrite or args.overwrite_verification,
         )
     except (OSError, ValueError) as error:

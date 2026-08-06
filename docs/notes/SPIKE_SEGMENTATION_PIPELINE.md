@@ -1,8 +1,18 @@
-# SpikeIMU label segmentation
+# SpikeIMU segmentation pipeline
 
-This note records the PR1/PR3 input and label-segmentation contract. It is a
-consumer of the complete gravity-to-spike artifacts; it does not perform
-gravity removal or implement SpikeIMU Board-assisted segmentation.
+This note records the PR1/PR3 input and label-segmentation contract plus the
+PR2/PR4 alignment and Board-assisted consumer contract. It is a consumer of
+the complete gravity-to-spike artifacts; it does not perform gravity removal.
+
+| feature input | label boundaries | Board-assisted boundaries |
+|---|---|---|
+| `raw-ring` | supported, legacy default | supported, legacy 9-channel output |
+| `spike-imu` | 21-channel canonical artifact | 21-channel artifact plus four Board targets |
+
+`boundary-mode` chooses the boundary source; `input-kind` chooses the matrix
+and canonical timestamp artifact. Segmentation never reconstructs or resamples
+that canonical axis. Alignment may create a separate strict work axis for
+peak detection and matching when canonical timestamps contain duplicates.
 
 ## Canonical input
 
@@ -31,6 +41,21 @@ timestamp NPY and records its SHA-256 digest. The SpikeIMU loader verifies:
 SpikeIMU consumers. Raw input remains compatible with the existing in-memory
 preprocessing path. SpikeIMU input is loaded as-is.
 
+## Sampling-rate contract
+
+The optional CLI `--sampling-rate` is an expected-rate check applied to each
+SpikeIMU artifact while it is loaded. It does not resample or rewrite feature
+values or timestamps. For a user/action aggregation, the segmentation code
+loads all selected SpikeIMU inputs first and then requires one common metadata
+rate, comparing every recording to the first with absolute tolerance `1e-12`.
+Mismatch errors identify both dataset IDs and their declared rates.
+
+This preflight runs before label slicing, Board loading, aggregation, or
+staging publication. Consequently, a mixed-rate action is rejected without
+publishing a partial label or aligned-Board output, and a successful summary's
+top-level `sampling_rate_hz` is the validated common rate. Raw-ring
+segmentation keeps its existing per-recording processing behavior.
+
 ## Label mode
 
 The segmentation CLI separates the feature source from the boundary source:
@@ -55,9 +80,9 @@ summary carry input kind, schema, units, timestamp provenance, and feature
 hashes.
 
 Gravity-removal flags are rejected in SpikeIMU mode. An explicit sampling rate
-is a metadata consistency check only. `spike-imu + aligned-board-events` is
-rejected until the separate Board-assist implementation supplies compatible
-alignment provenance.
+is a per-recording metadata consistency check, followed by the action-level
+common-rate check above. `spike-imu + aligned-board-events` requires the
+matching provenance-bearing alignment offset described below.
 
 ## Verification overlay
 
@@ -73,3 +98,39 @@ its recording identity, signal source, feature schema, SpikeIMU values and
 metadata hashes, transient-channel contract, and canonical timestamp hash
 match the current `RecordingFeatureInput`. Legacy raw-Ring offsets and stale
 SpikeIMU offsets are rejected before Board alignment or rendering.
+
+## Board-assisted SpikeIMU mode
+
+`scripts/align_ring_board.py --input-kind spike-imu` loads one published
+SpikeIMU artifact, uses `values[:, 15:21]` for transient detection, and writes
+the canonical timestamp hash into the alignment report and offset. The
+segmentation CLI then validates that offset before loading Board events and
+publishes:
+
+```text
+*_spikeIMU.npy                 (total_samples, 21)
+*_board_event_targets.npy     (total_samples, 4)
+*_labels.npy
+*_segment_offsets.npy
+*_segment_lengths.npy
+*_segments.csv
+*_board_events.csv
+*_segmentation_summary.json
+```
+
+`board_event_targets` has the fixed order
+`valid_press, valid_lift, transient_press, transient_lift`. The summary marks
+`alignment_input_hash_match_verified=true` only after values, metadata, and
+timestamp hashes match for every recording. Raw-ring offsets, offsets from an
+older SpikeIMU artifact, and offsets with a different timestamp hash fail
+before Board-assisted outputs are published. The sampling-rate preflight also
+completes before staging; mixed-rate SpikeIMU recordings cannot produce an
+aggregate whose single top-level rate describes only the first recording.
+
+## Compatibility and migration
+
+Omitting both selectors keeps the existing raw-ring label workflow. Existing
+raw-ring Board-assist exports retain the nine-channel `*_rawIMU.npy` naming
+and legacy gravity summaries. SpikeIMU outputs use `*_spikeIMU.npy`; they are
+not interchangeable with raw-ring outputs, and a raw-ring alignment offset
+must never be reused for SpikeIMU overlay or Board-assisted segmentation.

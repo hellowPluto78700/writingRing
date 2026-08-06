@@ -13,7 +13,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
@@ -86,6 +86,48 @@ class RecordingFeatureInput:
         """Return the feature channel count."""
 
         return int(self.values.shape[1])
+
+
+def validate_common_feature_sampling_rate(
+    features: Sequence[RecordingFeatureInput],
+) -> float:
+    """Require one common metadata sampling rate for SpikeIMU aggregation."""
+
+    if not features:
+        raise RecordingFeatureError(
+            "at least one feature input is required to validate sampling rate"
+        )
+    reference = features[0]
+    if not isinstance(reference, RecordingFeatureInput):
+        raise RecordingFeatureError("feature inputs must be RecordingFeatureInput values")
+    if reference.input_kind != "spike-imu":
+        raise RecordingFeatureError(
+            "common sampling-rate validation only supports SpikeIMU feature inputs"
+        )
+    reference_rate = _finite_positive(
+        reference.sampling_rate_hz,
+        name=f"dataset {reference.dataset_id} sampling_rate_hz",
+    )
+    for feature in features[1:]:
+        if not isinstance(feature, RecordingFeatureInput):
+            raise RecordingFeatureError(
+                "feature inputs must be RecordingFeatureInput values"
+            )
+        if feature.input_kind != "spike-imu":
+            raise RecordingFeatureError(
+                "common sampling-rate validation only supports SpikeIMU feature inputs"
+            )
+        rate = _finite_positive(
+            feature.sampling_rate_hz,
+            name=f"dataset {feature.dataset_id} sampling_rate_hz",
+        )
+        if not np.isclose(rate, reference_rate, rtol=0.0, atol=1e-12):
+            raise RecordingFeatureError(
+                "inconsistent SpikeIMU sampling rates for one user/action: "
+                f"dataset {reference.dataset_id} uses {_format_rate(reference_rate)} Hz, "
+                f"but dataset {feature.dataset_id} uses {_format_rate(rate)} Hz"
+            )
+    return reference_rate
 
 
 def load_raw_ring_features(
@@ -562,6 +604,12 @@ def _finite_positive(value: object, *, name: str) -> float:
     if not math.isfinite(numeric) or numeric <= 0.0:
         raise RecordingFeatureError(f"{name} must be a finite positive number")
     return numeric
+
+
+def _format_rate(rate_hz: float) -> str:
+    """Format a sampling rate compactly while retaining diagnostic precision."""
+
+    return format(float(rate_hz), ".12g")
 
 
 def _sha256_array(values: np.ndarray) -> str:

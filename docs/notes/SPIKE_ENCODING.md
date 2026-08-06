@@ -4,6 +4,15 @@
 preprocessed Ring IMU recording. Gravity removal, resampling, segmentation,
 and label-boundary handling happen outside the encoding layer.
 
+The preprocessing timestamp sidecar is part of the handoff contract:
+`preprocessedIMU[i]`, `timestamps_us[i]`, and the published `spikeIMU[i]`
+describe the same row. Encoding validates the declared source timestamp
+SHA-256 before publication and carries the verified digest into SpikeIMU
+metadata. Consumers must reuse this canonical vector; they must not sort,
+deduplicate, resample, or replace it with an endpoint-reconstructed axis for
+segmentation. Alignment may use a separate strict work axis internally, but
+its provenance hash always remains the canonical source hash.
+
 ## Source contract
 
 The preferred source is:
@@ -49,6 +58,15 @@ sample count, channel names, source path, digest, recording identity when
 supplied, and sampling rate. `raw`/gravity-included summaries are rejected by
 default; use
 `--allow-gravity-included` only for an intentional measured-acceleration run.
+That flag does not waive the complete metadata contract: the summary must
+explicitly identify `raw` measured acceleration with `gravity_removed=false`.
+
+Published `metadata.json` uses the `spike_encoding_v3` contract and carries the
+source IMU digest, canonical timestamp path/digest when available, timestamp
+unit, recording identity, gravity-removal semantics, and row-alignment flags.
+When the preprocessing summary declares a timestamp digest, the encoder hashes
+the actual timestamp file immediately before publication and records that the
+source hash was verified; a replacement file with the same length is rejected.
 
 The low-level Xylo API returns only `(N, 3)` acceleration. That is not a valid
 spike handoff. Use the complete `(N, 9)` result from
@@ -127,6 +145,21 @@ they are processed acceleration when the source method is low-pass, Madgwick,
 or Xylo, and measured acceleration only when raw mode was explicitly allowed.
 `recording_offsets.npy` is `[0, N]`. `metadata.json` records the source
 contract, encoder settings, output schema, reset boundary, and row alignment.
+For the canonical preprocessing handoff, its `spike_imu` section also records
+the 21-channel schema, event units, trailing IMU units, source columns `3:9`,
+sample count, and the copied timestamp provenance.
+
+The downstream segmentation matrix is:
+
+```text
+columns 0:15   signed wavelet events
+columns 15:18  acceleration x/y/z (m/s²)
+columns 18:21  gyro x/y/z (rad/s)
+```
+
+Alignment and Board-assisted segmentation use only `15:21` for transient
+detection and require the SpikeIMU values, metadata, and canonical timestamp
+hashes to match the saved alignment offset.
 
 ## Legacy segmentation sources
 

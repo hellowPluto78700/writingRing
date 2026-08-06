@@ -9,6 +9,7 @@ segmentation remains isolated in :mod:`writingring.segmentation`.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from collections.abc import Mapping
 import json
 import math
 import os
@@ -26,10 +27,15 @@ from writingring.alignment_io import (
     apply_board_to_ring_offset,
     build_alignment_offset_path,
     read_alignment_offset_txt,
+    validate_alignment_feature_provenance,
 )
 from writingring.discovery import Recording
 from writingring.board_loader import BoardLoadError, load_board
-from writingring.event_alignment import compute_transient_score, detect_board_events
+from writingring.event_alignment import (
+    compute_transient_score,
+    compute_transient_score_array,
+    detect_board_events,
+)
 from writingring.gravity import (
     GravityRemovalConfig,
     GravityRemovalError,
@@ -43,6 +49,12 @@ from writingring.imu_preprocessing import (
     preprocess_ring_imu,
 )
 from writingring.ring_loader import RingLoadError, load_ring
+from writingring.recording_features import (
+    RecordingFeatureError,
+    RecordingFeatureInput,
+    load_recording_features,
+    validate_common_feature_sampling_rate,
+)
 from writingring.segmentation import (
     SegmentLabel,
     SegmentationConfig,
@@ -354,8 +366,10 @@ def align_board_event_tables(
 
 def segment_recording_by_aligned_board_events(
     *,
-    ring_imu: np.ndarray,
-    ring_timestamps_us: np.ndarray,
+    ring_imu: np.ndarray | None = None,
+    ring_timestamps_us: np.ndarray | None = None,
+    feature_values: np.ndarray | None = None,
+    timestamps_us: np.ndarray | None = None,
     labels: Sequence[SegmentLabel],
     aligned_board_events: pd.DataFrame,
     aligned_touch_pairs: pd.DataFrame,
@@ -364,7 +378,13 @@ def segment_recording_by_aligned_board_events(
     """Build final, non-overlapping Board-event-guided segments for one Ring."""
 
     dtype = _validated_config(config)
-    imu, timestamps = _validated_ring_inputs(ring_imu, ring_timestamps_us)
+    imu_source, timestamp_source = _resolve_feature_arguments(
+        feature_values=feature_values,
+        timestamps_us=timestamps_us,
+        ring_imu=ring_imu,
+        ring_timestamps_us=ring_timestamps_us,
+    )
+    imu, timestamps = _validated_ring_inputs(imu_source, timestamp_source)
     markers = _validated_labels(labels)
     _validate_label_range(markers, timestamps)
     events, touch_pairs = _validated_aligned_event_tables(
@@ -537,15 +557,21 @@ def build_board_event_segmentation_output_paths(
     *,
     user: str,
     action: str,
+    input_kind: str = "raw-ring",
 ) -> BoardEventSegmentationOutputPaths:
     """Return aligned-mode paths without publishing anything."""
 
     _validate_identity(user=user, action=action)
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise BoardEventSegmentationError(
+            "input_kind must be 'raw-ring' or 'spike-imu'"
+        )
     base = Path(output_root) / user / f"action_{action}"
     stem = f"{user}_action_{action}"
+    feature_suffix = "spikeIMU" if input_kind == "spike-imu" else "rawIMU"
     return BoardEventSegmentationOutputPaths(
         output_directory=base,
-        raw_imu_path=base / f"{stem}_rawIMU.npy",
+        raw_imu_path=base / f"{stem}_{feature_suffix}.npy",
         labels_path=base / f"{stem}_labels.npy",
         segment_offsets_path=base / f"{stem}_segment_offsets.npy",
         segment_lengths_path=base / f"{stem}_segment_lengths.npy",
@@ -566,12 +592,35 @@ def segment_user_action_by_aligned_board_events(
     config: BoardEventSegmentationConfig = BoardEventSegmentationConfig(),
     verification_config: object | None = None,
     gravity_config: GravityRemovalConfig | None = None,
+    input_kind: str = "raw-ring",
+    spike_root: Path | None = None,
+    expected_sampling_rate_hz: float | None = None,
     overwrite: bool = False,
 ) -> BoardEventUserActionSegmentationResult:
     """Load, align, verify, aggregate, and transactionally publish one action."""
 
     _validated_config(config)
     _validate_identity(user=user, action=action)
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise BoardEventSegmentationError(
+            "input_kind must be 'raw-ring' or 'spike-imu'"
+        )
+    if input_kind == "spike-imu" and spike_root is None:
+        raise BoardEventSegmentationError(
+            "spike_root is required for input_kind='spike-imu'"
+        )
+    if input_kind == "raw-ring" and spike_root is not None:
+        raise BoardEventSegmentationError(
+            "spike_root is only valid for input_kind='spike-imu'"
+        )
+    if input_kind == "raw-ring" and expected_sampling_rate_hz is not None:
+        raise BoardEventSegmentationError(
+            "expected_sampling_rate_hz is only valid for input_kind='spike-imu'"
+        )
+    if input_kind == "spike-imu" and gravity_config is not None:
+        raise BoardEventSegmentationError(
+            "gravity preprocessing settings are not valid for input_kind='spike-imu'"
+        )
     if not isinstance(overwrite, bool):
         raise BoardEventSegmentationError("overwrite must be a boolean")
     from writingring.discovery import DiscoveryError, discover_recordings
@@ -591,7 +640,11 @@ def segment_user_action_by_aligned_board_events(
         raise BoardEventSegmentationError(
             "verification_config must be SegmentationVerificationConfig"
         )
-    effective_gravity = _effective_gravity_config(gravity_config)
+    effective_gravity = (
+        _effective_gravity_config(gravity_config)
+        if input_kind == "raw-ring"
+        else None
+    )
     try:
         recordings = discover_recordings(data_root)
     except DiscoveryError as error:
@@ -609,13 +662,30 @@ def segment_user_action_by_aligned_board_events(
             f"no recordings found for user={user!r}, action={action!r}"
         )
     paths = build_board_event_segmentation_output_paths(
-        output_root, user=user, action=action
+        output_root, user=user, action=action, input_kind=input_kind
     )
     if paths.output_directory.exists() and not overwrite:
         raise BoardEventSegmentationError(
             "aligned-board-events output already exists; use overwrite=True: "
             + str(paths.output_directory)
         )
+    preloaded_feature_inputs: dict[int, RecordingFeatureInput] = {}
+    if input_kind == "spike-imu":
+        for recording in selected:
+            feature_input = _load_alignment_feature_input(
+                recording,
+                input_kind=input_kind,
+                gravity_config=effective_gravity,
+                spike_root=spike_root,
+                expected_sampling_rate_hz=expected_sampling_rate_hz,
+            )
+            preloaded_feature_inputs[recording.dataset_id] = feature_input
+        try:
+            validate_common_feature_sampling_rate(
+                tuple(preloaded_feature_inputs[recording.dataset_id] for recording in selected)
+            )
+        except RecordingFeatureError as error:
+            raise BoardEventSegmentationError(str(error)) from error
     paths.output_directory.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(
@@ -631,6 +701,12 @@ def segment_user_action_by_aligned_board_events(
             config=config,
             verification_config=effective_verification,
             gravity_config=effective_gravity,
+            input_kind=input_kind,
+            spike_root=spike_root,
+            expected_sampling_rate_hz=expected_sampling_rate_hz,
+            preloaded_feature_inputs=(
+                preloaded_feature_inputs if input_kind == "spike-imu" else None
+            ),
             build_verification_path=build_segmentation_verification_path,
             create_verification_figure=create_segmentation_verification_figure,
             verification_error=SegmentationVerificationError,
@@ -643,13 +719,17 @@ def segment_user_action_by_aligned_board_events(
             alignment_offset_root=Path(alignment_offset_root),
             config=config,
             gravity_config=effective_gravity,
+            input_kind=input_kind,
             published_output_directory=paths.output_directory,
         )
         _publish_staging_directory(
             staging, final_directory=paths.output_directory, overwrite=overwrite
         )
         published_paths = build_board_event_segmentation_output_paths(
-            output_root, user=user, action=action
+            output_root,
+            user=user,
+            action=action,
+            input_kind=input_kind,
         )
         return replace(result, output_paths=published_paths)
     except Exception:
@@ -661,6 +741,7 @@ def segment_user_action_by_aligned_board_events(
 @dataclass(frozen=True, slots=True)
 class _RecordingArtifacts:
     recording: Recording
+    feature_input: RecordingFeatureInput
     timestamps_us: np.ndarray
     result: BoardEventSegmentationResult
     labels: tuple[SegmentLabel, ...]
@@ -676,7 +757,11 @@ def _build_aligned_recording_artifacts(
     alignment_offset_root: Path,
     config: BoardEventSegmentationConfig,
     verification_config: object,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
+    input_kind: str,
+    spike_root: Path | None,
+    expected_sampling_rate_hz: float | None,
+    preloaded_feature_inputs: Mapping[int, RecordingFeatureInput] | None,
     build_verification_path: object,
     create_verification_figure: object,
     verification_error: type[Exception],
@@ -705,9 +790,31 @@ def _build_aligned_recording_artifacts(
             raise BoardEventSegmentationError(
                 f"alignment was not successful for dataset {recording.dataset_id}"
             )
-        ring, ring_imu, timestamps = _load_gravity_removed_ring(
-            recording, gravity_config=gravity_config
-        )
+        if preloaded_feature_inputs is None:
+            feature_input = _load_alignment_feature_input(
+                recording,
+                input_kind=input_kind,
+                gravity_config=gravity_config,
+                spike_root=spike_root,
+                expected_sampling_rate_hz=expected_sampling_rate_hz,
+            )
+        else:
+            try:
+                feature_input = preloaded_feature_inputs[recording.dataset_id]
+            except KeyError as error:
+                raise BoardEventSegmentationError(
+                    f"preloaded feature input is missing dataset {recording.dataset_id}"
+                ) from error
+        ring_imu = feature_input.values
+        timestamps = feature_input.timestamps_us
+        if input_kind == "spike-imu":
+            try:
+                validate_alignment_feature_provenance(offset, feature_input)
+            except AlignmentOffsetExportError as error:
+                raise BoardEventSegmentationError(
+                    f"alignment feature provenance failed for dataset "
+                    f"{recording.dataset_id}: {error}"
+                ) from error
         labels = _labels_in_ring_domain(
             load_timestamp_labels(recording.timestamp_path),
             offset_us=offset.offset_us,
@@ -728,8 +835,8 @@ def _build_aligned_recording_artifacts(
             prepared.events, prepared.touch_pairs, offset=offset
         )
         recording_result = segment_recording_by_aligned_board_events(
-            ring_imu=ring_imu,
-            ring_timestamps_us=timestamps,
+            feature_values=ring_imu,
+            timestamps_us=timestamps,
             labels=labels,
             aligned_board_events=events,
             aligned_touch_pairs=pairs,
@@ -737,15 +844,17 @@ def _build_aligned_recording_artifacts(
         )
         reasons = _combined_label_skip_reasons(labels, recording_result)
         verification_path = build_verification_path(
-            staging_directory, dataset_id=recording.dataset_id
+            staging_directory,
+            dataset_id=recording.dataset_id,
+            input_kind=input_kind,
         )
         try:
             create_verification_figure(
-                ring_dataframe=ring.dataframe,
+                ring_dataframe=None,
+                feature_values=feature_input.values,
                 ring_timestamps_us=timestamps,
-                transient_score=compute_transient_score(
-                    ring.dataframe,
-                    signal_columns=("acc_x", "acc_y", "acc_z", "gyr_x", "gyr_y", "gyr_z"),
+                transient_score=compute_transient_score_array(
+                    feature_input.values[:, feature_input.transient_channel_indices]
                 ),
                 aligned_board_events=recording_result.aligned_board_events,
                 labels=labels,
@@ -770,6 +879,7 @@ def _build_aligned_recording_artifacts(
         artifacts.append(
             _RecordingArtifacts(
                 recording=recording,
+                feature_input=feature_input,
                 timestamps_us=timestamps,
                 result=recording_result,
                 labels=labels,
@@ -789,7 +899,8 @@ def _aggregate_and_write_aligned_outputs(
     output_directory: Path,
     alignment_offset_root: Path,
     config: BoardEventSegmentationConfig,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
+    input_kind: str,
     published_output_directory: Path,
 ) -> BoardEventUserActionSegmentationResult:
     all_samples: list[BoardEventSegmentedSample] = []
@@ -822,10 +933,11 @@ def _aggregate_and_write_aligned_outputs(
         event_rows.extend(
             _board_event_rows(artifact, global_segment_start=segment_index - len(artifact.result.samples))
         )
+    channel_count = artifacts[0].feature_input.channel_count
     raw_imu = (
         np.concatenate([sample.imu for sample in all_samples], axis=0)
         if all_samples
-        else np.empty((0, len(PREPROCESSED_IMU_COLUMNS)), dtype=np.dtype(config.output_dtype))
+        else np.empty((0, channel_count), dtype=np.dtype(config.output_dtype))
     )
     targets = (
         np.concatenate([sample.board_event_targets for sample in all_samples], axis=0)
@@ -837,7 +949,14 @@ def _aggregate_and_write_aligned_outputs(
     offsets = np.concatenate((np.array([0], dtype=np.int64), np.cumsum(lengths, dtype=np.int64)))
     manifest = pd.DataFrame(manifest_rows)
     events = pd.DataFrame(event_rows)
-    _validate_aggregate_arrays(raw_imu, labels, offsets, lengths, targets)
+    _validate_aggregate_arrays(
+        raw_imu,
+        labels,
+        offsets,
+        lengths,
+        targets,
+        channel_count=channel_count,
+    )
     summary = _aligned_summary(
         artifacts,
         samples=all_samples,
@@ -845,9 +964,14 @@ def _aggregate_and_write_aligned_outputs(
         alignment_offset_root=alignment_offset_root,
         config=config,
         gravity_config=gravity_config,
+        input_kind=input_kind,
     )
     stem = f"{user}_action_{action}"
-    paths = _staging_output_paths(output_directory, stem=stem)
+    paths = _staging_output_paths(
+        output_directory,
+        stem=stem,
+        input_kind=input_kind,
+    )
     _save_npy(paths.raw_imu_path, raw_imu)
     _save_npy(paths.labels_path, labels)
     _save_npy(paths.segment_offsets_path, offsets)
@@ -873,6 +997,31 @@ def _aggregate_and_write_aligned_outputs(
         summary=summary,
         output_paths=paths,
     )
+
+
+def _load_alignment_feature_input(
+    recording: Recording,
+    *,
+    input_kind: str,
+    gravity_config: GravityRemovalConfig | None,
+    spike_root: Path | None,
+    expected_sampling_rate_hz: float | None,
+) -> RecordingFeatureInput:
+    """Load the exact feature/timestamp source used by aligned segmentation."""
+
+    try:
+        return load_recording_features(
+            recording,
+            input_kind=input_kind,
+            gravity_config=gravity_config,
+            spike_root=spike_root,
+            expected_sampling_rate_hz=expected_sampling_rate_hz,
+        )
+    except RecordingFeatureError as error:
+        raise BoardEventSegmentationError(
+            f"could not load alignment feature input for dataset "
+            f"{recording.dataset_id}: {error}"
+        ) from error
 
 
 def _load_gravity_removed_ring(
@@ -928,12 +1077,17 @@ def _manifest_row(
     skipped: SkippedBoardEventSegment | None,
     segment_index: int | None,
     published_verification_path: Path,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
 ) -> dict[str, object]:
     next_label = (
         artifact.labels[label_index + 1]
         if label_index + 1 < len(artifact.labels)
         else None
+    )
+    feature = artifact.feature_input
+    is_raw = feature.input_kind == "raw-ring"
+    gravity_method = (
+        None if gravity_config is None else gravity_config.gravity_removal_method
     )
     base: dict[str, object] = {
         "segment_index": segment_index,
@@ -949,18 +1103,31 @@ def _manifest_row(
         "alignment_offset_us": artifact.offset.offset_us,
         "alignment_event_coverage_ratio": artifact.offset.event_coverage_ratio,
         "ring_source_path": str(artifact.recording.ring_0_path),
+        "feature_values_path": str(feature.values_path),
         "label_source_path": str(artifact.recording.timestamp_path),
+        "timestamp_source_path": (
+            None if feature.timestamps_path is None else str(feature.timestamps_path)
+        ),
         "offset_source_path": str(artifact.offset_path),
         "segmentation_verification_path": str(published_verification_path),
-        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
-        "channel_schema": "dual_acceleration_units_v1",
-        "acceleration_semantics": _acceleration_semantics(
-            gravity_config.gravity_removal_method
+        "input_kind": feature.input_kind,
+        "feature_schema": feature.feature_schema,
+        "channel_count": feature.channel_count,
+        "channel_schema": feature.feature_schema,
+        "channel_names": list(feature.channel_names),
+        "units": list(feature.units),
+        "transient_channel_indices": list(feature.transient_channel_indices),
+        "feature_values_sha256": feature.values_sha256,
+        "feature_metadata_sha256": feature.metadata_sha256,
+        "timestamps_sha256": feature.timestamps_sha256,
+        "acceleration_semantics": (
+            _acceleration_semantics(gravity_method) if is_raw and gravity_method else None
         ),
-        "acceleration_g_unit": "g",
+        "acceleration_g_unit": "g" if is_raw else None,
         "acceleration_m_s2_unit": "m/s^2",
         "gyroscope_unit": "rad/s",
-        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2 if is_raw else None,
+        "gravity_removal_method": gravity_method,
     }
     if sample is None:
         base.update(
@@ -1114,8 +1281,33 @@ def _aligned_summary(
     output_dtype: np.dtype,
     alignment_offset_root: Path,
     config: BoardEventSegmentationConfig,
-    gravity_config: GravityRemovalConfig,
+    gravity_config: GravityRemovalConfig | None,
+    input_kind: str,
 ) -> dict[str, object]:
+    if not artifacts:
+        raise BoardEventSegmentationError("aligned summary requires at least one recording")
+    feature_inputs = [artifact.feature_input for artifact in artifacts]
+    first_feature = feature_inputs[0]
+    if any(
+        feature.input_kind != input_kind
+        or feature.feature_schema != first_feature.feature_schema
+        or feature.channel_count != first_feature.channel_count
+        or feature.channel_names != first_feature.channel_names
+        or feature.units != first_feature.units
+        for feature in feature_inputs
+    ):
+        raise BoardEventSegmentationError(
+            "aligned recordings do not share one feature input schema"
+        )
+    if input_kind == "spike-imu":
+        try:
+            common_sampling_rate_hz = validate_common_feature_sampling_rate(
+                feature_inputs
+            )
+        except RecordingFeatureError as error:
+            raise BoardEventSegmentationError(str(error)) from error
+    else:
+        common_sampling_rate_hz = first_feature.sampling_rate_hz
     skip_counts: dict[str, int] = {}
     boundary_counts: dict[str, int] = {}
     for artifact in artifacts:
@@ -1126,8 +1318,34 @@ def _aligned_summary(
     pairs = [artifact.result.aligned_touch_pairs for artifact in artifacts]
     pair_table = pd.concat(pairs, ignore_index=True) if pairs else pd.DataFrame()
     verification_paths = [artifact.verification_path for artifact in artifacts]
+    raw_gravity = gravity_config is not None and input_kind == "raw-ring"
+    feature_provenance = [
+        {
+            "dataset_id": artifact.recording.dataset_id,
+            "values_path": str(artifact.feature_input.values_path),
+            "values_sha256": artifact.feature_input.values_sha256,
+            "metadata_path": (
+                None
+                if artifact.feature_input.metadata_path is None
+                else str(artifact.feature_input.metadata_path)
+            ),
+            "metadata_sha256": artifact.feature_input.metadata_sha256,
+            "timestamps_sha256": artifact.feature_input.timestamps_sha256,
+            "timestamps_path": (
+                None
+                if artifact.feature_input.timestamps_path is None
+                else str(artifact.feature_input.timestamps_path)
+            ),
+            "sampling_rate_hz": artifact.feature_input.sampling_rate_hz,
+        }
+        for artifact in artifacts
+    ]
     return {
+        "input_kind": input_kind,
         "boundary_mode": "aligned_board_events",
+        "boundary_source": "aligned_board_events",
+        "time_mapping": "ring_timestamp_us = board_timestamp_us + offset_us",
+        "padding_or_truncation": "disabled",
         "alignment_required": config.require_successful_alignment,
         "alignment_offset_root": str(alignment_offset_root),
         "pre_press_context_us": config.pre_press_context_us,
@@ -1160,42 +1378,105 @@ def _aligned_summary(
         ],
         "output_dtype": output_dtype.name,
         "output_schema_version": 3,
-        "channel_count": len(PREPROCESSED_IMU_COLUMNS),
-        "channel_names": list(PREPROCESSED_IMU_COLUMNS),
-        "units": {
-            "acceleration_x_g": "g", "acceleration_y_g": "g", "acceleration_z_g": "g",
-            "acceleration_x": "m/s^2", "acceleration_y": "m/s^2", "acceleration_z": "m/s^2",
-            "gyro_x": "rad/s", "gyro_y": "rad/s", "gyro_z": "rad/s",
+        "feature_schema": first_feature.feature_schema,
+        "channel_count": first_feature.channel_count,
+        "channel_names": list(first_feature.channel_names),
+        "channel_units": list(first_feature.units),
+        "sampling_rate_hz": common_sampling_rate_hz,
+        "sample_count_by_recording": {
+            str(feature.dataset_id): feature.sample_count for feature in feature_inputs
         },
-        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,
-        "acceleration_semantics": _acceleration_semantics(
-            gravity_config.gravity_removal_method
+        "transient_channel_indices": list(first_feature.transient_channel_indices),
+        "transient_channel_names": list(first_feature.transient_channel_names),
+        "event_channel_slice": [0, 15] if input_kind == "spike-imu" else None,
+        "acceleration_m_s2_channel_slice": [15, 18] if input_kind == "spike-imu" else [3, 6],
+        "gyroscope_channel_slice": [18, 21] if input_kind == "spike-imu" else [6, 9],
+        "feature_values_sha256": [
+            feature.values_sha256 for feature in feature_inputs
+        ],
+        "feature_metadata_sha256": [
+            feature.metadata_sha256 for feature in feature_inputs
+        ],
+        "timestamps_sha256": [
+            feature.timestamps_sha256 for feature in feature_inputs
+        ],
+        "feature_provenance": feature_provenance,
+        "timestamps": {
+            "unit": "microseconds",
+            "paths": sorted(
+                {
+                    str(feature.timestamps_path)
+                    for feature in feature_inputs
+                    if feature.timestamps_path is not None
+                }
+            ),
+            "sha256": sorted({feature.timestamps_sha256 for feature in feature_inputs}),
+        },
+        "alignment_input_hash_match_verified": (
+            input_kind == "spike-imu"
+            and all(artifact.offset.feature_values_sha256 == artifact.feature_input.values_sha256
+                    and artifact.offset.feature_metadata_sha256 == artifact.feature_input.metadata_sha256
+                    and artifact.offset.timestamp_sha256 == artifact.feature_input.timestamps_sha256
+                    for artifact in artifacts)
+        ),
+        "board_event_targets_present": True,
+        "units": {
+            "channel_units": list(first_feature.units),
+            "acceleration_x_g": "g" if input_kind == "raw-ring" else None,
+            "acceleration_y_g": "g" if input_kind == "raw-ring" else None,
+            "acceleration_z_g": "g" if input_kind == "raw-ring" else None,
+            "acceleration_x": "m/s^2",
+            "acceleration_y": "m/s^2",
+            "acceleration_z": "m/s^2",
+            "gyro_x": "rad/s",
+            "gyro_y": "rad/s",
+            "gyro_z": "rad/s",
+        },
+        "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2 if raw_gravity else None,
+        "acceleration_semantics": (
+            _acceleration_semantics(gravity_config.gravity_removal_method)
+            if raw_gravity
+            else None
         ),
         "gravity_removal": {
-            "method": gravity_config.gravity_removal_method,
+            "method": (
+                gravity_config.gravity_removal_method
+                if raw_gravity
+                else "upstream_spike_imu"
+            ),
             "sampling_rate_hz": (
                 None
-                if gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.sampling_rate_hz
             ),
             "low_pass_cutoff_hz": (
                 None
-                if gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.low_pass_cutoff_hz
             ),
             "madgwick_beta": (
                 None
-                if gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.madgwick_beta
             ),
         },
     }
 
 
-def _staging_output_paths(output_directory: Path, *, stem: str) -> BoardEventSegmentationOutputPaths:
+def _staging_output_paths(
+    output_directory: Path,
+    *,
+    stem: str,
+    input_kind: str = "raw-ring",
+) -> BoardEventSegmentationOutputPaths:
+    if input_kind not in {"raw-ring", "spike-imu"}:
+        raise BoardEventSegmentationError(
+            "input_kind must be 'raw-ring' or 'spike-imu'"
+        )
+    feature_suffix = "spikeIMU" if input_kind == "spike-imu" else "rawIMU"
     return BoardEventSegmentationOutputPaths(
         output_directory=output_directory,
-        raw_imu_path=output_directory / f"{stem}_rawIMU.npy",
+        raw_imu_path=output_directory / f"{stem}_{feature_suffix}.npy",
         labels_path=output_directory / f"{stem}_labels.npy",
         segment_offsets_path=output_directory / f"{stem}_segment_offsets.npy",
         segment_lengths_path=output_directory / f"{stem}_segment_lengths.npy",
@@ -1217,10 +1498,15 @@ def _validate_aggregate_arrays(
     offsets: np.ndarray,
     lengths: np.ndarray,
     targets: np.ndarray,
+    *,
+    channel_count: int | None = None,
 ) -> None:
+    expected_channels = (
+        len(PREPROCESSED_IMU_COLUMNS) if channel_count is None else channel_count
+    )
     if (
         raw_imu.ndim != 2
-        or raw_imu.shape[1] != len(PREPROCESSED_IMU_COLUMNS)
+        or raw_imu.shape[1] != expected_channels
         or targets.shape != (len(raw_imu), 4)
     ):
         raise BoardEventSegmentationError("aligned aggregate arrays have invalid channel shapes")
@@ -1673,8 +1959,10 @@ def _validated_ring_inputs(
         timestamps = np.asarray(ring_timestamps_us, dtype=np.float64)
     except (TypeError, ValueError) as error:
         raise BoardEventSegmentationError("Ring IMU and timestamps must be numeric") from error
-    if imu.ndim != 2 or imu.shape[1] not in {6, len(PREPROCESSED_IMU_COLUMNS)} or len(imu) == 0:
-        raise BoardEventSegmentationError("Ring IMU must have nonempty shape (M, 6) or (M, 9)")
+    if imu.ndim != 2 or imu.shape[1] == 0 or len(imu) == 0:
+        raise BoardEventSegmentationError(
+            "feature values must have nonempty shape (M, C)"
+        )
     if timestamps.ndim != 1 or len(timestamps) != len(imu):
         raise BoardEventSegmentationError("Ring timestamps must be a length-M vector")
     if not np.isfinite(imu).all() or not np.isfinite(timestamps).all():
@@ -1682,6 +1970,32 @@ def _validated_ring_inputs(
     if np.any(np.diff(timestamps) < 0.0):
         raise BoardEventSegmentationError("Ring timestamps must be nondecreasing")
     return imu.copy(), timestamps.copy()
+
+
+def _resolve_feature_arguments(
+    *,
+    feature_values: np.ndarray | None,
+    timestamps_us: np.ndarray | None,
+    ring_imu: np.ndarray | None,
+    ring_timestamps_us: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Accept generic feature names while retaining the raw-ring API aliases."""
+
+    if feature_values is not None and ring_imu is not None:
+        raise BoardEventSegmentationError(
+            "feature_values and ring_imu cannot both be supplied"
+        )
+    if timestamps_us is not None and ring_timestamps_us is not None:
+        raise BoardEventSegmentationError(
+            "timestamps_us and ring_timestamps_us cannot both be supplied"
+        )
+    values = feature_values if feature_values is not None else ring_imu
+    timestamps = timestamps_us if timestamps_us is not None else ring_timestamps_us
+    if values is None or timestamps is None:
+        raise BoardEventSegmentationError(
+            "feature_values and timestamps_us are required"
+        )
+    return values, timestamps
 
 
 def _validated_labels(labels: Sequence[SegmentLabel]) -> tuple[SegmentLabel, ...]:

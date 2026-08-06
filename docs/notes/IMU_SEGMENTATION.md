@@ -1,8 +1,20 @@
-# Timestamp-label Ring IMU segmentation
+# Timestamp-label and Board-assisted Ring IMU segmentation
 
-`scripts/segment_ring_imu.py` first removes the gravity contribution from each
-primary Ring recording, then exports variable-length IMU segments for one
-`user` and one `action`. It uses only
+The CLI has two independent selectors:
+
+```text
+--input-kind raw-ring|spike-imu
+--boundary-mode label|aligned-board-events
+```
+
+`boundary-mode=label` uses only timestamp-label files. `boundary-mode=aligned-board-events`
+requires a previously exported successful Ring--Board offset and derives
+boundaries from aligned Board press/lift events. The `--input-kind` selector
+chooses the matrix being sliced; it never changes the boundary policy.
+
+For the default `raw-ring` input, `scripts/segment_ring_imu.py` first removes
+the gravity contribution from each primary Ring recording, then exports
+variable-length IMU segments for one `user` and one `action`. It uses only
 `{dataset_id}_ring_0.bin`; `ring_1` is never read.
 
 ```bash
@@ -78,6 +90,25 @@ python scripts/segment_ring_imu.py \
 The overlay requires valid saved offsets and Board data, but it never changes
 label-mode segments. `--verification-panel-seconds` and `--verification-dpi`
 adjust either label or aligned verification figures.
+
+## SpikeIMU consumer mode
+
+`--input-kind spike-imu` requires `--spike-root` and consumes the published
+`spikeIMU.npy` plus its metadata and canonical timestamp sidecar. It performs
+no gravity removal, resampling, timestamp rewriting, or event-channel
+alignment during segmentation. Label mode slices all 21 channels with the same
+`searchsorted(canonical_timestamps_us, ..., side="left")` rule. Aligned Board
+mode additionally requires an offset whose feature, metadata, and timestamp
+hashes match the loaded SpikeIMU artifact. An explicit `--sampling-rate` is
+checked per recording. When a user/action selects multiple SpikeIMU recordings,
+their metadata rates must also match within `1e-12`; this is checked before
+label or aligned-Board aggregation, so mixed-rate actions do not publish
+partial outputs and successful summaries contain one common `sampling_rate_hz`.
+
+Spike label verification scores only channels `15:21`; channels `0:15` are
+signed wavelet event channels and cannot affect segmentation. The optional
+Board overlay is diagnostic only: it can reject a stale or raw-ring offset,
+but it cannot alter values, offsets, lengths, labels, or manifest boundaries.
 
 ## Segment semantics
 

@@ -148,11 +148,12 @@ def create_alignment_verification_figure(
     action: str | None = None,
     dataset_id: int | None = None,
 ) -> AlignmentVerificationResult:
-    """Render six common-y panels using the result's single accepted offset.
+    """Render matching verification on the strict alignment work axis.
 
     Raw Board timestamps are retained in ``board_events``. Aligned timestamps
-    are derived locally from the one ``best_offset_us`` value and never stored
-    back into caller-owned data.
+    are derived locally from the result's work-axis offset and never stored
+    back into caller-owned data. The canonical exported offset is deliberately
+    kept separate and is consumed by downstream Board-assisted segmentation.
     """
 
     _validate_config(config)

@@ -39,6 +39,7 @@ from writingring.recording_features import (
     RecordingFeatureError,
     RecordingFeatureInput,
     load_recording_features,
+    validate_common_feature_sampling_rate,
 )
 
 
@@ -346,25 +347,37 @@ def segment_user_action(
             f"no recordings found for user={user!r}, action={action!r}"
         )
 
-    all_samples: list[SegmentedSample] = []
     feature_inputs: list[RecordingFeatureInput] = []
-    manifest_rows: list[dict[str, object]] = []
-    skipped_label_counts: dict[str, int] = {}
-    source_label_count = 0
     for recording in selected:
         try:
-            feature_input = load_recording_features(
-                recording,
-                input_kind=input_kind,
-                gravity_config=effective_gravity_config,
-                spike_root=spike_root,
-                expected_sampling_rate_hz=expected_sampling_rate_hz,
+            feature_inputs.append(
+                load_recording_features(
+                    recording,
+                    input_kind=input_kind,
+                    gravity_config=effective_gravity_config,
+                    spike_root=spike_root,
+                    expected_sampling_rate_hz=expected_sampling_rate_hz,
+                )
             )
         except RecordingFeatureError as error:
             raise SegmentationError(str(error)) from error
+    if input_kind == "spike-imu":
+        try:
+            common_sampling_rate_hz = validate_common_feature_sampling_rate(
+                feature_inputs
+            )
+        except RecordingFeatureError as error:
+            raise SegmentationError(str(error)) from error
+    else:
+        common_sampling_rate_hz = feature_inputs[0].sampling_rate_hz
+
+    all_samples: list[SegmentedSample] = []
+    manifest_rows: list[dict[str, object]] = []
+    skipped_label_counts: dict[str, int] = {}
+    source_label_count = 0
+    for recording, feature_input in zip(selected, feature_inputs, strict=True):
         feature_values = feature_input.values
         timestamps = feature_input.timestamps_us
-        feature_inputs.append(feature_input)
         if recording.timestamp_path is None:
             raise SegmentationError(
                 f"dataset {recording.dataset_id} is missing its timestamp label file"
@@ -422,6 +435,7 @@ def segment_user_action(
         gravity_config=effective_gravity_config,
         feature_input_kind=input_kind,
         feature_inputs=feature_inputs,
+        sampling_rate_hz=common_sampling_rate_hz,
         label_overlay_requested=label_overlay_requested,
     )
     paths = build_segmentation_output_paths(
@@ -591,6 +605,7 @@ def _summary(
     gravity_config: GravityRemovalConfig | None,
     feature_input_kind: str,
     feature_inputs: Sequence[RecordingFeatureInput],
+    sampling_rate_hz: float,
     label_overlay_requested: bool,
 ) -> dict[str, object]:
     lengths = np.asarray([sample.sample_count for sample in samples], dtype=np.int64)
@@ -605,6 +620,15 @@ def _summary(
         for feature in feature_inputs
     ):
         raise SegmentationError("feature inputs do not share one segmentation schema")
+    if not math.isclose(
+        _finite_float(sampling_rate_hz, name="sampling_rate_hz"),
+        first_feature.sampling_rate_hz,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise SegmentationError(
+            "summary sampling_rate_hz does not match the validated feature inputs"
+        )
     summary: dict[str, object] = {
         "boundary_mode": "label",
         "boundary_source": "timestamp_labels",
@@ -631,7 +655,7 @@ def _summary(
         "channel_count": first_feature.channel_count,
         "channel_names": list(first_feature.channel_names),
         "units": list(first_feature.units),
-        "sampling_rate_hz": first_feature.sampling_rate_hz,
+        "sampling_rate_hz": sampling_rate_hz,
         "sample_count_by_recording": {
             str(feature.dataset_id): feature.sample_count for feature in feature_inputs
         },

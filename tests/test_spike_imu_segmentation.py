@@ -9,22 +9,35 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from scripts import encode_spikes, segment_ring_imu
+from scripts import align_ring_board, encode_spikes, segment_ring_imu
 from writingring.alignment_io import (
     AlignmentOffset,
     AlignmentOffsetExportError,
+    read_alignment_offset_txt,
     write_alignment_offset_txt,
+)
+from writingring.board_event_segmentation import (
+    BoardEventSegmentationConfig,
+    BoardEventSegmentationError,
+    segment_user_action_by_aligned_board_events,
 )
 from writingring.discovery import discover_recordings
 from writingring.imu_preprocessing import PREPROCESSED_IMU_COLUMNS
 from writingring.preprocessing_io import PREPROCESSED_IMU_UNITS, sha256_file
 from writingring.recording_features import (
+    RecordingFeatureError,
     SPIKE_IMU_FEATURE_SCHEMA,
     SPIKE_IMU_TRANSIENT_CHANNEL_NAMES,
     RecordingFeatureInput,
     load_spike_imu_features,
+    validate_common_feature_sampling_rate,
 )
-from writingring.segmentation import SegmentationConfig, segment_user_action
+from writingring.segmentation import (
+    SegmentationConfig,
+    SegmentationError,
+    segment_user_action,
+)
+from writingring.event_alignment import SequenceAlignmentResult
 
 
 def _data_root(tmp_path: Path, *, sample_count: int = 400) -> Path:
@@ -49,17 +62,48 @@ def _data_root(tmp_path: Path, *, sample_count: int = 400) -> Path:
     return root
 
 
+def _add_data_recording(
+    data_root: Path,
+    *,
+    dataset_id: int,
+    sample_count: int = 400,
+) -> None:
+    action_dir = data_root / "writer_a" / "letters"
+    timestamps = 1_000_000.0 + np.arange(sample_count, dtype=np.float64) * 1_000.0
+    rows = np.column_stack(
+        (
+            np.zeros((sample_count, 2)),
+            np.full(sample_count, 9.80665),
+            np.zeros((sample_count, 3)),
+            timestamps,
+        )
+    )
+    rows.tofile(action_dir / f"{dataset_id}_ring_0.bin")
+    (action_dir / f"{dataset_id}_timestamp.txt").write_text(
+        "1000000 first\n1200000 last\n",
+        encoding="utf-8",
+    )
+
+
 def _write_spike_artifact(
     tmp_path: Path,
     data_root: Path,
     *,
     sample_count: int = 400,
+    dataset_id: int = 0,
+    sampling_rate_hz: float = 1_000.0,
 ) -> tuple[Path, np.ndarray]:
-    recording = discover_recordings(data_root)[0]
+    recording = next(
+        recording
+        for recording in discover_recordings(data_root)
+        if recording.dataset_id == dataset_id
+    )
     directory = tmp_path / "spike" / recording.user / recording.action / str(recording.dataset_id)
     directory.mkdir(parents=True)
     values = np.arange(sample_count * 21, dtype=np.float32).reshape(sample_count, 21)
-    timestamps = 1_000_000.0 + np.arange(sample_count, dtype=np.float64) * 1_000.0
+    timestamps = 1_000_000.0 + (
+        np.arange(sample_count, dtype=np.float64) * 1_000_000.0 / sampling_rate_hz
+    )
     values_path = directory / "spikeIMU.npy"
     timestamps_path = directory / "0_timestamps_us.npy"
     metadata_path = directory / "metadata.json"
@@ -73,14 +117,14 @@ def _write_spike_artifact(
             "action": recording.action,
             "data_id": recording.dataset_id,
         },
-        "sampling_rate_hz": 1_000.0,
+        "sampling_rate_hz": sampling_rate_hz,
         "timestamps_path": str(timestamps_path.resolve()),
         "timestamps_sha256": sha256_file(timestamps_path),
         "timestamp_unit": "microseconds",
         "input": {
             "sample_count": sample_count,
             "channel_count": len(PREPROCESSED_IMU_COLUMNS),
-            "sampling_rate_hz": 1_000.0,
+            "sampling_rate_hz": sampling_rate_hz,
         },
         "spike_imu": {
             "schema": SPIKE_IMU_FEATURE_SCHEMA,
@@ -120,6 +164,22 @@ def _matching_spike_offset(feature_input: RecordingFeatureInput) -> AlignmentOff
     )
 
 
+def test_common_spike_sampling_rate_reports_reference_and_conflict(
+    tmp_path: Path,
+) -> None:
+    data_root = _data_root(tmp_path)
+    spike_root, _ = _write_spike_artifact(tmp_path, data_root)
+    recording = discover_recordings(data_root)[0]
+    reference = load_spike_imu_features(recording, spike_root=spike_root)
+    conflict = replace(reference, dataset_id=1, sampling_rate_hz=100.0)
+
+    with pytest.raises(
+        RecordingFeatureError,
+        match=r"dataset 0 uses 1000 Hz, but dataset 1 uses 100 Hz",
+    ):
+        validate_common_feature_sampling_rate((reference, conflict))
+
+
 def test_spike_label_segmentation_publishes_21_channel_slices(
     tmp_path: Path,
 ) -> None:
@@ -151,6 +211,76 @@ def test_spike_label_segmentation_publishes_21_channel_slices(
     np.testing.assert_array_equal(result.segment_offsets, [0, 200, 400])
     assert result.manifest["input_kind"].tolist() == ["spike-imu", "spike-imu"]
     assert result.output_paths.raw_imu_path.is_file()
+
+
+def test_spike_label_aggregation_rejects_mixed_sampling_rates(
+    tmp_path: Path,
+) -> None:
+    data_root = _data_root(tmp_path)
+    _add_data_recording(data_root, dataset_id=1)
+    spike_root, _ = _write_spike_artifact(
+        tmp_path,
+        data_root,
+        dataset_id=0,
+        sampling_rate_hz=200.0,
+    )
+    _write_spike_artifact(
+        tmp_path,
+        data_root,
+        dataset_id=1,
+        sampling_rate_hz=100.0,
+    )
+    output_root = tmp_path / "mixed-label-output"
+
+    with pytest.raises(
+        SegmentationError,
+        match=r"dataset 0 uses 200 Hz, but dataset 1 uses 100 Hz",
+    ):
+        segment_user_action(
+            data_root=data_root,
+            user="writer_a",
+            action="letters",
+            output_root=output_root,
+            input_kind="spike-imu",
+            spike_root=spike_root,
+        )
+    assert not output_root.exists()
+
+
+def test_spike_aligned_board_aggregation_rejects_mixed_sampling_rates(
+    tmp_path: Path,
+) -> None:
+    data_root = _data_root(tmp_path)
+    _add_data_recording(data_root, dataset_id=1)
+    spike_root, _ = _write_spike_artifact(
+        tmp_path,
+        data_root,
+        dataset_id=0,
+        sampling_rate_hz=200.0,
+    )
+    _write_spike_artifact(
+        tmp_path,
+        data_root,
+        dataset_id=1,
+        sampling_rate_hz=100.0,
+    )
+    output_root = tmp_path / "mixed-aligned-output"
+
+    with pytest.raises(
+        BoardEventSegmentationError,
+        match=r"dataset 0 uses 200 Hz, but dataset 1 uses 100 Hz",
+    ):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="writer_a",
+            action="letters",
+            output_root=output_root,
+            alignment_offset_root=tmp_path / "offsets",
+            input_kind="spike-imu",
+            spike_root=spike_root,
+        )
+    assert not output_root.exists()
+    assert not any(tmp_path.glob("mixed-aligned-output*"))
 
 
 def test_canonical_batch_encoding_metadata_is_consumable_by_spike_loader(
@@ -302,10 +432,344 @@ def test_spike_label_cli_never_reapplies_gravity_and_rejects_invalid_modes(
     assert "not valid for --input-kind spike-imu" in capsys.readouterr().err
 
     assert segment_ring_imu.main(
-        [*common, "--boundary-mode", "aligned-board-events",
+        [*common[:-2], "--output-root", str(tmp_path / "aligned-cli-output"),
+         "--boundary-mode", "aligned-board-events",
          "--alignment-offset-root", str(tmp_path / "offsets")]
     ) == 2
-    assert "PR 4" in capsys.readouterr().err
+    assert "alignment offset is required" in capsys.readouterr().err
+
+
+def test_spike_board_assist_publishes_21_channels_and_board_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _data_root(tmp_path)
+    spike_root, source_values = _write_spike_artifact(tmp_path, data_root)
+    recording = discover_recordings(data_root)[0]
+    feature_input = load_spike_imu_features(
+        recording,
+        spike_root=spike_root,
+        expected_sampling_rate_hz=1_000.0,
+    )
+    offset_root = tmp_path / "offsets"
+    write_alignment_offset_txt(
+        _matching_spike_offset(feature_input),
+        output_path=(
+            offset_root / "writer_a" / "action_letters" / "0_ring_board_offset.txt"
+        ),
+    )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(6),
+            "frame_timestamp_raw": [
+                1_000_000.0,
+                1_020_000.0,
+                1_030_000.0,
+                1_040_000.0,
+                1_050_000.0,
+                1_060_000.0,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda _recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
+        ),
+    )
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="writer_a",
+        action="letters",
+        output_root=tmp_path / "segmented",
+        alignment_offset_root=offset_root,
+        input_kind="spike-imu",
+        spike_root=spike_root,
+        expected_sampling_rate_hz=1_000.0,
+        config=BoardEventSegmentationConfig(
+            pre_press_context_us=0.0,
+            post_lift_context_us=0.0,
+        ),
+    )
+
+    assert result.raw_imu.shape == (30, 21)
+    assert result.board_event_targets.shape == (30, 4)
+    np.testing.assert_array_equal(result.raw_imu, source_values[20:50])
+    np.testing.assert_array_equal(result.raw_imu[:, 15:], source_values[20:50, 15:])
+    assert result.output_paths.raw_imu_path.name.endswith("_spikeIMU.npy")
+    assert result.summary["input_kind"] == "spike-imu"
+    assert result.summary["feature_schema"] == SPIKE_IMU_FEATURE_SCHEMA
+    assert result.summary["channel_count"] == 21
+    assert result.summary["alignment_input_hash_match_verified"] is True
+    assert result.summary["board_event_targets_present"] is True
+    assert result.summary["feature_values_sha256"] == [feature_input.values_sha256]
+    assert result.summary["timestamps_sha256"] == [feature_input.timestamps_sha256]
+    assert result.output_paths.board_event_targets_path.is_file()
+
+    cli_output_root = tmp_path / "cli-segmented"
+    assert segment_ring_imu.main(
+        [
+            "--data-root", str(data_root),
+            "--user", "writer_a", "--action", "letters",
+            "--input-kind", "spike-imu", "--spike-root", str(spike_root),
+            "--sampling-rate", "1000",
+            "--boundary-mode", "aligned-board-events",
+            "--alignment-offset-root", str(offset_root),
+            "--pre-press-context-seconds", "0",
+            "--post-lift-context-seconds", "0",
+            "--output-root", str(cli_output_root),
+        ]
+    ) == 0
+    cli_directory = cli_output_root / "writer_a" / "action_letters"
+    np.testing.assert_array_equal(
+        np.load(cli_directory / "writer_a_action_letters_spikeIMU.npy", allow_pickle=False),
+        source_values[20:50],
+    )
+    assert np.load(
+        cli_directory / "writer_a_action_letters_board_event_targets.npy",
+        allow_pickle=False,
+    ).shape == (30, 4)
+    cli_summary = json.loads(
+        (cli_directory / "writer_a_action_letters_segmentation_summary.json")
+        .read_text(encoding="utf-8")
+    )
+    assert cli_summary["alignment_input_hash_match_verified"] is True
+
+
+def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _data_root(tmp_path)
+    spike_root, _ = _write_spike_artifact(tmp_path, data_root)
+    recording = discover_recordings(data_root)[0]
+    timestamps_path = (
+        spike_root
+        / recording.user
+        / recording.action
+        / str(recording.dataset_id)
+        / "0_timestamps_us.npy"
+    )
+    timestamps = 1_000_000.0 + np.cumsum(
+        np.asarray([1_000, 0, 2_000, 1_500] + [1_000] * 396, dtype=np.float64)
+    )
+    np.save(timestamps_path, timestamps, allow_pickle=False)
+    metadata_path = timestamps_path.with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["timestamps_sha256"] = sha256_file(timestamps_path)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    captured: dict[str, np.ndarray] = {}
+    board = SimpleNamespace(frames=pd.DataFrame(), contacts=pd.DataFrame())
+    monkeypatch.setattr("writingring.board_loader.load_board", lambda _recording: board)
+    empty_events = pd.DataFrame()
+    interval = SimpleNamespace(events=empty_events, touch_pairs=empty_events)
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_board_events",
+        lambda _frames: SimpleNamespace(events=empty_events, touch_pairs=empty_events),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.select_board_interval_from_presses",
+        lambda _frames, _contacts, _detection: interval,
+    )
+    original_score = __import__(
+        "writingring.event_alignment", fromlist=["compute_transient_score_array"]
+    ).compute_transient_score_array
+
+    def capture_score(values: np.ndarray) -> np.ndarray:
+        captured["transient_values"] = np.asarray(values, dtype=np.float64).copy()
+        return original_score(values)
+
+    monkeypatch.setattr(
+        "writingring.event_alignment.compute_transient_score_array", capture_score
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_transient_peak_regions",
+        lambda _score, _timestamps: pd.DataFrame(),
+    )
+    alignment_result = SequenceAlignmentResult(
+        success=True,
+        best_offset_us=0.0,
+        second_best_offset_us=None,
+        candidates=pd.DataFrame(),
+        event_matches=pd.DataFrame(
+            {
+                "matched": [True],
+                "matched_peak_index": [0],
+            }
+        ),
+        touch_pair_matches=pd.DataFrame(),
+        report={
+            "alignment_model": "constant_offset",
+            "event_coverage_ratio": 1.0,
+            "matched_event_count": 1,
+            "total_valid_event_count": 1,
+        },
+        warnings=(),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.align_events_to_transient_peaks",
+        lambda *_args, **_kwargs: alignment_result,
+    )
+    verification_path = tmp_path / "verification.png"
+    monkeypatch.setattr(
+        "writingring.alignment_verification.create_alignment_verification_figure",
+        lambda **_kwargs: SimpleNamespace(
+            output_path=verification_path,
+            displayed_start_s=0.0,
+            displayed_stop_s=60.0,
+            press_count_displayed=0,
+            lift_count_displayed=0,
+            label_count_displayed=0,
+            warnings=(),
+        ),
+    )
+
+    assert align_ring_board.main(
+        [
+            "--data-root", str(data_root),
+            "--user", "writer_a", "--action", "letters", "--dataset-id", "0",
+            "--input-kind", "spike-imu", "--spike-root", str(spike_root),
+            "--offset-output-root", str(tmp_path / "offsets"),
+            "--verification-output-root", str(tmp_path / "verification"),
+            "--report-output-root", str(tmp_path / "reports"),
+            "--overwrite-offset", "--overwrite-verification", "--overwrite-report",
+        ]
+    ) == 0
+
+    feature_input = load_spike_imu_features(recording, spike_root=spike_root)
+    np.testing.assert_array_equal(
+        captured["transient_values"], feature_input.values[:, 15:21]
+    )
+    offset = read_alignment_offset_txt(
+        tmp_path / "offsets" / "writer_a" / "action_letters" / "0_ring_board_offset.txt",
+        expected_user="writer_a",
+        expected_action="letters",
+        expected_dataset_id=0,
+    )
+    assert offset.alignment_signal_source == "spike-imu"
+    assert offset.feature_values_sha256 == feature_input.values_sha256
+    assert offset.feature_metadata_sha256 == feature_input.metadata_sha256
+    assert offset.timestamp_sha256 == feature_input.timestamps_sha256
+    assert offset.timestamp_source_sha256 == feature_input.timestamps_sha256
+    assert offset.timestamp_source_duplicate_step_count == 1
+    assert offset.alignment_time_axis_strategy == "strict_reconstruction"
+    assert offset.alignment_time_axis_sample_count == len(timestamps)
+    assert offset.canonical_timestamps_modified is False
+    assert offset.work_axis_offset_us == pytest.approx(0.0)
+    assert offset.projection_delta_us == pytest.approx(0.0)
+    assert offset.projection_contributing_match_count == 1
+    report = json.loads(
+        (
+            tmp_path / "reports" / "writer_a" / "action_letters"
+            / "0_alignment_report.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert report["timestamp_sha256"] == feature_input.timestamps_sha256
+    assert report["source_hash_verified"] is True
+    assert report["timestamp_source"]["sha256"] == feature_input.timestamps_sha256
+    assert report["timestamp_source"]["duplicate_step_count"] == 1
+    assert report["alignment_time_axis"]["strategy"] == "strict_reconstruction"
+    assert report["alignment_time_axis"]["canonical_timestamps_modified"] is False
+    assert report["canonical_offset_projection"]["success"] is True
+    assert report["canonical_offset_projection"]["exported_offset_us"] == pytest.approx(0.0)
+
+
+@pytest.mark.skipif(
+    not (Path("data") / "user_1" / "4" / "2_ring_0.bin").is_file(),
+    reason="repository sample data is unavailable",
+)
+def test_real_raw_alignment_accepts_duplicate_ring_timestamps(tmp_path: Path) -> None:
+    report_root = tmp_path / "reports"
+    offset_root = tmp_path / "offsets"
+    verification_root = tmp_path / "verification"
+    assert align_ring_board.main(
+        [
+            "--data-root", "data",
+            "--user", "user_1", "--action", "4", "--dataset-id", "2",
+            "--offset-output-root", str(offset_root),
+            "--verification-output-root", str(verification_root),
+            "--report-output-root", str(report_root),
+            "--overwrite-offset", "--overwrite-verification", "--overwrite-report",
+        ]
+    ) == 0
+    report = json.loads(
+        (report_root / "user_1" / "action_4" / "2_alignment_report.json")
+        .read_text(encoding="utf-8")
+    )
+    assert report["timestamp_source"]["duplicate_step_count"] > 0
+    assert report["alignment_time_axis"]["strategy"] == "raw_endpoint_reconstruction"
+    assert report["alignment_time_axis"]["canonical_timestamps_modified"] is False
+    offset = read_alignment_offset_txt(
+        offset_root / "user_1" / "action_4" / "2_ring_board_offset.txt",
+        expected_user="user_1",
+        expected_action="4",
+        expected_dataset_id=2,
+    )
+    assert offset.timestamp_source_duplicate_step_count > 0
+    assert offset.canonical_timestamps_modified is False
+    assert offset.work_axis_offset_us is not None
+    assert offset.projection_delta_us is not None
+    assert offset.offset_us == pytest.approx(
+        offset.work_axis_offset_us + offset.projection_delta_us
+    )
+    report_offset = report["canonical_offset_projection"]["exported_offset_us"]
+    assert report_offset == pytest.approx(offset.offset_us)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "message"),
+    [
+        ("alignment_signal_source", "raw-ring", "signal source"),
+        ("feature_values_sha256", "0" * 64, "feature values SHA-256"),
+        ("timestamp_sha256", "1" * 64, "timestamp SHA-256"),
+    ],
+)
+def test_spike_board_assist_rejects_stale_alignment_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    replacement: str,
+    message: str,
+) -> None:
+    data_root = _data_root(tmp_path)
+    spike_root, _ = _write_spike_artifact(tmp_path, data_root)
+    recording = discover_recordings(data_root)[0]
+    feature_input = load_spike_imu_features(
+        recording,
+        spike_root=spike_root,
+        expected_sampling_rate_hz=1_000.0,
+    )
+    offset_root = tmp_path / "offsets"
+    write_alignment_offset_txt(
+        replace(_matching_spike_offset(feature_input), **{field: replacement}),
+        output_path=(
+            offset_root / "writer_a" / "action_letters" / "0_ring_board_offset.txt"
+        ),
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda _recording: (_ for _ in ()).throw(
+            AssertionError("Board must not load before provenance validation")
+        ),
+    )
+
+    with pytest.raises(BoardEventSegmentationError, match=message):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="writer_a",
+            action="letters",
+            output_root=tmp_path / "segmented",
+            alignment_offset_root=offset_root,
+            input_kind="spike-imu",
+            spike_root=spike_root,
+            expected_sampling_rate_hz=1_000.0,
+        )
+    assert not (tmp_path / "segmented" / "writer_a" / "action_letters").exists()
 
 
 def test_spike_label_verification_overlay_does_not_change_boundaries(
