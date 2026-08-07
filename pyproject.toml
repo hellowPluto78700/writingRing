@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+snn = ["torch", "snntorch"]
 xylo = [
     "rockpool==2.9.1",
     "samna==0.43.0.0",
@@ -29,9 +30,9 @@ notebook = [
 ]
 
 [tool.setuptools]
-packages = ["writingring", "writingring.spike_encoding", "writingring.spike_encoding.encoders", "core", "core.sensel_lib"]
+packages = ["writingring", "writingring.spike_encoding", "writingring.spike_encoding.encoders", "core", "core.sensel_lib", "snn"]
 package-dir = { writingring = "src/writingring", core = "core", "core.sensel_lib" = "core/sensel_lib" }
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
