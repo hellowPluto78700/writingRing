@@ -1,24 +1,75 @@
-from tqdm import tqdm
+from __future__ import annotations
+
 from copy import deepcopy
-import sys
-sys.path.append('/home/igavier_umass_edu/Documents/Neuromorphic-IMU/snn/')
-from utils_architectures import *
-from utils_datasets import *
-from utils_losses import *
-from utils_run import *
-from utils_parser import *
+from pathlib import Path
 
-import torch
-import torch.nn as nn
+try:
+    from .utils_parser import getArgsParser
+except ImportError:
+    # Allow ``python snn/har_snn.py`` in addition to ``python -m snn.har_snn``.
+    from utils_parser import getArgsParser
 
-import wandb
-import pandas as pd
-import numpy as np
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, balanced_accuracy_score, roc_auc_score, f1_score, matthews_corrcoef, cohen_kappa_score
+
+def build_data_path(
+    data_root: Path,
+    dataset_name: str,
+    *,
+    raw_data_wg: bool = False,
+    raw_data_gr: bool = False,
+    use_xylo: bool = False,
+) -> Path:
+    """Compose the legacy HAR dataset path from a configurable root.
+
+    The branch order intentionally matches the historical runner: gravity
+    data takes precedence over gravity-removed data, then Xylo data, with the
+    NIMU event representation as the default.
+    """
+
+    dataset_name_lower = dataset_name.lower()
+    dataset_root = Path(data_root) / dataset_name_lower / "data"
+    if raw_data_wg:
+        suffix = f"{dataset_name_lower}_wg"
+    elif raw_data_gr:
+        suffix = f"{dataset_name_lower}_gr"
+    elif use_xylo:
+        suffix = "spikesXylo"
+    else:
+        suffix = "eventsNIMU"
+    return dataset_root / suffix / "windows"
+
+
+def build_checkpoint_path(model_root: Path, checkpoint_name: str | Path) -> Path:
+    """Compose a legacy checkpoint filename below the configured model root."""
+
+    return Path(model_root) / checkpoint_name
+
+
+def build_saved_model_path(model_root: Path, created_at: str, run_id: str) -> Path:
+    """Compose the historical timestamp/run-id checkpoint filename."""
+
+    return Path(model_root) / f"{created_at}_{run_id}.pth"
 
 
 if __name__ == '__main__':
     args = getArgsParser()
+
+    # The legacy training stack is optional.  Keep it out of module import and
+    # argument-help paths, while supporting both package and direct-script
+    # launches when training dependencies are installed.
+    if __package__:
+        from .utils_architectures import createModel
+        from .utils_datasets import createLoaders
+        from .utils_losses import CrossEntropySpkReg, TimeFirstWin
+        from .utils_run import run_epoch
+    else:
+        from utils_architectures import createModel
+        from utils_datasets import createLoaders
+        from utils_losses import CrossEntropySpkReg, TimeFirstWin
+        from utils_run import run_epoch
+
+    import pandas as pd
+    import torch
+    import wandb
     
     # Initialize run
     tags = ['31_spikes_per_dt', 'without_reset_after_batch', 'saving_models'] # , 'no_balancing', 'xylo_size_sweep'
@@ -27,17 +78,14 @@ if __name__ == '__main__':
     if args.use_wandb: run = wandb.init(project='Neuromorphic-IMU', config=args, tags=tags)
     
     # Define some variables
-    data_path = f'/work/pi_sunghoonlee_umass_edu/Ignacio/{args.dataset_name.lower()}/'
-    if args.raw_data_wg:
-        data_path += f'data/{args.dataset_name.lower()}_wg/windows/'
-    elif args.raw_data_gr:
-        data_path += f'data/{args.dataset_name.lower()}_gr/windows/'
-    elif args.use_xylo:
-        data_path += f'data/spikesXylo/windows/'
-    else:
-        data_path += f'data/eventsNIMU/windows/'
-        
-    model_path = '/home/igavier_umass_edu/Documents/Neuromorphic-IMU/snn/models/'
+    data_path = build_data_path(
+        args.data_root,
+        args.dataset_name,
+        raw_data_wg=args.raw_data_wg,
+        raw_data_gr=args.raw_data_gr,
+        use_xylo=args.use_xylo,
+    )
+    model_path = args.model_root
     device = torch.device('cuda') if torch.cuda.is_available() and args.use_gpu else torch.device('cpu')
     sample_freq = 64 # int(64 / time_compress)
     
@@ -109,7 +157,9 @@ if __name__ == '__main__':
     if args.model_checkpoint != 'None':
         # Load parameters up to layer 3 (included)
         state_dict = model.state_dict()
-        state_dict.update({k: v for k, v in torch.load(f'{model_path}/{args.model_checkpoint}').items()
+        state_dict.update({k: v for k, v in torch.load(
+            build_checkpoint_path(model_path, args.model_checkpoint)
+        ).items()
                           if k in state_dict and '4' not in k})
         model.load_state_dict(state_dict)
         # Set learning rates
@@ -143,4 +193,7 @@ if __name__ == '__main__':
         if args.save_model and val_metrics['auroc_mac'] > best_metric:
             best_metric = val_metrics['auroc_mac']
             created_at = pd.to_datetime(run.start_time, unit='s', utc=True).isoformat()
-            torch.save(deepcopy(model.state_dict()), f'{model_path}/{created_at}_{run.id}.pth')
+            torch.save(
+                deepcopy(model.state_dict()),
+                build_saved_model_path(model_path, created_at, run.id),
+            )

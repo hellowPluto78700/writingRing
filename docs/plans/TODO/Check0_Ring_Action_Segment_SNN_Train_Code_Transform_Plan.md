@@ -2099,6 +2099,20 @@ data → forward → loss → backward → step
 所有新增 pytest 通过
 ```
 
+## Completion reconciliation (T006)
+
+This is a historical implementation plan. Its illustrative Action0 training
+references to `label/segmentation/` are superseded by the verified producer
+contract at `label/segmentation_padded/`; the latter is the fixed-length
+trainer input and is documented in `docs/notes/ACTION0_SNN_TRAINING.md`.
+
+Acceptance item `[22]` was resolved as Scope B for the full `snn/` tree. The
+legacy HAR path now requires typed `--data-root` and `--model-root` inputs,
+preserves its existing suffix/checkpoint naming behavior, supports package and
+direct-script imports, and has no scoped old-machine `/home` or `/work`
+literals. This annotation records the verified outcome without rewriting the
+historical plan's other intent.
+
 最终建议目录不变：
 
 ```text

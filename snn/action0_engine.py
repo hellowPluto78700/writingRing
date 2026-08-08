@@ -51,8 +51,9 @@ def run_epoch(
     split: str = "train",
     device: torch.device | None = None,
     max_batches: int | None = None,
+    expected_num_classes: int,
 ) -> dict[str, float]:
-    """Run a train, validation, or test epoch without counting padded positions."""
+    """Run an epoch without counting padded positions or unexpected classes."""
 
     if split not in {"train", "val", "test"}:
         raise ValueError("split must be one of: train, val, test")
@@ -61,12 +62,15 @@ def run_epoch(
         raise ValueError("optimizer is required for a training epoch")
     if max_batches is not None and max_batches <= 0:
         raise ValueError("max_batches must be positive when provided")
+    if expected_num_classes <= 0:
+        raise ValueError("expected_num_classes must be positive")
     if device is None:
         device = torch.device("cpu")
 
     model.train(is_train)
     sample_count = 0
     running_loss = 0.0
+    valid_step_total = 0
     total_output_spikes = 0.0
     total_valid_spikes = 0.0
     zero_output_segments = 0
@@ -99,13 +103,16 @@ def run_epoch(
                 optimizer.zero_grad()
 
             output = model(inputs, valid_mask=valid_mask)
-            if output.ndim != 3 or output.shape[:2] != inputs.shape[:2]:
+            if (
+                output.ndim != 3
+                or output.shape[:2] != inputs.shape[:2]
+                or output.shape[2] != expected_num_classes
+            ):
                 raise AssertionError(
-                    "model output must have shape (batch, time, classes); "
+                    "model output must have exact shape "
+                    f"(batch, time, {expected_num_classes}); "
                     f"inputs={tuple(inputs.shape)}, output={tuple(output.shape)}"
                 )
-            if output.shape[2] <= 0:
-                raise AssertionError("model output must include at least one class")
 
             spikes = getattr(model, "spkTotal", None)
             spike_neuron_count = getattr(model, "spike_neuron_count", None)
@@ -130,7 +137,9 @@ def run_epoch(
                 raise AssertionError("Action0 model must expose spkTotal after forward")
 
             sample_count += batch_size
-            running_loss += float(loss.detach()) * batch_size
+            batch_valid_steps = int(valid_mask.sum().item())
+            running_loss += float(loss.detach()) * batch_valid_steps
+            valid_step_total += batch_valid_steps
             total_output_spikes += float(spike_counts.detach().sum())
             total_valid_spikes += float(spikes.detach())
             zero_output_segments += int((spike_counts.sum(dim=1) == 0).sum())
@@ -143,7 +152,7 @@ def run_epoch(
     metrics = _classification_metrics(y_true, y_pred)
     metrics.update(
         {
-            "loss": running_loss / sample_count,
+            "loss": running_loss / valid_step_total,
             "mean_output_spikes": total_output_spikes / sample_count,
             "mean_total_spikes": total_valid_spikes / sample_count,
             "zero_output_spike_fraction": zero_output_segments / sample_count,

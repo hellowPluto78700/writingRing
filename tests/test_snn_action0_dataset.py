@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -10,8 +11,11 @@ import torch
 
 from snn.action0_dataset import (
     INPUT_CHANNEL_COUNT,
+    SPIKE_IMU_FEATURE_SCHEMA,
+    Action0DatasetError,
     Action0SegmentDataset,
     discover_class_to_idx,
+    load_padding_dataset_metadata,
     resolve_dataset_root,
     resolve_segmentation_root,
 )
@@ -45,6 +49,28 @@ def _write_padded_package(
     np.save(directory / f"{stem}_valid_lengths.npy", valid_lengths, allow_pickle=False)
     np.save(directory / f"{stem}_valid_mask.npy", valid_mask, allow_pickle=False)
     return values
+
+
+def _write_metadata(
+    segmentation_root: Path,
+    *,
+    target_length: object = 4,
+    sampling_rate_hz: object = 200.0,
+    **overrides: object,
+) -> None:
+    payload: dict[str, object] = {
+        "input_kind": "spike-imu",
+        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "channel_count": 21,
+        "target_length": target_length,
+        "sampling_rate_hz": sampling_rate_hz,
+        "padding_side": "right",
+    }
+    payload.update(overrides)
+    segmentation_root.mkdir(parents=True, exist_ok=True)
+    (segmentation_root / "padding_dataset_summary.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
 
 def test_variant_resolution_is_fixed_to_label_padded_output(tmp_path: Path) -> None:
@@ -82,3 +108,72 @@ def test_dataset_returns_only_the_first_fifteen_spike_channels(tmp_path: Path) -
     assert valid_mask.tolist() == [True, True, True, True]
     assert dataset.padded_length == 4
     assert dataset.class_distribution == {"A": 1, "B": 1}
+
+
+def test_valid_padding_metadata_loads_and_keeps_diagnostic_counts(tmp_path: Path) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    _write_metadata(
+        segmentation_root,
+        processed_user_action_count=3,
+        source_segment_count=12,
+        segment_count=10,
+        skipped_segment_count=2,
+        board_assisted_package_count=1,
+        label_only_package_count=2,
+        failed_package_count=0,
+        input_root="/relocated/source",
+        output_root="/relocated/output",
+    )
+
+    metadata = load_padding_dataset_metadata(segmentation_root)
+
+    assert metadata.target_length == 4
+    assert metadata.sampling_rate_hz == 200.0
+    assert metadata.diagnostic_counts == {
+        "processed_user_action_count": 3,
+        "source_segment_count": 12,
+        "segment_count": 10,
+        "skipped_segment_count": 2,
+        "board_assisted_package_count": 1,
+        "label_only_package_count": 2,
+        "failed_package_count": 0,
+    }
+
+
+def test_missing_padding_metadata_fails(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="padding_dataset_summary.json"):
+        load_padding_dataset_metadata(tmp_path / "segmentation_padded")
+
+
+def test_malformed_padding_metadata_fails(tmp_path: Path) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    segmentation_root.mkdir()
+    (segmentation_root / "padding_dataset_summary.json").write_text(
+        "not-json", encoding="utf-8"
+    )
+
+    with pytest.raises(Action0DatasetError, match="could not read padded dataset summary"):
+        load_padding_dataset_metadata(segmentation_root)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("input_kind", "raw-ring", "input_kind"),
+        ("feature_schema", "wrong_schema", "feature_schema"),
+        ("channel_count", 15, "channel_count"),
+        ("target_length", 0, "target_length"),
+        ("target_length", 4.0, "target_length"),
+        ("sampling_rate_hz", 0.0, "sampling_rate_hz"),
+        ("sampling_rate_hz", "200", "sampling_rate_hz"),
+        ("padding_side", "left", "padding_side"),
+    ],
+)
+def test_padding_metadata_contract_fields_are_validated(
+    tmp_path: Path, field: str, value: object, message: str
+) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    _write_metadata(segmentation_root, **{field: value})
+
+    with pytest.raises(Action0DatasetError, match=message):
+        load_padding_dataset_metadata(segmentation_root)

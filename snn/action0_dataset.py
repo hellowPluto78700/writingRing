@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import json
+import math
 from pathlib import Path
 from typing import Final, Mapping, Sequence
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+from writingring.segment_padding import SPIKE_IMU_FEATURE_SCHEMA
 
 
 DATASET_VARIANT_DIRS: Final[dict[str, str]] = {
@@ -26,12 +30,52 @@ DATASET_VARIANT_DIRS: Final[dict[str, str]] = {
 }
 BOUNDARY: Final[str] = "label"
 PADDED_SEGMENTATION_DIRECTORY: Final[str] = "segmentation_padded"
+PADDING_DATASET_SUMMARY_FILENAME: Final[str] = "padding_dataset_summary.json"
 SPIKE_IMU_CHANNEL_COUNT: Final[int] = 21
 INPUT_CHANNEL_COUNT: Final[int] = 15
+
+_DIAGNOSTIC_COUNT_FIELDS: Final[tuple[str, ...]] = (
+    "processed_user_action_count",
+    "source_segment_count",
+    "segment_count",
+    "skipped_segment_count",
+    "board_assisted_package_count",
+    "label_only_package_count",
+    "failed_package_count",
+)
 
 
 class Action0DatasetError(ValueError):
     """Raised when a padded Action0 producer artifact violates its contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class PaddingDatasetMetadata:
+    """Validated root-level metadata published by the padding producer."""
+
+    input_kind: str
+    feature_schema: str
+    channel_count: int
+    target_length: int
+    sampling_rate_hz: float
+    padding_side: str
+    processed_user_action_count: int | None = None
+    source_segment_count: int | None = None
+    segment_count: int | None = None
+    skipped_segment_count: int | None = None
+    board_assisted_package_count: int | None = None
+    label_only_package_count: int | None = None
+    failed_package_count: int | None = None
+
+    @property
+    def diagnostic_counts(self) -> dict[str, int]:
+        """Return optional producer counters without treating them as dataset identity."""
+
+        return {
+            name: value
+            for name in _DIAGNOSTIC_COUNT_FIELDS
+            if (value := getattr(self, name)) is not None
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +114,142 @@ def resolve_segmentation_root(dataset_root: Path) -> Path:
     """
 
     return Path(dataset_root) / PADDED_SEGMENTATION_DIRECTORY
+
+
+def load_padding_dataset_metadata(segmentation_root: Path) -> PaddingDatasetMetadata:
+    """Load and validate the producer's root-level padded dataset contract.
+
+    The summary is intentionally the only source for producer-wide target and
+    sampling metadata.  Absolute source/output roots are not interpreted by
+    the trainer, so a package can be moved after publication.
+    """
+
+    summary_path = Path(segmentation_root) / PADDING_DATASET_SUMMARY_FILENAME
+    if not summary_path.is_file():
+        raise FileNotFoundError(
+            "missing padded dataset summary: "
+            f"{summary_path}. Run the Action0 padding producer first."
+        )
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise Action0DatasetError(
+            f"could not read padded dataset summary {summary_path}: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise Action0DatasetError(
+            f"padded dataset summary must be a JSON object: {summary_path}"
+        )
+
+    input_kind = _require_exact_string(
+        payload, "input_kind", "spike-imu", summary_path
+    )
+    feature_schema = _require_exact_string(
+        payload, "feature_schema", SPIKE_IMU_FEATURE_SCHEMA, summary_path
+    )
+    channel_count = _require_exact_int(
+        payload, "channel_count", summary_path, expected=SPIKE_IMU_CHANNEL_COUNT
+    )
+    target_length = _require_positive_int(payload, "target_length", summary_path)
+    sampling_rate_hz = _require_positive_finite_float(
+        payload, "sampling_rate_hz", summary_path
+    )
+    padding_side = _require_exact_string(payload, "padding_side", "right", summary_path)
+
+    diagnostics: dict[str, int | None] = {}
+    for name in _DIAGNOSTIC_COUNT_FIELDS:
+        if name in payload:
+            diagnostics[name] = _require_nonnegative_int(payload, name, summary_path)
+        else:
+            diagnostics[name] = None
+    return PaddingDatasetMetadata(
+        input_kind=input_kind,
+        feature_schema=feature_schema,
+        channel_count=channel_count,
+        target_length=target_length,
+        sampling_rate_hz=sampling_rate_hz,
+        padding_side=padding_side,
+        **diagnostics,
+    )
+
+
+def _require_exact_string(
+    payload: Mapping[str, object],
+    name: str,
+    expected: str,
+    summary_path: Path,
+) -> str:
+    value = payload.get(name)
+    if not isinstance(value, str) or value != expected:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name}={expected!r}; "
+            f"got {value!r}"
+        )
+    return value
+
+
+def _require_exact_int(
+    payload: Mapping[str, object],
+    name: str,
+    summary_path: Path,
+    *,
+    expected: int,
+) -> int:
+    value = payload.get(name)
+    if not isinstance(value, int) or isinstance(value, bool) or value != expected:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name}={expected}; "
+            f"got {value!r}"
+        )
+    return value
+
+
+def _require_positive_int(
+    payload: Mapping[str, object], name: str, summary_path: Path
+) -> int:
+    value = payload.get(name)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name} to be a positive integer; "
+            f"got {value!r}"
+        )
+    return value
+
+
+def _require_nonnegative_int(
+    payload: Mapping[str, object], name: str, summary_path: Path
+) -> int:
+    value = payload.get(name)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires diagnostic {name} "
+            f"to be a non-negative integer; got {value!r}"
+        )
+    return value
+
+
+def _require_positive_finite_float(
+    payload: Mapping[str, object], name: str, summary_path: Path
+) -> float:
+    value = payload.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name} to be a "
+            f"finite positive number; got {value!r}"
+        )
+    try:
+        converted = float(value)
+    except (OverflowError, ValueError) as error:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name} to be a "
+            f"finite positive number; got {value!r}"
+        ) from error
+    if not math.isfinite(converted) or converted <= 0:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires {name} to be a "
+            f"finite positive number; got {value!r}"
+        )
+    return converted
 
 
 def discover_class_to_idx(segmentation_root: Path) -> dict[str, int]:

@@ -2,11 +2,15 @@
 
 ## Active plan
 
-- **Plan:** `docs/plans/TODO/00_Documentation_Contract_Repair_Plan.md`
-- **Task file:** `docs/plans/TODO/00_Documentation_Contract_Repair_TASKS.md`
-- **Baseline commit:** `34a79fc6a6d5942e082cc23ab6be4e5c20dd63db`
+- **Plan:** none
+- **Task file:** none
+- **Most recently completed plan:**
+  `docs/plans/Done/02_SNN_Train_Process_Correction_Plan.md`
+- **Companion task file:**
+  `docs/plans/Done/02_SNN_Train_Process_Correction_TASKS.md`
+- **Baseline commit:** `29da4396b60d9357e0b8edffdb6f02ec4011a987`
 - **Current task:** none
-- **Status:** DONE
+- **Status:** DONE — 02 SNN training process correction plan closed
 
 ## Task state
 
@@ -14,66 +18,65 @@
 | --- | --- | --- |
 | T001 | DONE | — |
 | T002 | DONE | T001 |
-| T003 | DONE | T001 |
-| T004 | DONE | T001 |
-| T005 | DONE | T001 |
-| T006 | DONE — DATA_FORMAT only; reports deferred | T001, T003 |
-| T007 | DONE | T002–T006 |
-| T008 | NOT REQUIRED | no implementation discrepancy found |
+| T003 | DONE | T002 |
+| T004 | DONE — Scope B | T003 |
+| T004B | DONE | T004 |
+| T005 | DONE | T003, T004B |
+| T006 | DONE | T005 |
 
 ## Focus and next action
 
-- Probe digest: the revised baseline is confirmed. It distinguishes
-  work-axis-only alignment artifacts, scoped defaults, generic versus public
-  schemas, and mask/state semantics; no implementation discrepancy was found.
-- Focus: source representation and rate wording; 9/15/21 schemas; alignment
-  endpoint work axis and canonical projection status; segmentation
-  combinations; scoped defaults; historical-report scope.
-- Blockers: none recorded.
-- Primary execution digest: recorded the shape matrix, timestamp vocabulary,
-  scoped defaults, and explicit alignment-projection/mask distinctions in the
-  frozen task file; README and notes remain untouched.
-- Verifier digest: PASS. T001 scope and all frozen contracts were independently
-  confirmed; 87 targeted tests passed. Environment note: the verifier observed
-  Python 3.10.20 in `writingring-viz`, although repository policy requires
-  3.11; no T001 artifact depends on changing that environment.
-- Probe digest: T002 is confirmed. README may describe the public entry-point
-  flow and link to notes; it must distinguish optional separate Action-0
-  training from the wrapper pipeline.
-- Primary execution digest: README was rewritten within the frozen scope to
-  be an orientation layer with validated note links and current entry points.
-- Verifier digest: PASS. README's source/rate/action terminology, pipeline,
-  entry points, link targets, and scope were independently confirmed.
-- Probe digest: T003 confirmed endpoint reconstruction for both input kinds;
-  schema-v2 `offset_us` is work-axis-domain and canonical projection failure
-  does not invalidate a declared work-axis artifact.
-- Primary execution digest: repaired only ALIGNMENT_OUTPUTS and the derived
-  alignment section of DATA_FORMAT.
-- Verifier digest: PASS. 66 focused tests passed, 1 real-sample test skipped;
-  endpoint/projection/consumer documentation matches current behavior.
-- Plan reconciliation: PROJECT_REPORT and VENDOR_WINDOWING_REPORT are deferred
-  / out of scope, therefore excluded from T006 and T007 blocking criteria.
-- Probe digest: T004 confirmed public 9/15/21 schemas, independent selectors,
-  Board validation/no-fallback behavior, and stale raw/six-nine/strict-axis
-  phrases requiring documentation repair.
-- Primary execution digest: repaired T004's frozen note scope; no runtime
-  artifacts changed.
-- Verifier digest: PASS. 41 targeted tests passed, 1 skipped; raw/spike widths,
-  selector behavior, and Board fallback rules match the repaired notes.
-- Probe digest: T005 confirmed current mode/default/legacy alias semantics.
-- Primary execution digest: repaired SEGMENTATIONS_BASH_SCRIPTS only.
-- Verifier digest: PASS. Pipeline/dataset/model focused checks passed.
-- Probe digest: T006 requires a narrow DATA_FORMAT repair (0.10-second
-  stationary default, scoped defaults, and clearer four-way classification).
-- Re-probe digest: T006 revised scope confirmed; deferred reports stay
-  untouched.
-- Primary execution digest: corrected DATA_FORMAT classification/defaults.
-- Verifier digest: PASS. 47 focused tests passed; no deferred report changed.
-- Probe digest: T007 found no scoped contradiction; deferred reports are
-  excluded, and remaining stale-term hits are contextually correct.
-- Verifier digest: PASS. 102 focused tests passed and 1 skipped; no scoped
-  contradiction or implementation replan was found. Environment note remains:
-  verifier observed Python 3.10.20 despite the repository's Python 3.11 rule.
-- Plan result: DONE. T001–T007 passed their required probe/freeze/PRIMARY
-  documentation/verifier lifecycle; T008 is not required. Deferred historical
-  reports remain unmodified and out of scope.
+- Focus: no active plan. The completed 02 plan is retained under `Done/` with
+  its companion TaskSpec for durable audit.
+- Blockers: none recorded. User authorized an isolated `writingring-test`
+  environment; `writingring-viz` remains untouched.
+- Probe digest: T001 confirmed stable root metadata and required fields;
+  package counts are diagnostic, and summary/provenance rate is not measured
+  data. No replan trigger found.
+- Worker/verifier digest: PASS. Metadata/rate/target validation was implemented
+  in the frozen scope; focused and related tests passed with no producer or
+  SynNet dynamics change.
+- Probe digest: T002 confirmed exact class-dimension, valid-step loss, and
+  same-batch dry-run gaps; no baseline redesign required.
+- Worker/verifier digest: PASS. Exact class validation, valid-step loss, and
+  same-batch dry-run landed within frozen scope. Python 3.11 validation remains
+  unavailable; `writingring-viz` reports 3.10.20.
+- Probe digest: existing checkpoint loading lacks explicit restore semantics.
+  PRIMARY adopted the plan's preferred configuration-compatible model-restore
+  direction; no exact resume/optimizer continuation is claimed.
+- Re-probe digest: CONFIRMED. Schema-v1 model-only new-run restore is safe;
+  no external Action0 consumer requires legacy compatibility.
+- Worker/verifier digest: PASS. Schema-v1 model-only restore landed in the
+  frozen scope; focused verification passed. Python 3.11 remains unverified.
+- Scope decision: user selected Scope B. T004 records repository-wide `/snn`
+  portability acceptance; T004B is now required before T005.
+- Verifier digest: PASS. Scope B was recorded with no legacy implementation
+  edit; T004B is correctly required before T005.
+- Probe digest: T004B confirmed active HAR old-machine paths and import
+  coupling; no external launcher contract was found.
+- Worker/verifier digest: PASS. Frozen legacy portability cleanup passed scoped
+  tests; no HAR or Action0 behavior changed.
+- Prior probe digest: BLOCKED. `writingring-viz` is Python 3.10.20, not required
+  3.11. Its 3.10 diagnostics passed:
+  targeted 26, supplemental 29, full 502 passed/1 skipped, plus real lowpass
+  producer dry run. These cannot satisfy T005's policy gate.
+- Environment reconciliation: `writingring-test` was created independently at
+  Python 3.11.15 with the current direct runtime pins mirrored and the local
+  project installed editable without dependency resolution. `pip check` and
+  key imports pass. Re-probe: CONFIRMED that it is an authorized isolated
+  Python 3.11 target; prior diagnostics establish the exact T005 matrix.
+- T005 verification digest: PASS. `writingring-test` is Python 3.11.15 with
+  mirrored direct pins and `pip check` clean; targeted Action0 26 passed,
+  supplemental checkpoint/legacy 29 passed, full suite 502 passed/1 known
+  unavailable-real-artifact skip, and the real lowpass producer dry run passed.
+  Torch 2.5.1+cpu and snnTorch 1.0.0 executed. No Python 3.11, resolver, or
+  T005 implementation failure was observed; `writingring-viz` remains 3.10.20
+  and untouched by user direction.
+- T006 probe digest: CONFIRMED. Update the Action0 note, plan/task/workboard,
+  and a concise historical Check0 annotation only; keep README unchanged and
+  do not overclaim rate measurement, exact resume, or a one-forward dry run.
+- T006 verifier digests: initial FAIL identified only stale lifecycle markers;
+  PRIMARY synchronized them and a fresh verifier PASS confirmed the durable
+  Action0/Scope-B documentation, unchanged README, correct limitations, and
+  consistent state. The plan and task record are now closed under `Done/`.
+- Next action: initialize a new plan only when requested.

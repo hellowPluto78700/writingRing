@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 import math
 import random
-from typing import Any, Mapping, Sequence
+from typing import Any, Final, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -15,8 +15,11 @@ from torch.utils.data import DataLoader
 from .action0_dataset import (
     BOUNDARY,
     INPUT_CHANNEL_COUNT,
+    Action0DatasetError,
     Action0SegmentDataset,
+    PaddingDatasetMetadata,
     discover_class_to_idx,
+    load_padding_dataset_metadata,
     resolve_dataset_root,
     resolve_segmentation_root,
 )
@@ -24,6 +27,9 @@ from .action0_engine import run_epoch
 from .action0_losses import MaskedCrossEntropySpkReg
 from .action0_parser import parse_args
 from .utils_architectures import createModel
+
+
+CHECKPOINT_SCHEMA_VERSION: Final[int] = 1
 
 
 def main(argv: Sequence[str] | None = None) -> dict[str, object]:
@@ -45,17 +51,29 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
             "padded segmentation root does not exist: "
             f"{segmentation_root}. The training baseline requires producer padding output."
         )
+    producer_metadata = load_padding_dataset_metadata(segmentation_root)
+    _validate_sampling_rate(
+        cli_sampling_rate=args.sample_freq,
+        producer_sampling_rate=producer_metadata.sampling_rate_hz,
+    )
 
     print(f"Dataset variant: {args.dataset_variant}")
     print(f"Boundary: {BOUNDARY}")
     print(f"Dataset root: {dataset_root}")
     print(f"Segmentation root: {segmentation_root}")
+    _print_producer_metadata(producer_metadata)
 
     class_to_idx = discover_class_to_idx(segmentation_root)
     idx_to_class = {index: label for label, index in class_to_idx.items()}
     train_dataset = Action0SegmentDataset(segmentation_root, args.train_users, class_to_idx)
     val_dataset = Action0SegmentDataset(segmentation_root, args.val_users, class_to_idx)
     test_dataset = Action0SegmentDataset(segmentation_root, args.test_users, class_to_idx)
+    _validate_split_padded_lengths(
+        producer_metadata,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        test_dataset=test_dataset,
+    )
     _print_dataset_statistics(
         class_to_idx=class_to_idx,
         idx_to_class=idx_to_class,
@@ -101,10 +119,10 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         _load_checkpoint(
             checkpoint_path=args.model_checkpoint,
             model=model,
-            optimizer=optimizer,
             device=device,
             class_to_idx=class_to_idx,
             dataset_variant=args.dataset_variant,
+            args=args,
         )
 
     if args.dry_run:
@@ -115,12 +133,13 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
             )
         dry_run_metrics = run_epoch(
             model,
-            train_loader,
+            [(first_inputs, first_labels, first_mask)],
             criterion,
             optimizer,
             split="train",
             device=device,
             max_batches=1,
+            expected_num_classes=num_outputs,
         )
         _print_dry_run_report(
             args=args,
@@ -156,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
                 split="train",
                 device=device,
                 max_batches=args.max_train_batches,
+                expected_num_classes=num_outputs,
             )
             val_metrics = run_epoch(
                 model,
@@ -163,6 +183,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
                 criterion,
                 split="val",
                 device=device,
+                expected_num_classes=num_outputs,
             )
             _print_epoch_metrics("train", train_metrics)
             _print_epoch_metrics("val", val_metrics)
@@ -202,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
             criterion,
             split="test",
             device=device,
+            expected_num_classes=num_outputs,
         )
         _print_epoch_metrics("test", test_metrics)
         if run is not None:
@@ -248,6 +270,55 @@ def _validate_args(args: Any) -> None:
                 "to preserve SynNet's heterogeneous alpha layout"
             )
     _validate_user_splits(args.train_users, args.val_users, args.test_users)
+
+
+def _validate_sampling_rate(
+    *, cli_sampling_rate: float, producer_sampling_rate: float
+) -> None:
+    """Require CLI and producer rates to agree without changing SynNet dynamics."""
+
+    if not math.isclose(
+        cli_sampling_rate,
+        producer_sampling_rate,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise Action0DatasetError(
+            "CLI sample_freq does not match producer sampling_rate_hz: "
+            f"{cli_sampling_rate!r} != {producer_sampling_rate!r} "
+            "(absolute tolerance 1e-12)"
+        )
+
+
+def _validate_split_padded_lengths(
+    producer_metadata: PaddingDatasetMetadata,
+    *,
+    train_dataset: Action0SegmentDataset,
+    val_dataset: Action0SegmentDataset,
+    test_dataset: Action0SegmentDataset,
+) -> None:
+    """Require all selected splits to use the producer's one padded length."""
+
+    lengths = {
+        "train": train_dataset.padded_length,
+        "validation": val_dataset.padded_length,
+        "test": test_dataset.padded_length,
+    }
+    mismatches = {
+        name: length
+        for name, length in lengths.items()
+        if length != producer_metadata.target_length
+    }
+    if mismatches:
+        raise Action0DatasetError(
+            "selected split padded lengths must equal producer target_length "
+            f"{producer_metadata.target_length}; got {lengths}"
+        )
+    if len(set(lengths.values())) != 1:
+        raise Action0DatasetError(
+            "train, validation, and test padded lengths must match; "
+            f"got {lengths}"
+        )
 
 
 def _validate_user_splits(
@@ -329,6 +400,19 @@ def _inspect_first_batch(
     print(f"First labels shape: {tuple(labels.shape)}")
     print(f"First valid-mask shape: {tuple(valid_mask.shape)}")
     print(f"First-batch valid fraction: {float(valid_mask.float().mean()):.6f}")
+
+
+def _print_producer_metadata(metadata: PaddingDatasetMetadata) -> None:
+    """Print the producer fields that define this Action0 training input."""
+
+    print("Producer:")
+    print(f"  input_kind: {metadata.input_kind}")
+    print(f"  feature_schema: {metadata.feature_schema}")
+    print(f"  channel_count: {metadata.channel_count}")
+    print(f"  target_length: {metadata.target_length}")
+    print(f"  sampling_rate_hz: {metadata.sampling_rate_hz:g}")
+    print(f"  padding_side: {metadata.padding_side}")
+    print(f"Trainer input channel slice: 0:{INPUT_CHANNEL_COUNT}")
 
 
 def _print_dataset_statistics(
@@ -415,17 +499,23 @@ def _print_epoch_metrics(name: str, metrics: Mapping[str, float]) -> None:
 def _checkpoint_payload(
     *,
     model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    epoch: int,
-    best_val_metric: float,
     args: Any,
     class_to_idx: Mapping[str, int],
+    optimizer: torch.optim.Optimizer | None = None,
+    epoch: int | None = None,
+    best_val_metric: float | None = None,
 ) -> dict[str, object]:
+    """Build a schema-v1 model-only checkpoint for a new training run.
+
+    The optional legacy arguments remain accepted by this private helper so
+    existing in-repository callers do not break, but they intentionally do
+    not enter the payload.  ``--model_checkpoint`` is a configuration-
+    compatible model restore, not an optimizer or trajectory resume.
+    """
+
     return {
+        "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
         "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "epoch": epoch,
-        "best_val_metric": best_val_metric,
         "dataset_variant": args.dataset_variant,
         "boundary": BOUNDARY,
         "class_to_idx": dict(class_to_idx),
@@ -473,30 +563,79 @@ def _load_checkpoint(
     *,
     checkpoint_path: Path,
     model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
     device: torch.device,
     class_to_idx: Mapping[str, int],
     dataset_variant: str,
+    args: Any,
 ) -> None:
+    """Restore model weights after validating the schema-v1 configuration.
+
+    Only model parameters are restored.  Optimizer, epoch, best-metric, RNG,
+    and DataLoader state are intentionally not part of this new-run restore.
+    """
+
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"model checkpoint does not exist: {checkpoint_path}")
     payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    if not isinstance(payload, Mapping) or "model_state_dict" not in payload:
-        raise ValueError("model_checkpoint must be an Action0 full checkpoint with model_state_dict")
-    if payload.get("dataset_variant") != dataset_variant:
+
+    if not isinstance(payload, Mapping):
         raise ValueError(
-            "checkpoint dataset_variant does not match requested variant: "
-            f"{payload.get('dataset_variant')!r} != {dataset_variant!r}"
+            "checkpoint checkpoint_schema_version mismatch: "
+            f"checkpoint value={type(payload).__name__!r}; "
+            f"requested value={CHECKPOINT_SCHEMA_VERSION!r}"
         )
-    if payload.get("boundary") != BOUNDARY:
-        raise ValueError("checkpoint boundary is not the required label boundary")
-    if payload.get("class_to_idx") != dict(class_to_idx):
-        raise ValueError("checkpoint class_to_idx does not match the selected dataset variant")
-    model.load_state_dict(payload["model_state_dict"])
-    optimizer_state = payload.get("optimizer_state_dict")
-    if optimizer_state is not None:
-        optimizer.load_state_dict(optimizer_state)
+    _validate_checkpoint_field(
+        payload,
+        "checkpoint_schema_version",
+        CHECKPOINT_SCHEMA_VERSION,
+    )
+
+    expected_fields = {
+        "dataset_variant": dataset_variant,
+        "boundary": BOUNDARY,
+        "class_to_idx": dict(class_to_idx),
+        "input_channels": [0, INPUT_CHANNEL_COUNT],
+        "num_inputs": INPUT_CHANNEL_COUNT,
+        "num_outputs": len(class_to_idx),
+        "hidden_sizes": list(args.neurons_network),
+        "shift_syn": args.shift_syn,
+        "shift_mem": args.shift_mem,
+        "sample_freq": args.sample_freq,
+        "train_users": list(args.train_users),
+        "val_users": list(args.val_users),
+        "test_users": list(args.test_users),
+    }
+    for field, requested_value in expected_fields.items():
+        _validate_checkpoint_field(payload, field, requested_value)
+
+    model_state = payload.get("model_state_dict")
+    if not isinstance(model_state, Mapping):
+        raise ValueError(
+            "checkpoint model_state_dict must be a mapping; "
+            f"checkpoint value={model_state!r}; requested value=mapping"
+        )
+    model.load_state_dict(model_state)
     print(f"Loaded checkpoint: {checkpoint_path}")
+
+
+def _validate_checkpoint_field(
+    payload: Mapping[str, object], field: str, requested_value: object
+) -> None:
+    """Reject a missing or mismatched checkpoint field with actionable context."""
+
+    missing = object()
+    checkpoint_value = payload.get(field, missing)
+    if checkpoint_value is missing:
+        checkpoint_value_repr = "<missing>"
+        raise ValueError(
+            f"checkpoint {field} mismatch: checkpoint value={checkpoint_value_repr}; "
+            f"requested value={requested_value!r}"
+        )
+    if checkpoint_value != requested_value:
+        raise ValueError(
+            f"checkpoint {field} mismatch: checkpoint value={checkpoint_value!r}; "
+            f"requested value={requested_value!r}"
+        )
 
 
 def _start_wandb_run(args: Any) -> Any:

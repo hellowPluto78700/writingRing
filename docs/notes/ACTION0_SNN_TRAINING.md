@@ -30,6 +30,15 @@ there. Before padding, the producer uses `offsets[i]:offsets[i + 1]` to select
 each segment. After padding, segment `i` is already directly addressed by
 axis 0, so offsets are not copied into the padded package.
 
+Each padded representation root must also contain
+`padding_dataset_summary.json`. Before discovering classes or constructing a
+dataset, the trainer requires `input_kind=spike-imu`, feature schema
+`signed_wavelet_events_plus_imu_v1`, `channel_count=21`, a positive integer
+`target_length`, a finite positive `sampling_rate_hz`, and
+`padding_side=right`. The selected train, validation, and test packages must
+each use that target length and agree with one another. Producer counters are
+diagnostic/provenance information, not relocatable-root checks.
+
 The dataset validates that every padded package is `(S, T_pad, 21)`, all
 packages share `T_pad`, values are finite, masks are boolean contiguous
 prefixes, and each valid length agrees with its mask. It returns:
@@ -70,8 +79,11 @@ layer 3 shifts: 2-9
 beta: 1 - 2**(-shift_mem) = 0.5
 ```
 
-`sample_freq` is retained for the original tau diagnostics only; it never
-remaps the shifts or changes alpha/beta. The model still advances all time
+`sample_freq` must exactly equal the producer summary's `sampling_rate_hz`
+(`atol=1e-12`, `rtol=0`); this is provenance/configuration validation, not a
+claim that every input records a measured acquisition rate. It is retained for
+the original tau diagnostics only; it never remaps the shifts or changes
+alpha/beta. The model still advances all time
 steps, including right padding. The mask affects only the cross-entropy mean,
 final spike-count prediction, spike statistics, and optional spike
 regularization. Thus padding cannot change loss, predicted class, or
@@ -80,6 +92,12 @@ regularization. Thus padding cannot change loss, predicted class, or
 Rockpool is imported only if the legacy `SynNetRP` architecture is explicitly
 selected. Action0 training always selects local `SynNet`, including when the
 dataset variant is named `xylo`.
+
+The engine requires an exact `(B, T, C)` output where
+`C == len(class_to_idx)`; wider or narrower logits fail fast. Epoch loss is the
+scalar batch objective weighted by that batch's number of valid mask time
+steps, divided by the global valid-time-step total. This preserves the masked
+cross-entropy and valid-neuron-time spike-regularization semantics.
 
 ## Run a dry run
 
@@ -99,11 +117,21 @@ conda run --no-capture-output -n writingring-viz \
     --dry_run
 ```
 
-`--dry_run` resolves data, builds the datasets and DataLoaders, runs a forward
-pass, masked loss, backward pass, and one optimizer step before exiting. Normal
-training uses Adam and optionally saves the best validation-balanced-accuracy
-checkpoint with the dataset variant, fixed boundary, mapping, channels, shifts,
-sample frequency, and user splits.
+`--dry_run` resolves data, builds the datasets and DataLoaders, previews one
+batch, then sends that *same* batch through the existing training-epoch path
+as a singleton iterable for masked loss, backward pass, and exactly one
+optimizer step before exiting. The preview and training path each perform
+their normal forward work; dry run is not a promise of only one forward call.
+
+Normal training uses Adam and optionally saves the best
+validation-balanced-accuracy checkpoint. Schema-v1 checkpoints are
+configuration-compatible **model-only restores for a new run**: the loader
+rejects missing or unknown schema versions and validates variant, boundary,
+class mapping/counts, input slice, topology/shifts, sample rate, and ordered
+user splits before applying model weights. It does not restore optimizer,
+epoch, best metric, RNG, or DataLoader/shuffle state, and is not an exact
+trajectory-resume mechanism. New-run epoch count, learning rate,
+regularization, and seed may differ.
 
 ## Upstream and producer differences
 

@@ -1,12 +1,16 @@
 import argparse
+from pathlib import Path
 
-def getArgsParser():
+
+def getArgsParser() -> argparse.Namespace:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # Reproducibility
     parser.add_argument('--random_seed', type=int, default=12345, help='Random seed')
     
     # Dataset
+    parser.add_argument('--data-root', type=Path, required=True,
+                        help='Root containing the legacy HAR dataset directories')
     parser.add_argument('--dataset_name', type=str, default='Capture24', help='Name of dataset')
     parser.add_argument('--label_type', type=str, default='Willetts2018', help='Annotation criterion for Capture24')
     parser.add_argument('--subject_splits', nargs=3, type=int, default=[20,5,5],
@@ -35,6 +39,8 @@ def getArgsParser():
     parser.add_argument('--shift_mem', type=int, default=1, help='Shift for U[t+Dt] = U[t] - (U[t] >> b)')
     parser.add_argument('--relax_taus', action='store_true', help='Relax taus to satisfy hardware constraints')
     parser.add_argument('--model_checkpoint', type=str, default='None', help='Path to model checkpoint')
+    parser.add_argument('--model-root', type=Path, required=True,
+                        help='Directory containing legacy model checkpoints')
     parser.add_argument('--save_model', action='store_true', help='Save model')
     
     # Training setup

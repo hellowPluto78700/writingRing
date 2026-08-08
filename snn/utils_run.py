@@ -3,9 +3,11 @@ import torch
 import wandb
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, balanced_accuracy_score, roc_auc_score, f1_score, matthews_corrcoef, cohen_kappa_score
 
-# import sys
-# sys.path.append('/home/igavier_umass_edu/Documents/Neuromorphic-IMU/snn/')
-from utils_architectures import *
+try:
+    from .utils_architectures import *
+except ImportError:
+    # Allow direct execution/import when ``snn`` is not loaded as a package.
+    from utils_architectures import *
 
 def run_epoch(model, dataloader, criterion, optimizer=None, split='train', device=None):
     is_train = split == 'train'
