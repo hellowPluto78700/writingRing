@@ -28,6 +28,7 @@ You may modify only paths listed in the TaskSpec's allowed_write_paths.
 Treat that write set as authoritative.
 
 Unless explicitly permitted by the frozen TaskSpec, do not modify:
+
 - README.md
 - docs/**
 - AGENTS.md
@@ -41,6 +42,7 @@ Preserve established docs/notes/** contracts unless the frozen TaskSpec
 explicitly authorizes changing them.
 
 Stop and return NEEDS_REPLAN instead of continuing when:
+
 - a frozen assumption is false;
 - a producer or consumer contract materially differs from the TaskSpec;
 - implementation requires a path outside allowed_write_paths;
@@ -51,10 +53,14 @@ Stop and return NEEDS_REPLAN instead of continuing when:
 Do not silently expand scope.
 
 Implement the required behavior and authorized tests.
-Run all validation commands in the TaskSpec.
-After code changes, run the repository-required pytest suite using the
-writingring-viz Conda environment unless the TaskSpec explicitly defines a
-different repository-approved validation command.
+
+Run all validation commands defined in the frozen TaskSpec.
+
+After code changes, also run the repository-required pytest suite using the
+`writingring-viz` Conda environment.
+
+Task-specific validation supplements repository-required pytest; it never
+replaces it.
 
 Return exactly one compact TASK_SUMMARY_PACKET with:
 
