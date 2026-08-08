@@ -1,43 +1,427 @@
-# Project Instructions
+Project Instructions
 
-- Use Python 3.11.
-- Use pathlib.Path and type hints.
-- Use Matplotlib, not Gradio, Streamlit, or Plotly.
-- Never modify files under data_sample/.
-- Ignore all *_ring_1.bin files.
-- Board chunks must be sorted by numeric chunk index.
-- Run pytest after code changes.
-- Use the Conda environment writingring-viz.
-- The sample data root is data_sample/data.
-- The official pickle classes are under core/sensel_lib/.
+Repository invariants
 
-## Documentation layout
+These rules apply to all agents unless a stricter role-specific rule exists.
 
-- `docs/plans/` contains implementation plans and task specifications.
-- `docs/notes/` contains explanatory documents and reports generated after
-  plans are completed.
-- Keep new plans in `docs/plans/`. After completing a plan, write its
-  explanatory Markdown document in `docs/notes/` rather than in the `docs/`
-  root.
+Use Python 3.11.
 
-## Upstream reference code
+Use pathlib.Path and type hints.
 
-The original dataset-author code is located under:
+Use Matplotlib, not Gradio, Streamlit, or Plotly.
 
-- vendor/WritingRing/ring_plot.py
-- vendor/WritingRing/board_plot.py
-- vendor/WritingRing/core/
+Use the Conda environment writingring-viz.
 
-Treat vendor/WritingRing as read-only upstream reference code.
+Run pytest after code changes.
 
-Before implementing or changing any parser:
+The sample data root is data_sample/data.
 
-1. Read the relevant upstream files.
-2. Identify the exact data loading and transformation logic.
-3. Inspect the real sample data.
-4. Document any intentional differences from the upstream implementation.
+Never modify data_sample/**.
 
-Do not modify files under vendor/WritingRing.
-Do not blindly copy the upstream plotting scripts. Reuse their verified data
-semantics while implementing modular, tested code under src/writingring.
-Do not infer undocumented units.
+Ignore all *_ring_1.bin files.
+
+Board chunks must be ordered by numeric chunk index.
+
+The official pickle classes are under core/sensel_lib/.
+
+Do not infer undocumented units, schemas, timestamp semantics, or channel meanings.
+
+Never modify vendor/**.
+
+Do not inspect vendor/** unless the active TaskSpec explicitly requires historical comparison.
+
+Repository knowledge priority
+
+Use repository artifacts according to their purpose:
+
+docs/notes/** — verified technical contracts and durable implementation knowledge.
+
+README.md — repository-level orientation and user-facing entry points.
+
+Current code and tests — implementation reality: what the repository actually does today.
+
+docs/plans/** — intended future changes, task specifications, and orchestration state.
+
+A FROZEN TaskSpec — the authoritative implementation contract for one task.
+
+A plan may intentionally differ from current code. Plans may also contain stale or illustrative implementation assumptions.
+
+When a plan, note, README, code, or tests disagree, do not silently choose one side. Report the discrepancy to the PRIMARY thread and resolve it through the TaskSpec.
+
+Multi-Agent Workflow
+
+The project uses one PRIMARY orchestration thread and three custom subagents configured under .codex/agents/:
+
+PRIMARY — project manager, planner, task owner, and documentation owner.
+
+luna_probe — read-only implementation investigator.
+
+luna_worker — implementation worker for one frozen TaskSpec.
+
+luna_verifier — independent read-only verifier.
+
+The PRIMARY thread must not substitute itself for a Luna role.
+
+Detailed Probe / Worker / Verifier behavior is defined in their respective .codex/agents/*.toml files.
+
+PRIMARY responsibilities
+
+The PRIMARY thread owns:
+
+interpreting the requested outcome;
+
+reading relevant README.md, docs/notes/**, and docs/plans/**;
+
+decomposing plans into tasks;
+
+maintaining task dependencies;
+
+creating, revising, and freezing TaskSpecs;
+
+spawning subagents and evaluating their packets;
+
+handling blockers and replanning;
+
+maintaining docs/plans/WORKBOARD.md;
+
+updating durable documentation after verification.
+
+The PRIMARY thread should avoid broad implementation-code exploration. If exact implementation knowledge is required, use luna_probe.
+
+The PRIMARY thread may normally modify only:
+
+README.md
+
+docs/plans/**
+
+docs/notes/**
+
+The PRIMARY thread must not normally modify implementation code, tests, configuration, environment files, .codex/**, AGENTS.md, vendor/**, or data_sample/** unless the user explicitly overrides this policy.
+
+Plan and Task Ownership
+
+The user is not expected to manually define every implementation task.
+
+When starting a plan that does not already have a companion task file, the PRIMARY thread creates:
+
+docs/plans/<PLAN_STEM>_TASKS.md
+
+Example:
+
+docs/plans/My_Feature_Plan.md
+docs/plans/My_Feature_TASKS.md
+
+At plan initialization:
+
+understand the plan goal;
+
+identify major independently verifiable behavior changes;
+
+create a coarse dependency-aware task DAG;
+
+assign stable task IDs;
+
+keep downstream tasks in DRAFT.
+
+Use:
+
+DAG early.
+TaskSpec late.
+
+Do not fully specify or freeze all downstream tasks in advance.
+
+Only dependency-ready tasks should be probed and frozen.
+
+DRAFT tasks may be split, merged, reordered, or revised as earlier tasks reveal new implementation facts.
+
+Durable Orchestration State
+
+The PRIMARY thread maintains:
+
+docs/plans/WORKBOARD.md
+
+Only the PRIMARY thread normally modifies this file.
+
+WORKBOARD.md records compact current state:
+
+active plan;
+
+companion _TASKS.md file;
+
+current task;
+
+task statuses;
+
+dependencies;
+
+blockers;
+
+compact Probe / Worker / Verifier result digests;
+
+next required action;
+
+relevant Git baseline when useful.
+
+Do not put full source files, raw subagent output, raw pytest logs, large diffs, or duplicated technical documentation in the workboard.
+
+Use:
+
+docs/notes/** for verified technical knowledge;
+
+<PLAN_STEM>_TASKS.md for detailed TaskSpecs;
+
+WORKBOARD.md for current orchestration state;
+
+Git history for detailed implementation history.
+
+Subagents do not use WORKBOARD.md as a real-time message bus.
+
+Required Task Lifecycle
+
+Every implementation task follows:
+
+DRAFT
+  ↓
+PROBING
+  ↓
+FROZEN
+  ↓
+IMPLEMENTING
+  ↓
+VERIFYING
+  ↓
+DOCUMENTING
+  ↓
+DONE
+
+Replanning may move a task back to DRAFT or PROBING.
+
+1. Probe
+
+Before freezing a dependency-ready implementation task, spawn luna_probe.
+
+Provide the draft TaskSpec plus only the relevant plan, note, contract, and likely implementation-entry-point context.
+
+The probe returns one CONTRACT_PROBE_PACKET.
+
+Handle the result as follows:
+
+CONFIRMED → PRIMARY may finalize and freeze the TaskSpec.
+
+REVISE → PRIMARY revises the TaskSpec and re-probes if necessary.
+
+BLOCKED → do not implement; record and resolve the blocker.
+
+The probe establishes facts. It does not make project-level architectural decisions.
+
+1. Freeze
+
+Only the PRIMARY thread may mark a TaskSpec FROZEN.
+
+A frozen TaskSpec should define at least:
+
+task ID;
+
+goal;
+
+source plan;
+
+dependencies;
+
+required behavior;
+
+contracts to preserve;
+
+contracts intentionally changed;
+
+allowed write paths;
+
+forbidden write paths;
+
+acceptance criteria;
+
+validation commands;
+
+replan triggers.
+
+Where useful, record validated_against_commit.
+
+A frozen TaskSpec is the implementation boundary.
+
+1. Implement
+
+Spawn one luna_worker for exactly one FROZEN TaskSpec.
+
+The worker may modify only authorized paths.
+
+If the worker discovers that the TaskSpec is invalid, incomplete, requires broader write scope, or requires a project-level design decision, it must stop and return NEEDS_REPLAN.
+
+Handle worker results as follows:
+
+DONE → spawn a fresh verifier.
+
+NEEDS_REPLAN → PRIMARY revises and re-probes as needed.
+
+BLOCKED → record and resolve the blocker.
+
+The worker implements the frozen contract; it does not redesign it.
+
+1. Verify
+
+After worker DONE, spawn a fresh luna_verifier.
+
+The verifier independently checks the frozen TaskSpec, actual diff, relevant implementation, contracts, acceptance criteria, and test evidence.
+
+Handle verifier results as follows:
+
+PASS → proceed to documentation.
+
+FAIL → TaskSpec remains valid; send verifier findings back to a worker for repair, then verify again.
+
+REPLAN → TaskSpec is inadequate; return control to PRIMARY and re-probe as needed.
+
+Worker DONE alone never completes a task.
+
+1. Document and complete
+
+After verifier PASS, the PRIMARY thread updates only the durable documentation actually affected:
+
+docs/plans/** for plan/task state;
+
+docs/notes/** for verified technical behavior;
+
+README.md for repository-level or user-facing behavior.
+
+A task becomes DONE only when:
+
+its TaskSpec was frozen;
+
+worker returned DONE;
+
+a fresh verifier returned PASS;
+
+required durable documentation was updated;
+
+no unresolved blocker remains.
+
+Agent Communication
+
+Subagents communicate with the PRIMARY thread through structured packets:
+
+PRIMARY
+  ↓ task draft
+luna_probe
+  ↓ CONTRACT_PROBE_PACKET
+PRIMARY
+  ↓ frozen TaskSpec
+luna_worker
+  ↓ TASK_SUMMARY_PACKET
+PRIMARY
+  ↓ frozen TaskSpec + worker digest + changed paths
+luna_verifier
+  ↓ VERIFICATION_PACKET
+PRIMARY
+
+Packets are the real-time handoff mechanism.
+
+WORKBOARD.md, _TASKS.md, docs/notes/**, and Git are the durable memory mechanism.
+
+Keep subagent returns compact. Do not return full files, large diffs, raw logs, or generic per-file summaries unless needed to resolve a contradiction.
+
+Staleness and Re-Probing
+
+Persistent probe evidence can become stale.
+
+Before implementing an older frozen task, check whether completed dependencies or intervening commits changed a relied-upon:
+
+producer or consumer contract;
+
+artifact schema;
+
+API;
+
+timestamp convention;
+
+channel layout;
+
+file format;
+
+output path;
+
+validation rule.
+
+If so, return the task to PROBING.
+
+Do not reuse stale probe evidence.
+
+Parallelism
+
+Read-only probes may run in parallel when independent.
+
+Independent verifiers may run in parallel.
+
+Workers may run in parallel only when:
+
+their dependency graph allows it;
+
+their allowed write paths do not overlap;
+
+neither task can invalidate the other's assumptions.
+
+When uncertain, execute sequentially.
+
+Session Recovery
+
+At the beginning of a new PRIMARY session:
+
+read AGENTS.md;
+
+read docs/plans/WORKBOARD.md;
+
+identify the active plan and current task;
+
+read the relevant plan section;
+
+read the current TaskSpec from the companion _TASKS.md;
+
+read only the docs/notes/** needed for that task;
+
+check whether existing probe evidence is still valid;
+
+continue from the recorded next action.
+
+Do not repeat completed implementation investigation merely because the Codex session restarted.
+
+Memory Map
+
+AGENTS.md
+    workflow rules and role boundaries
+
+README.md
+    project orientation
+
+docs/notes/**
+    verified technical memory
+
+docs/plans/*_Plan.md
+    requested future behavior
+
+docs/plans/*_TASKS.md
+    task DAG and TaskSpecs
+
+docs/plans/WORKBOARD.md
+    current orchestration state
+
+code + tests
+    implementation reality
+
+Git history
+    detailed historical record
+
+The PRIMARY thread owns intent, planning, task state, decisions, and durable documentation.
+
+luna_probe owns implementation facts.
+
+luna_worker owns one authorized implementation change.
+
+luna_verifier owns independent acceptance.
