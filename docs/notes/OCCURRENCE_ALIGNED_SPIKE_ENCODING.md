@@ -34,5 +34,8 @@ latter concatenates those event channels with the unchanged source
 `rawIMU[:, 3:9]` m/s² acceleration and gyroscope channels; it omits the three
 g-domain acceleration columns. Existing labels, timestamps, segment offsets,
 segment lengths, and segment manifests are referenced as source sidecars and
-are neither shifted nor regenerated. The current segmenter still accepts only
-six- or nine-channel input, so it is intentionally not re-run on `spikeIMU`.
+are neither shifted nor regenerated. The public segmenter also accepts
+`--input-kind spike-imu` and preserves the 21-channel SpikeIMU representation.
+Its `raw-ring` input path separately produces the canonical nine-channel
+preprocessed representation; generic low-level helpers should not be mistaken
+for those public artifact contracts.

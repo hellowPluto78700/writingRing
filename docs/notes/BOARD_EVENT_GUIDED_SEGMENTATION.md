@@ -114,7 +114,7 @@ For Madgwick mode, the root is
 `--output-root` replaces the method-specific root directly; no additional
 `aligned_board_events` directory is added.
 
-To export the original six Ring IMU channels without gravity removal, use:
+To export raw-mode preprocessed IMU features without gravity removal, use:
 
 ```bash
 python scripts/segment_ring_imu.py \
@@ -126,7 +126,7 @@ python scripts/segment_ring_imu.py \
 
 Without `--output-root`, this publishes under
 `outputs/boardAssistSegmentedIMU_RawIMU/user_0/action_0/`. Raw keeps gravity
-in the measured acceleration; all modes still publish the same nine channels.
+in the measured acceleration; all modes publish the canonical nine channels.
 
 ```text
 outputs/boardAssistSegmentedIMU_LowPassFilterin/user_0/action_0/

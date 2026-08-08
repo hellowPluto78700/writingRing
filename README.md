@@ -1,60 +1,91 @@
-# WritingRing Dataset
+# WritingRing Dataset and Processing Pipeline
 
----
-license: cc
----
+This repository provides a Python 3.11 workflow for inspecting WritingRing
+recordings and producing the derived artifacts used by the current
+segmentation and Action-0 SynNet experiments.
 
-## Data Format and Structure
+The sample-data root is `data_sample/data`. Under a user/action directory,
+the supported primary Ring input is `*_ring_0.bin`; `*_ring_1.bin` is ignored.
+Each primary Ring file is a raw native-endian float64 binary stream reshaped
+into rows of seven values: six IMU measurements followed by a timestamp. It
+is not a NumPy `.npy` file. Action directory names are identifiers; this
+repository does not establish human semantic labels for action IDs.
 
-The data is organized under `./data/{username}/{action}`, where each action corresponds to a different handwriting task:
+The raw acquisition-rate contract is not established here. Current processing
+commands commonly use a nominal/default 200 Hz configuration; that setting is
+not a claim about every source recording's acquisition rate.
 
-- **Action 0:** Letters, hand raised
-- **Action 1:** Letters, hand not raised
-- **Action 2:** Words (connected), hand raised
-- **Action 3:** Words (connected), hand not raised
-- **Action 4:** Words (disconnected), hand raised
-- **Action 5:** Words (disconnected), hand not raised
+## Current workflow
 
-Each action contains multiple data sets, consisting of data from a ring and a touchpad. Due to the size of the touchpad data, it's split into multiple parts. For example, for dataset with ID 1:
+```text
+Ring recording (`*_ring_0.bin`)
+  → discovery / inspection / Matplotlib visualization
+  → 9-channel preprocessing and gravity handling
+  → optional Custom Wavelet encoding
+       ├── 15 event channels
+       └── 21-channel SpikeIMU artifact
+  → optional Ring–Board alignment
+  → label or aligned-Board-event segmentation
+  → variable-length segment analysis and right-padding
+  → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
+```
 
-- Ring 0 data: `1_ring_0.bin`
-- Touchpad data: `1_board_{index}.gz`
-- Ring 1 data: `1_ring_1.bin` (Please ignore this.)
+The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
+`python -m snn.train_action0` is a separate optional training entry point that
+consumes those padded packages.
 
-### Ring Data Format
+## Setup
 
-The ring data is stored in numpy format as 64-bit floating point values. After reshaping with `data_ring0 = data_ring0.reshape(-1, 7)`, the columns represent:
+Use the `writingring-viz` Conda environment with Python 3.11:
 
-1. Acceleration X
-2. Acceleration Y
-3. Acceleration Z
-4. Angular velocity X
-5. Angular velocity Y
-6. Angular velocity Z
-7. Timestamp
+```bash
+conda activate writingring-viz
+python -m pip install -e ".[test]"
+```
 
-The data is sampled at 200Hz.
+The optional Action-0 training dependencies are available through the project
+extras documented in `pyproject.toml`.
 
-### Touchpad Data Format
+## Entry points
 
-The touchpad data is stored in gzipped format (`.gz`).
+Inspection and visualization:
 
-## Data Visualization
+```bash
+python scripts/list_recordings.py --data-root data_sample/data
 
-### Ring Data Visualization
+python scripts/inspect_recording.py \
+  --data-root data_sample/data --user user_0 --action 0 --dataset-id 0
 
-The `ring_plot.py` script can be used to visualize the ring data. It contains a function `plot_ring_data()`, which takes two parameters:
+python scripts/plot_recording.py \
+  --data-root data_sample/data --user user_0 --action 0 --dataset-id 0 \
+  --output-dir outputs/dataset_0 --no-show
+```
 
-1. Path to the ring data file
-2. A flag indicating whether to save the output
+Derived-processing commands include:
 
-The output is a plot that visualizes the ring data.
+```text
+scripts/preprocess_ring_imu.py
+scripts/encode_spikes.py
+scripts/align_ring_board.py
+scripts/segment_ring_imu.py
+scripts/analyze_segment_lengths.py
+scripts/pad_segmented_imu.py
+scripts/action0_pipeline/*.sh
+python -m snn.train_action0
+```
 
-### Touchpad Data Visualization
+Use `--help` on an entry point for its required inputs and output controls.
 
-The `board_plot.py` script is used for visualizing touchpad data. It contains a function `plot_board_data()`, which takes two parameters:
+## Documentation
 
-1. Path to the touchpad data file
-2. Username
+- [Source format and terminology](docs/notes/DATA_FORMAT.md)
+- [Preprocessing and complete-recording handoff](docs/notes/GRAVITY_TO_SPIKE_PIPELINE.md)
+- [Spike encoding](docs/notes/SPIKE_ENCODING.md)
+- [Ring–Board alignment](docs/notes/ALIGNMENT_OUTPUTS.md)
+- [Label segmentation](docs/notes/IMU_SEGMENTATION.md) and [Board-event segmentation](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
+- [Segment padding](docs/notes/SEGMENT_PADDING.md)
+- [Action-0 training](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
 
-The function randomly samples touchpad data and outputs a visualization showing the user's writing trajectory, with color representing the pressure applied. Additionally, the `visualize_touch_data()` function can be called to visualize touchpad data for a specific time range.
+`vendor/WritingRing/` contains historical/upstream acquisition and plotting
+utilities. The repository's current implementation and entry points are the
+modules and scripts described above.

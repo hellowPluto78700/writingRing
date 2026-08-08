@@ -492,14 +492,19 @@ Source: `vendor/WritingRing/ring_plot.py`, lines 6-17
 Source: `vendor/WritingRing/board_plot.py`, lines 26-49 and 71-84  
 Verified from: all sample files under `data_sample/data/user_0/0`
 
-## 10. Confirmed facts, unknowns, and design decisions
+## 10. Source facts, sample observations, repository interpretation, and policy
 
-### Confirmed facts
+### Source-format facts and sample observations
+
+The following list intentionally combines source-backed format facts with
+observations explicitly marked as sample-specific. Repository policies appear
+in their own section below.
 
 - Ring files are read as native-endian NumPy float64 and reshaped to seven
   columns.
 - Ring columns are acceleration x/y/z, gyro x/y/z, then timestamp.
-- The author plots `ring_0`; this project must ignore `ring_1`.
+- The author plots `ring_0`; the physical meaning of either ring index is not
+  documented.
 - Board chunks are gzip-compressed protocol-4 Python pickles loaded by
   `compress_pickle.load`.
 - A loaded chunk is a list of `FrameData`; contacts are lists of
@@ -538,7 +543,7 @@ Verified from: all sample files under `data_sample/data/user_0/0`
 - Why `Board.FPS` is 50 while the sample board sequences are approximately
   131 frames/s.
 
-### Proposed implementation decisions
+### Repository interpretations and policies
 
 - Discover recordings by user/action/dataset-ID filename membership.
 - Load only `ring_0`; record `ring_1` as ignored metadata rather than treating
@@ -557,7 +562,7 @@ Verified from: all sample files under `data_sample/data/user_0/0`
 - Surface missing timestamp files and discontinuous/missing chunks explicitly;
   the exact warning-versus-error policy remains an implementation decision.
 
-### TASK.md assumptions that differ from upstream or sample behavior
+### Policy choices that differ from upstream or sample behavior
 
 - `TASK.md` requires matching and numerically ordered board chunks. The
   upstream board plotter instead globs all action-level gzip files without
@@ -622,14 +627,15 @@ segment manifest, and the source Ring data retain the boundary/time
 information separately. The name `rawIMU.npy` therefore does not imply that
 its acceleration columns are raw measurements.
 
-The default transformation assumes a nominal 200 Hz rate, acceleration in
-`m/s^2`, gyroscope values in `rad/s`, the identity axis transform, and
-expected gravity of `9.80665 m/s^2`. It automatically proposes the best
-passing 1.0-second stationary interval from robust acceleration and gyro
-metrics, then passes that interval through gravity calibration. Callers may
-override it with explicit manual bounds. The identity transform means raw Ring
-sensor axes; a physical sensor-to-ring mounting transform remains
-undocumented.
+The lower-level gravity configuration defaults to a nominal 200 Hz rate,
+Madgwick processing, acceleration in `m/s^2`, gyroscope values in `rad/s`,
+the identity axis transform, and expected gravity of `9.80665 m/s^2`. The
+public preprocessing CLI instead defaults to low-pass processing. Both are
+repository processing defaults, not acquisition-rate guarantees. The stationary
+search default proposes the best passing 0.10-second interval from robust
+acceleration and gyro metrics; callers may override bounds explicitly. The
+identity transform means raw Ring sensor axes; a physical sensor-to-ring
+mounting transform remains undocumented.
 
 The opt-in `upstream_suggested` profile is based on
 `IMUData.scale()`—acceleration divided by `9.8`, raw gyroscope treated as
@@ -654,19 +660,18 @@ a body-frame gravity contribution, or subtract it.
 
 ## 12. Alignment exports are derived artifacts
 
-The alignment offset TXT and verification PNG are not source-data formats and
-do not alter Ring, Board, or marker files. A successful sequence alignment
-exports only the finite `best_offset_us` using this explicit convention:
+Alignment TXT, report, and verification PNG artifacts are downstream
+processing outputs; they do not alter Ring, Board, or marker files. Canonical
+Ring timestamps remain source/provenance values. Matching uses a separate
+endpoint-reconstructed work axis, and its endpoint-derived effective rate is
+not a device-acquisition claim.
 
-```text
-ring_timestamp_us = board_timestamp_us + offset_us
-```
-
-The offset is in microseconds. `frame_timestamp_raw` remains the unmodified
-Board timestamp; verification derives `aligned_ring_timestamp_us` and
-`aligned_ring_elapsed_s` only for display. The TXT contains the mapping text,
-unit, success state, and coverage counts, so a bare number cannot lose its
-direction. The verification image uses the exact same accepted offset and six
-adjacent ten-second Ring-elapsed-time panels. It also records whether labels
-were interpreted in the `ring`, `board`, or `shared` time domain. See
-[ALIGNMENT_OUTPUTS.md](ALIGNMENT_OUTPUTS.md) for the output schema and CLI.
+The mapping convention is `ring_timestamp_us = board_timestamp_us + offset_us`.
+Current schema-v2 output declares the offset domain: `offset_us` is the
+work-axis offset when `offset_domain=alignment_work_axis`; a separately
+reported `canonical_offset_us` exists only after successful canonical
+projection. A successful work-axis alignment may therefore publish a
+declared-domain artifact even when canonical projection is not representable.
+Consumers must honor the declared domain rather than treating every exported
+offset as canonical. See [ALIGNMENT_OUTPUTS.md](ALIGNMENT_OUTPUTS.md) for the
+full output contract and CLI.

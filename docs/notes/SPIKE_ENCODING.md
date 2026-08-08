@@ -10,7 +10,8 @@ describe the same row. Encoding validates the declared source timestamp
 SHA-256 before publication and carries the verified digest into SpikeIMU
 metadata. Consumers must reuse this canonical vector; they must not sort,
 deduplicate, resample, or replace it with an endpoint-reconstructed axis for
-segmentation. Alignment may use a separate strict work axis internally, but
+segmentation. Alignment may use a separate endpoint-reconstructed strictly
+increasing work axis internally, but
 its provenance hash always remains the canonical source hash.
 
 ## Source contract

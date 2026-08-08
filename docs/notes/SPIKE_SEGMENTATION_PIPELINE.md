@@ -11,8 +11,9 @@ the complete gravity-to-spike artifacts; it does not perform gravity removal.
 
 `boundary-mode` chooses the boundary source; `input-kind` chooses the matrix
 and canonical timestamp artifact. Segmentation never reconstructs or resamples
-that canonical axis. Alignment may create a separate strict work axis for
-peak detection and matching when canonical timestamps contain duplicates.
+that canonical axis. Alignment uses a separate endpoint-reconstructed strictly
+increasing work axis for peak detection and matching while canonical
+timestamps remain immutable.
 
 ## Canonical input
 
