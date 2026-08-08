@@ -5,6 +5,15 @@
 # The wrappers deliberately invoke the existing Python CLIs.  This file owns
 # only discovery, orchestration, logging, padding, and post-run contract
 # checks; it is not a second Ring or Board parser.
+#
+# Execution modes:
+#   continue  (default) - validate existing stage outputs and resume from the
+#                         first stage that has not started yet.  If an existing
+#                         stage is partial or invalid, rebuild from preprocess.
+#   overwrite           - skip resume validation and rebuild every stage.
+#
+# Explicit full rebuild example:
+#   PIPELINE_MODE=overwrite bash scripts/action0_pipeline/<wrapper>.bash
 
 set -Eeuo pipefail
 
@@ -71,6 +80,27 @@ pipeline_run_logged() {
     "$@" 2>&1 | tee -a "$log_path"
 }
 
+pipeline_note() {
+    local message="$1"
+    printf '[pipeline] %s\n' "$message"
+    if [[ -n "${DISCOVERY_LOG:-}" ]]; then
+        printf '[pipeline] %s\n' "$message" >>"$DISCOVERY_LOG"
+    fi
+}
+
+pipeline_configure_overwrite_args() {
+    PREPROCESS_OVERWRITE_ARGS=()
+    ENCODE_OVERWRITE_ARGS=()
+    ALIGN_OVERWRITE_ARGS=()
+    SEGMENT_OVERWRITE_ARGS=()
+    if [[ "$OVERWRITE" == "1" ]]; then
+        PREPROCESS_OVERWRITE_ARGS+=(--overwrite)
+        ENCODE_OVERWRITE_ARGS+=(--overwrite)
+        ALIGN_OVERWRITE_ARGS+=(--overwrite-offset --overwrite-report --overwrite-verification)
+        SEGMENT_OVERWRITE_ARGS+=(--overwrite)
+    fi
+}
+
 pipeline_init() {
     GRAVITY_METHOD="$1"
     BOUNDARY_MODE="$2"
@@ -97,7 +127,22 @@ pipeline_init() {
     SAMPLING_RATE="${SAMPLING_RATE:-200}"
     ENCODER="${ENCODER:-custom-wavelet}"
     ENCODER_SETTINGS="$(_pipeline_resolve_path "${ENCODER_SETTINGS:-configs/spike_encoding/custom_wavelet.json}")"
-    OVERWRITE="${OVERWRITE:-0}"
+    LEGACY_OVERWRITE="${OVERWRITE:-}"
+    if [[ -n "$LEGACY_OVERWRITE" && "$LEGACY_OVERWRITE" != "0" && "$LEGACY_OVERWRITE" != "1" ]]; then
+        pipeline_die "OVERWRITE must be 0 or 1 when used as a legacy mode alias"
+    fi
+    if [[ -n "${PIPELINE_MODE:-}" ]]; then
+        PIPELINE_MODE="${PIPELINE_MODE}"
+    elif [[ "$LEGACY_OVERWRITE" == "1" ]]; then
+        PIPELINE_MODE="overwrite"
+    else
+        PIPELINE_MODE="continue"
+    fi
+    case "$PIPELINE_MODE" in
+        continue) OVERWRITE=0 ;;
+        overwrite) OVERWRITE=1 ;;
+        *) pipeline_die "PIPELINE_MODE must be continue or overwrite" ;;
+    esac
     CONDA_ENV="${CONDA_ENV:-writingring-viz}"
     LOW_PASS_CUTOFF_HZ="${LOW_PASS_CUTOFF_HZ:-0.2}"
     MADGWICK_BETA="${MADGWICK_BETA:-0.1}"
@@ -110,9 +155,6 @@ pipeline_init() {
 
     if [[ "$ENCODER" != "custom-wavelet" ]]; then
         pipeline_die "action-0 scripts require ENCODER=custom-wavelet"
-    fi
-    if [[ "$OVERWRITE" != "0" && "$OVERWRITE" != "1" ]]; then
-        pipeline_die "OVERWRITE must be 0 or 1"
     fi
     if [[ "$MADGWICK_PROVISIONAL" != "0" && "$MADGWICK_PROVISIONAL" != "1" ]]; then
         pipeline_die "MADGWICK_PROVISIONAL must be 0 or 1"
@@ -146,9 +188,15 @@ pipeline_init() {
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
         mkdir -p "$LOG_ROOT/alignment"
     fi
-    : >"$DISCOVERY_LOG"
-    : >"$ENCODE_LOG"
-    : >"$QA_LOG"
+    if [[ "$PIPELINE_MODE" == "overwrite" ]]; then
+        : >"$DISCOVERY_LOG"
+        : >"$ENCODE_LOG"
+        : >"$QA_LOG"
+        : >"$PADDING_LOG"
+    else
+        touch "$DISCOVERY_LOG" "$ENCODE_LOG" "$QA_LOG" "$PADDING_LOG"
+    fi
+    printf '\n=== pipeline invocation mode=%s ===\n' "$PIPELINE_MODE" >>"$DISCOVERY_LOG"
 
     export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/writingring-matplotlib}"
     export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/writingring-cache}"
@@ -160,16 +208,7 @@ pipeline_init() {
     fi
     PYTHON_CMD=(conda run --no-capture-output -n "$CONDA_ENV" python)
 
-    PREPROCESS_OVERWRITE_ARGS=()
-    ENCODE_OVERWRITE_ARGS=()
-    ALIGN_OVERWRITE_ARGS=()
-    SEGMENT_OVERWRITE_ARGS=()
-    if [[ "$OVERWRITE" == "1" ]]; then
-        PREPROCESS_OVERWRITE_ARGS+=(--overwrite)
-        ENCODE_OVERWRITE_ARGS+=(--overwrite)
-        ALIGN_OVERWRITE_ARGS+=(--overwrite-offset --overwrite-report --overwrite-verification)
-        SEGMENT_OVERWRITE_ARGS+=(--overwrite)
-    fi
+    pipeline_configure_overwrite_args
 }
 
 pipeline_discover() {
@@ -517,9 +556,10 @@ if summary.get("feature_schema") != "signed_wavelet_events_plus_imu_v1":
     raise SystemExit(f"padded summary feature schema mismatch: {summary_path}")
 if summary.get("channel_count") != 21:
     raise SystemExit(f"padded summary channel count is not 21: {summary_path}")
-if summary.get("processed_user_action_count") != expected_user_action_count:
+processed_user_action_count = summary.get("processed_user_action_count")
+if processed_user_action_count != expected_user_action_count:
     raise SystemExit(
-        f"padded package count {summary.get('processed_user_action_count')} "
+        f"padded package count {processed_user_action_count} "
         f"!= user count {expected_user_action_count}"
     )
 source_count = summary.get("source_segment_count")
@@ -529,13 +569,386 @@ if not all(isinstance(value, int) and value >= 0 for value in (source_count, exp
     raise SystemExit(f"invalid padded segment counts: {summary_path}")
 if exported_count + skipped_count != source_count:
     raise SystemExit(f"padded segment counts do not reconcile: {summary_path}")
-if not isinstance(summary.get("target_length"), int) or summary["target_length"] <= 0:
+target_length = summary.get("target_length")
+if not isinstance(target_length, int) or target_length <= 0:
     raise SystemExit(f"invalid padded target length: {summary_path}")
 print(
     f"validated padded output segments={exported_count} skipped={skipped_count} "
-    f"target={summary['target_length']}: {summary_path}"
+    f"target={target_length}: {summary_path}"
 )
 ' "$summary_path" "$SEGMENT_ROOT" "$expected_user_action_count"
+}
+
+
+pipeline_validate_preprocess_artifact() {
+    local values_path="$1"
+    local timestamps_path="$2"
+    local metadata_path="$3"
+    pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import numpy as np
+import sys
+
+values_path, timestamps_path, metadata_path = map(Path, sys.argv[1:])
+values = np.load(values_path, allow_pickle=False)
+timestamps = np.load(timestamps_path, allow_pickle=False)
+metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+if values.ndim != 2 or values.shape[0] == 0 or values.shape[1] == 0:
+    raise SystemExit(f"invalid preprocessed IMU matrix: {values_path} shape={values.shape}")
+if not np.isfinite(values).all():
+    raise SystemExit(f"non-finite preprocessed IMU values: {values_path}")
+if timestamps.ndim != 1 or len(timestamps) != len(values) or not np.isfinite(timestamps).all():
+    raise SystemExit(f"invalid preprocessing timestamps: {timestamps_path}")
+if np.any(np.diff(timestamps) < 0.0):
+    raise SystemExit(f"preprocessing timestamps are not nondecreasing: {timestamps_path}")
+if not isinstance(metadata, dict):
+    raise SystemExit(f"preprocessing summary is not a JSON object: {metadata_path}")
+print(f"validated preprocessing rows={len(values)} channels={values.shape[1]}: {values_path}")
+' "$values_path" "$timestamps_path" "$metadata_path"
+}
+
+pipeline_validate_alignment_artifact() {
+    local offset_path="$1"
+    local report_path="$2"
+    pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import math
+import sys
+
+offset_path, report_path = map(Path, sys.argv[1:])
+try:
+    offset = float(offset_path.read_text(encoding="utf-8").strip())
+except (OSError, ValueError) as error:
+    raise SystemExit(f"invalid alignment offset {offset_path}: {error}") from error
+if not math.isfinite(offset):
+    raise SystemExit(f"alignment offset is not finite: {offset_path}")
+report = json.loads(report_path.read_text(encoding="utf-8"))
+if not isinstance(report, dict):
+    raise SystemExit(f"alignment report is not a JSON object: {report_path}")
+print(f"validated alignment offset={offset}: {offset_path}")
+' "$offset_path" "$report_path"
+}
+
+pipeline_validate_segment_package() {
+    local segment_directory="$1"
+    local record_user="$2"
+    local record_action="$3"
+    local board_mode="$4"
+    local values_path="$segment_directory/${record_user}_action_${record_action}_spikeIMU.npy"
+    local labels_path="$segment_directory/${record_user}_action_${record_action}_labels.npy"
+    local offsets_path="$segment_directory/${record_user}_action_${record_action}_segment_offsets.npy"
+    local lengths_path="$segment_directory/${record_user}_action_${record_action}_segment_lengths.npy"
+    local summary_path="$segment_directory/${record_user}_action_${record_action}_segmentation_summary.json"
+    local targets_path=""
+    if [[ "$board_mode" == "1" ]]; then
+        targets_path="$segment_directory/${record_user}_action_${record_action}_board_event_targets.npy"
+    fi
+    pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import numpy as np
+import sys
+
+values_path = Path(sys.argv[1])
+labels_path = Path(sys.argv[2])
+offsets_path = Path(sys.argv[3])
+lengths_path = Path(sys.argv[4])
+summary_path = Path(sys.argv[5])
+targets_path = Path(sys.argv[6]) if sys.argv[6] else None
+
+values = np.load(values_path, allow_pickle=False)
+labels = np.load(labels_path, allow_pickle=False)
+offsets = np.load(offsets_path, allow_pickle=False)
+lengths = np.load(lengths_path, allow_pickle=False)
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+
+if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+    raise SystemExit(f"invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}")
+if labels.ndim != 1 or lengths.ndim != 1 or len(labels) != len(lengths):
+    raise SystemExit(f"segment labels/lengths mismatch under {values_path.parent}")
+if offsets.ndim != 1 or len(offsets) != len(lengths) + 1:
+    raise SystemExit(f"invalid segment offsets under {values_path.parent}")
+if len(offsets) == 0 or int(offsets[0]) != 0 or int(offsets[-1]) != len(values):
+    raise SystemExit(f"segment offsets do not cover the feature matrix under {values_path.parent}")
+if np.any(lengths < 0) or not np.array_equal(np.diff(offsets), lengths):
+    raise SystemExit(f"segment lengths do not match offsets under {values_path.parent}")
+if not isinstance(summary, dict):
+    raise SystemExit(f"segmentation summary is not a JSON object: {summary_path}")
+if targets_path is not None:
+    targets = np.load(targets_path, allow_pickle=False)
+    if targets.shape != (len(values), 4) or targets.dtype != np.dtype(bool):
+        raise SystemExit(f"invalid Board target matrix: {targets_path} shape={targets.shape} dtype={targets.dtype}")
+print(f"validated segment package segments={len(lengths)} rows={len(values)}: {values_path.parent}")
+' "$values_path" "$labels_path" "$offsets_path" "$lengths_path" "$summary_path" "$targets_path"
+}
+
+pipeline_path_has_files() {
+    local root="$1"
+    local first=""
+    if [[ ! -d "$root" ]]; then
+        return 1
+    fi
+    first="$(find "$root" -type f -print -quit 2>/dev/null || true)"
+    [[ -n "$first" ]]
+}
+
+pipeline_preprocess_has_any_output() {
+    pipeline_path_has_files "$PREPROCESS_ROOT"
+}
+
+pipeline_encode_has_any_output() {
+    pipeline_path_has_files "$SPIKE_ROOT"
+}
+
+pipeline_alignment_has_any_output() {
+    pipeline_path_has_files "$OFFSET_ROOT" || \
+        pipeline_path_has_files "$ALIGNMENT_REPORT_ROOT" || \
+        pipeline_path_has_files "$ALIGNMENT_VERIFICATION_ROOT"
+}
+
+pipeline_segment_has_any_output() {
+    local first=""
+    if [[ ! -d "$SEGMENT_ROOT" ]]; then
+        return 1
+    fi
+    first="$(find "$SEGMENT_ROOT" -type f \
+        \( -name '*_spikeIMU.npy' -o -name '*_labels.npy' -o -name '*_segment_offsets.npy' \
+           -o -name '*_segment_lengths.npy' -o -name '*_segmentation_summary.json' \
+           -o -name '*_segments.csv' -o -name '*_board_event_targets.npy' \
+           -o -name '*_board_events.csv' \) -print -quit 2>/dev/null || true)"
+    [[ -n "$first" ]]
+}
+
+pipeline_padding_has_any_output() {
+    pipeline_path_has_files "$PADDING_ANALYSIS_DIR" || pipeline_path_has_files "$PADDING_OUTPUT_ROOT"
+}
+
+pipeline_preprocess_outputs_valid() {
+    local index record_user record_action dataset_id directory
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        directory="$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id"
+        [[ -s "$directory/${dataset_id}_preprocessedIMU.npy" ]] || return 1
+        [[ -s "$directory/${dataset_id}_timestamps_us.npy" ]] || return 1
+        [[ -s "$directory/${dataset_id}_preprocessing.json" ]] || return 1
+        pipeline_validate_preprocess_artifact \
+            "$directory/${dataset_id}_preprocessedIMU.npy" \
+            "$directory/${dataset_id}_timestamps_us.npy" \
+            "$directory/${dataset_id}_preprocessing.json" || return 1
+    done
+}
+
+pipeline_encode_outputs_valid() {
+    local index record_user record_action dataset_id directory timestamps_path
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        directory="$SPIKE_ROOT/$record_user/$record_action/$dataset_id"
+        timestamps_path="$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy"
+        [[ -s "$directory/spikes.npy" ]] || return 1
+        [[ -s "$directory/spikeIMU.npy" ]] || return 1
+        [[ -s "$directory/recording_offsets.npy" ]] || return 1
+        [[ -s "$directory/metadata.json" ]] || return 1
+        [[ -s "$timestamps_path" ]] || return 1
+        pipeline_validate_spike_artifact \
+            "$directory/spikeIMU.npy" \
+            "$directory/metadata.json" \
+            "$timestamps_path" || return 1
+    done
+}
+
+pipeline_alignment_outputs_valid() {
+    local index record_user record_action dataset_id offset_path report_path verification_path
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        offset_path="$OFFSET_ROOT/$record_user/action_${record_action}/${dataset_id}_ring_board_offset.txt"
+        report_path="$ALIGNMENT_REPORT_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_report.json"
+        verification_path="$ALIGNMENT_VERIFICATION_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_verification.png"
+        [[ -s "$offset_path" ]] || return 1
+        [[ -s "$report_path" ]] || return 1
+        [[ -s "$verification_path" ]] || return 1
+        pipeline_validate_alignment_artifact "$offset_path" "$report_path" || return 1
+    done
+}
+
+pipeline_segment_outputs_valid() {
+    local record_user segment_directory board_mode=0
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        board_mode=1
+    fi
+    for record_user in "${PIPELINE_USERS[@]}"; do
+        segment_directory="$SEGMENT_ROOT/$record_user/action_$ACTION"
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_spikeIMU.npy" ]] || return 1
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_labels.npy" ]] || return 1
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_segment_offsets.npy" ]] || return 1
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_segment_lengths.npy" ]] || return 1
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_segments.csv" ]] || return 1
+        [[ -s "$segment_directory/${record_user}_action_${ACTION}_segmentation_summary.json" ]] || return 1
+        if [[ "$board_mode" == "1" ]]; then
+            [[ -s "$segment_directory/${record_user}_action_${ACTION}_board_event_targets.npy" ]] || return 1
+            [[ -s "$segment_directory/${record_user}_action_${ACTION}_board_events.csv" ]] || return 1
+        fi
+        pipeline_validate_segment_package \
+            "$segment_directory" "$record_user" "$ACTION" "$board_mode" || return 1
+    done
+}
+
+pipeline_padding_outputs_valid() {
+    local analysis_report="$PADDING_ANALYSIS_DIR/segment_length_analysis.json"
+    local summary_path="$PADDING_OUTPUT_ROOT/padding_dataset_summary.json"
+    local manifest_path="$PADDING_OUTPUT_ROOT/padding_dataset_manifest.csv"
+    [[ -s "$analysis_report" ]] || return 1
+    [[ -s "$summary_path" ]] || return 1
+    [[ -s "$manifest_path" ]] || return 1
+    pipeline_validate_padding_artifact "$summary_path" "${#PIPELINE_USERS[@]}" || return 1
+}
+
+pipeline_force_full_rebuild() {
+    local reason="$1"
+    PIPELINE_RESUME_STAGE="preprocess"
+    PIPELINE_FORCE_REBUILD=1
+    OVERWRITE=1
+    pipeline_configure_overwrite_args
+    pipeline_note "continue validation failed: ${reason}; rebuilding from preprocess with overwrite enabled"
+}
+
+pipeline_plan_continue() {
+    local preprocess_any=0 encode_any=0 alignment_any=0 segment_any=0 padding_any=0
+    PIPELINE_RESUME_STAGE="preprocess"
+    PIPELINE_FORCE_REBUILD=0
+
+    pipeline_preprocess_has_any_output && preprocess_any=1
+    pipeline_encode_has_any_output && encode_any=1
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        pipeline_alignment_has_any_output && alignment_any=1
+    fi
+    pipeline_segment_has_any_output && segment_any=1
+    pipeline_padding_has_any_output && padding_any=1
+
+    if [[ "$preprocess_any" == "0" ]]; then
+        if (( encode_any || alignment_any || segment_any || padding_any )); then
+            pipeline_force_full_rebuild "preprocess outputs are absent while downstream outputs exist"
+        else
+            PIPELINE_RESUME_STAGE="preprocess"
+            pipeline_note "no preprocess outputs found; starting from preprocess"
+        fi
+        return 0
+    fi
+    if ! pipeline_preprocess_outputs_valid; then
+        pipeline_force_full_rebuild "preprocess outputs are partial or invalid"
+        return 0
+    fi
+    pipeline_note "preprocess outputs are complete and valid; skipping preprocess"
+
+    if [[ "$encode_any" == "0" ]]; then
+        if (( alignment_any || segment_any || padding_any )); then
+            pipeline_force_full_rebuild "encode outputs are absent while downstream outputs exist"
+        else
+            PIPELINE_RESUME_STAGE="encode"
+            pipeline_note "encode outputs not found; resuming from encode"
+        fi
+        return 0
+    fi
+    if ! pipeline_encode_outputs_valid; then
+        pipeline_force_full_rebuild "encode outputs are partial or invalid"
+        return 0
+    fi
+    pipeline_note "encode outputs are complete and valid; skipping encode"
+
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        if [[ "$alignment_any" == "0" ]]; then
+            if (( segment_any || padding_any )); then
+                pipeline_force_full_rebuild "alignment outputs are absent while downstream outputs exist"
+            else
+                PIPELINE_RESUME_STAGE="align"
+                pipeline_note "alignment outputs not found; resuming from alignment"
+            fi
+            return 0
+        fi
+        if ! pipeline_alignment_outputs_valid; then
+            pipeline_force_full_rebuild "alignment outputs are partial or invalid"
+            return 0
+        fi
+        pipeline_note "alignment outputs are complete and valid; skipping alignment"
+    fi
+
+    if [[ "$segment_any" == "0" ]]; then
+        if (( padding_any )); then
+            pipeline_force_full_rebuild "segmentation outputs are absent while padding outputs exist"
+        else
+            PIPELINE_RESUME_STAGE="segment"
+            pipeline_note "segmentation outputs not found; resuming from segmentation"
+        fi
+        return 0
+    fi
+    if ! pipeline_segment_outputs_valid; then
+        pipeline_force_full_rebuild "segmentation outputs are partial or invalid"
+        return 0
+    fi
+    pipeline_note "segmentation outputs are complete and valid; skipping segmentation"
+
+    if [[ "$padding_any" == "0" ]]; then
+        PIPELINE_RESUME_STAGE="padding"
+        pipeline_note "padding outputs not found; resuming from padding"
+        return 0
+    fi
+    if ! pipeline_padding_outputs_valid; then
+        pipeline_force_full_rebuild "padding outputs are partial or invalid"
+        return 0
+    fi
+
+    PIPELINE_RESUME_STAGE="complete"
+    pipeline_note "all pipeline outputs are complete and valid; no compute stage needs to rerun"
+}
+
+pipeline_execute_from_stage() {
+    local stage="$1"
+    case "$stage" in
+        preprocess)
+            pipeline_preprocess
+            pipeline_encode
+            if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+                pipeline_align
+            fi
+            pipeline_segment
+            pipeline_padding
+            ;;
+        encode)
+            pipeline_encode
+            if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+                pipeline_align
+            fi
+            pipeline_segment
+            pipeline_padding
+            ;;
+        align)
+            if [[ "$BOUNDARY_MODE" != "aligned-board-events" ]]; then
+                pipeline_die "internal resume error: align stage requested for label mode"
+            fi
+            pipeline_align
+            pipeline_segment
+            pipeline_padding
+            ;;
+        segment)
+            pipeline_segment
+            pipeline_padding
+            ;;
+        padding)
+            pipeline_padding
+            ;;
+        complete)
+            ;;
+        *)
+            pipeline_die "internal resume error: unknown stage ${stage}"
+            ;;
+    esac
 }
 
 pipeline_qa() {
@@ -643,13 +1056,17 @@ run_action0_pipeline() {
     local method="$1"
     local boundary="$2"
     pipeline_init "$method" "$boundary"
+    pipeline_note "execution mode: ${PIPELINE_MODE}"
     pipeline_discover
-    pipeline_preprocess
-    pipeline_encode
-    if [[ "$boundary" == "aligned-board-events" ]]; then
-        pipeline_align
+
+    if [[ "$PIPELINE_MODE" == "overwrite" ]]; then
+        pipeline_note "overwrite mode: skipping resume checks and rebuilding from preprocess"
+        PIPELINE_RESUME_STAGE="preprocess"
+    else
+        pipeline_note "continue mode: checking existing stage outputs"
+        pipeline_plan_continue
     fi
-    pipeline_segment
-    pipeline_padding
+
+    pipeline_execute_from_stage "$PIPELINE_RESUME_STAGE"
     pipeline_qa
 }
