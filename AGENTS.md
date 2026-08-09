@@ -7,7 +7,7 @@ These rules apply to all agents unless a stricter role-specific rule exists.
 - Use Python 3.11.
 - Use `pathlib.Path` and type hints.
 - Use Matplotlib, not Gradio, Streamlit, or Plotly.
-- Use the Conda environment `writingring-gpu`.
+- Use the Conda environment `writingring-gpu`first, if not exist, use `writingring-viz`.
 - Run pytest after code changes.
 - The sample data root is `data_sample/data`.
 - Never modify `data_sample/**`.

@@ -144,7 +144,15 @@ pipeline_init() {
         overwrite) OVERWRITE=1 ;;
         *) pipeline_die "PIPELINE_MODE must be continue or overwrite" ;;
     esac
-    CONDA_ENV="${CONDA_ENV:-writingring-viz}"
+    
+    if conda env list | grep -q '^writingring-gpu '; then
+        CONDA_ENV="writingring-gpu"
+    elif conda env list | grep -q '^writingring-viz '; then
+        CONDA_ENV="writingring-viz"
+    else
+        echo "No suitable conda environment found."
+        exit 1
+    fi
     LOW_PASS_CUTOFF_HZ="${LOW_PASS_CUTOFF_HZ:-0.2}"
     MADGWICK_BETA="${MADGWICK_BETA:-0.1}"
     MADGWICK_PROVISIONAL="${MADGWICK_PROVISIONAL:-0}"
