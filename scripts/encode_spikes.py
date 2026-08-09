@@ -38,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-summary", type=Path)
     parser.add_argument("--encoder", required=True)
     parser.add_argument("--encoder-settings", type=Path, required=True)
+    parser.add_argument(
+        "--post-encode-transform",
+        choices=("none", "AbsRectify"),
+        default=None,
+        help="override the encoder settings post-encode transform",
+    )
     parser.add_argument("--sequence-mode", choices=("offsets", "single-array"))
     parser.add_argument("--sequence-offsets", type=Path)
     parser.add_argument(
@@ -174,6 +180,12 @@ def _run_one(
     )
 
     settings = load_encoder_settings(args.encoder_settings)
+    if args.post_encode_transform is not None:
+        settings["post_encode_transform"] = (
+            None
+            if args.post_encode_transform == "none"
+            else args.post_encode_transform
+        )
     if args.output_dtype is not None:
         settings["output_dtype"] = args.output_dtype
     source_summary = (
@@ -285,9 +297,22 @@ def _print_result(summary: dict[str, object]) -> None:
         output = summary.get("output", {})
         spike_imu = summary.get("spike_imu", {})
         channel_count = spike_imu.get("channel_count") if isinstance(spike_imu, dict) else None
+        representation = (
+            output.get("event_representation")
+            if isinstance(output, dict)
+            else None
+        )
+        if not isinstance(representation, str):
+            representation = (
+                encoder.get("representation")
+                if isinstance(encoder, dict)
+                else None
+            )
+        if not isinstance(representation, str):
+            representation = "spike"
         print(
             f"Encoded {summary['input']['sample_count'] if isinstance(summary.get('input'), dict) else summary['statistics']['sample_count']} rows into "
-            f"{output.get('channel_count', '?') if isinstance(output, dict) else '?'} signed spike channels across "
+            f"{output.get('channel_count', '?') if isinstance(output, dict) else '?'} {representation} spike channels across "
             f"{summary['sequence_processing']['sequence_count']} recording(s)."
         )
         if channel_count is not None:
@@ -476,6 +501,10 @@ def _source_metadata_paths(
 def _validate_custom_wavelet_arguments(args: argparse.Namespace) -> None:
     """Keep Custom Wavelet recording-level and free of boundary sidecars."""
 
+    if args.post_encode_transform is not None and args.encoder != "custom-wavelet":
+        raise ValueError(
+            "--post-encode-transform is only supported with encoder 'custom-wavelet'"
+        )
     if args.encoder != "custom-wavelet":
         return
     disallowed = {

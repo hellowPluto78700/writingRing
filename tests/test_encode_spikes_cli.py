@@ -186,6 +186,95 @@ def test_cli_publishes_custom_wavelet_with_summary_and_dynamic_channels(
     assert "Published spike encoding" in capsys.readouterr().out
 
 
+def test_cli_post_encode_transform_precedence_and_result_representation(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    imu = tmp_path / "recording_rawIMU.npy"
+    settings = tmp_path / "custom.json"
+    samples = np.zeros((80, 9), dtype=np.float32)
+    samples[:, 0] = np.sin(np.arange(80) / 3.0)
+    samples[:, 1] = -samples[:, 0]
+    samples[:, 2] = np.cos(np.arange(80) / 5.0)
+    samples[:, 3:6] = samples[:, :3] * 9.80665
+    np.save(imu, samples, allow_pickle=False)
+    settings.write_text(
+        json.dumps({"sampling_rate_hz": 200.0, "post_encode_transform": "AbsRectify"}),
+        encoding="utf-8",
+    )
+
+    def run(*extra: str, output_name: str) -> dict[str, object]:
+        output_root = tmp_path / output_name
+        assert encode_spikes.main(
+            [
+                "--input-imu", str(imu),
+                "--encoder", "custom-wavelet",
+                "--encoder-settings", str(settings),
+                "--output-root", str(output_root),
+                *extra,
+            ]
+        ) == 0
+        summary_path = output_root / "custom-wavelet" / "recording" / "recording_spike_encoding_summary.json"
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+
+    configured = run(output_name="configured")
+    signed = run("--post-encode-transform", "none", output_name="signed")
+    rectified = run("--post-encode-transform", "AbsRectify", output_name="rectified")
+
+    assert configured["settings"]["post_encode_transform"] == "AbsRectify"
+    assert configured["output"]["event_representation"] == "abs_rectified_sparse_wavelet_extrema"
+    assert signed["settings"]["post_encode_transform"] is None
+    assert signed["output"]["event_representation"] == "signed_sparse_wavelet_extrema"
+    assert rectified["settings"]["post_encode_transform"] == "AbsRectify"
+    assert rectified["output"]["event_representation"] == "abs_rectified_sparse_wavelet_extrema"
+
+    signed_values = np.load(
+        tmp_path / "signed" / "custom-wavelet" / "recording" / "recording_spikeEvents.npy",
+        allow_pickle=False,
+    )
+    rectified_values = np.load(
+        tmp_path / "rectified" / "custom-wavelet" / "recording" / "recording_spikeEvents.npy",
+        allow_pickle=False,
+    )
+    assert np.any(signed_values < 0.0)
+    np.testing.assert_array_equal(rectified_values, np.abs(signed_values))
+    assert np.all(rectified_values >= 0.0)
+
+    output = capsys.readouterr().out
+    assert "signed_sparse_wavelet_extrema spike channels" in output
+    assert "abs_rectified_sparse_wavelet_extrema spike channels" in output
+
+
+def test_cli_rejects_post_encode_transform_for_non_custom_encoder(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    register_encoder("phase1-cli-dummy", lambda settings: _CliDummyEncoder(), replace=True)
+    imu, settings, _ = _paths(tmp_path)
+
+    assert encode_spikes.main(
+        [
+            "--input-imu", str(imu),
+            "--encoder", "phase1-cli-dummy",
+            "--encoder-settings", str(settings),
+            "--post-encode-transform", "AbsRectify",
+        ]
+    ) == 2
+    assert "only supported with encoder 'custom-wavelet'" in capsys.readouterr().err
+
+
+def test_cli_rejects_invalid_post_encode_transform_choice() -> None:
+    with pytest.raises(SystemExit):
+        encode_spikes.build_parser().parse_args(
+            [
+                "--input-imu", "input.npy",
+                "--encoder", "custom-wavelet",
+                "--encoder-settings", "settings.json",
+                "--post-encode-transform", "abs",
+            ]
+        )
+
+
 @pytest.mark.parametrize(
     "option",
     [

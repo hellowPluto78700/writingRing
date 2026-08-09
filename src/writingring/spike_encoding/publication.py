@@ -253,7 +253,7 @@ def _publishes_signed_wavelet_spike_imu(
     raw_imu: np.ndarray,
     values: np.ndarray,
 ) -> bool:
-    """Return whether this output satisfies the only signed-wavelet IMU schema."""
+    """Return whether this output satisfies the 15-channel Wavelet IMU layout."""
 
     return (
         output.encoder_name == "custom-wavelet"
@@ -315,6 +315,11 @@ def _build_summary(
     metadata = getattr(encoder, "encoding_metadata", None)
     settings = dict(metadata) if isinstance(metadata, Mapping) else dict(effective_settings)
     settings.setdefault("sampling_rate_hz", effective_settings["sampling_rate_hz"])
+    event_representation = output.representation
+    has_post_encode_transform = "post_encode_transform" in settings
+    post_encode_transform = settings.get("post_encode_transform")
+    if "event_representation" in settings:
+        settings["event_representation"] = event_representation
     nonzero = int(np.count_nonzero(values))
     output_metadata = _validated_output_metadata(getattr(encoder, "output_metadata", None))
     output_section: dict[str, object] = {
@@ -325,7 +330,10 @@ def _build_summary(
         "binary": output.representation == "binary_spike_train",
         "polarity_preserved": "signed" in output.representation,
         "amplitude_preserved": output.representation != "binary_spike_train",
+        "event_representation": event_representation,
     }
+    if has_post_encode_transform:
+        output_section["post_encode_transform"] = post_encode_transform
     if "channel_order" in output_metadata:
         output_section["channel_order"] = output_metadata["channel_order"]
     metadata_paths = dict(source_metadata_paths or {})
@@ -410,10 +418,17 @@ def _build_summary(
         "source_hash_verified": bool(timestamp_source_hash_verified),
         "timestamp_source_hash_verified": bool(timestamp_source_hash_verified),
     }
+    encoder_section: dict[str, object] = {
+        "name": output.encoder_name,
+        "representation": output.representation,
+        "event_representation": event_representation,
+    }
+    if has_post_encode_transform:
+        encoder_section["post_encode_transform"] = post_encode_transform
     summary = {
         "schema_version": 3,
         "metadata_schema": "spike_encoding_v3",
-        "encoder": {"name": output.encoder_name, "representation": output.representation},
+        "encoder": encoder_section,
         "source": source_section,
         "source_imu_path": str(input_data.source_imu_path.resolve()),
         "source_file_sha256": source_hash,
@@ -479,6 +494,8 @@ def _build_summary(
         ]
         summary["spike_imu"] = {
             "schema": "signed_wavelet_events_plus_imu_v1",
+            "event_representation": event_representation,
+            "polarity_preserved": "signed" in event_representation,
             "sample_count": len(spike_imu),
             "channel_count": spike_imu.shape[1],
             "channel_names": list(output.channel_names) + trailing_channel_names,
@@ -491,6 +508,8 @@ def _build_summary(
             "sha256": "pending",
             "spike_imu_sha256": "pending",
         }
+        if has_post_encode_transform:
+            summary["spike_imu"]["post_encode_transform"] = post_encode_transform
     if output.encoder_name == "custom-wavelet":
         summary["source"]["metadata_usage"] = {
             "used_by_encoder": False,

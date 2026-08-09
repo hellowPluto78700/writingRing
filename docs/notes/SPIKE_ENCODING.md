@@ -79,8 +79,15 @@ spike handoff. Use the complete `(N, 9)` result from
 python scripts/encode_spikes.py \
   --input-imu outputs/preprocessedIMU/user_0/0/0/0_preprocessedIMU.npy \
   --encoder custom-wavelet \
-  --encoder-settings configs/spike_encoding/custom_wavelet.json
+  --encoder-settings configs/spike_encoding/custom_wavelet.json \
+  --post-encode-transform AbsRectify
 ```
+
+`--post-encode-transform` accepts only `none` and `AbsRectify`. Omitting it
+does not override encoder settings; explicit `none` writes a no-transform
+setting, and explicit `AbsRectify` writes rectification after occurrence
+alignment. It is valid only with `--encoder custom-wavelet`; explicitly using
+it with another encoder fails rather than being ignored.
 
 Custom Wavelet treats the entire file as one recording and uses
 `boundaries=[0, N]`. It resets exactly once. Directory names such as
@@ -127,16 +134,24 @@ widths and the extrema window; it never resamples data. If settings and the
 preprocessing summary both provide `sampling_rate_hz`, they must match
 exactly. If neither provides it, encoding fails.
 
-Custom Wavelet emits signed local-extrema amplitudes, not binary spike trains.
-It reflect-pads by half of its odd extrema window, compensates the fixed
-extrema-confirmation latency, and returns events to their occurrence rows. At
-the default settings the half-window is 30 samples (0.15 seconds) on each
-side. IIR phase/group delay and warmup are not compensated.
+Custom Wavelet defaults to signed local-extrema amplitudes, not binary spike
+trains. Its optional `post_encode_transform` accepts only `AbsRectify`, which
+applies `abs` **after** complete occurrence-aligned encoding. It never changes
+wavelet responses, extrema detection, occurrence rows, event channels, event
+sparsity, timestamps, or the trailing IMU values. Metadata records the chosen
+transform and either `signed_sparse_wavelet_extrema` or
+`abs_rectified_sparse_wavelet_extrema`; consumers must use that explicit event
+representation for polarity, not infer it from the legacy layout name.
+
+The encoder reflect-pads by half of its odd extrema window, compensates the
+fixed extrema-confirmation latency, and returns events to their occurrence
+rows. At the default settings the half-window is 30 samples (0.15 seconds) on
+each side. IIR phase/group delay and warmup are not compensated.
 
 `spikes.npy` has shape `(N, 15)`. `spikeIMU.npy` has shape `(N, 21)`:
 
 ```text
-15 signed event channels
+15 Custom Wavelet event channels (signed by default; optionally abs-rectified)
 3 acceleration channels in m/s²
 3 gyroscope channels in rad/s
 ```
@@ -145,15 +160,17 @@ The six trailing values are copied row-for-row from source columns `3:9`;
 they are processed acceleration when the source method is low-pass, Madgwick,
 or Xylo, and measured acceleration only when raw mode was explicitly allowed.
 `recording_offsets.npy` is `[0, N]`. `metadata.json` records the source
-contract, encoder settings, output schema, reset boundary, and row alignment.
-For the canonical preprocessing handoff, its `spike_imu` section also records
-the 21-channel schema, event units, trailing IMU units, source columns `3:9`,
+contract, encoder settings, output schema, reset boundary, row alignment, and
+the explicit post-transform/event representation. For the canonical
+preprocessing handoff, its `spike_imu` section also records the unchanged
+legacy 21-channel layout schema `signed_wavelet_events_plus_imu_v1`, explicit
+event representation, event units, trailing IMU units, source columns `3:9`,
 sample count, and the copied timestamp provenance.
 
 The downstream segmentation matrix is:
 
 ```text
-columns 0:15   signed wavelet events
+columns 0:15   Custom Wavelet events; polarity is explicit metadata
 columns 15:18  acceleration x/y/z (m/s²)
 columns 18:21  gyro x/y/z (rad/s)
 ```

@@ -56,6 +56,7 @@ class CustomWaveletSettings:
     max_filter_time_s: float = 0.3
     max_filter_frequency_decades: float = 0.5
     output_dtype: str = "float32"
+    post_encode_transform: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.wavelet_name, str) or self.wavelet_name not in WAVELET_REGISTRY:
@@ -76,6 +77,7 @@ class CustomWaveletSettings:
         object.__setattr__(self, "max_filter_frequency_decades", float(self.max_filter_frequency_decades))
         if self.output_dtype not in {"float32", "float64"}:
             raise CustomWaveletSettingsError("output_dtype must be 'float32' or 'float64'")
+        _validate_post_encode_transform(self.post_encode_transform)
         widths = self.wavelet_widths_samples
         if len(set(widths)) != len(widths):
             raise CustomWaveletSettingsError(
@@ -123,10 +125,9 @@ class CustomWaveletSettings:
 
 
 class CustomWaveletEncoder:
-    """Three-axis IIR wavelet bank with signed local-extrema events."""
+    """Three-axis IIR wavelet bank with an optional post-encode transform."""
 
     name = "custom-wavelet"
-    representation = "signed_sparse_wavelet_extrema"
 
     def __init__(self, settings: CustomWaveletSettings | None = None) -> None:
         self.settings = settings or CustomWaveletSettings()
@@ -176,12 +177,20 @@ class CustomWaveletEncoder:
         return self._channel_names
 
     @property
+    def representation(self) -> str:
+        """Return the event representation after the configured transform."""
+
+        return _event_representation(self.settings.post_encode_transform)
+
+    @property
     def output_metadata(self) -> dict[str, object]:
         """Declare the encoder-specific layout of its flattened event channels."""
 
         return {
             "channel_order": "axis_major_frequency_minor",
             "event_index_semantics": "wavelet_extrema_occurrence_index",
+            "post_encode_transform": self.settings.post_encode_transform,
+            "event_representation": self.representation,
         }
 
     @property
@@ -274,6 +283,8 @@ class CustomWaveletEncoder:
             "max_filter_frequency_decades": self.settings.max_filter_frequency_decades,
             "max_filter_frequency_bands": self._frequency_window_bands,
             "output_dtype": self.settings.output_dtype,
+            "post_encode_transform": self.settings.post_encode_transform,
+            "event_representation": self.representation,
         }
 
     def reset(self) -> None:
@@ -329,6 +340,10 @@ class CustomWaveletEncoder:
         encoded = detected[2 * padding : 2 * padding + len(values)].copy()
         if encoded.shape != (len(values), len(self._channel_names)):
             raise SpikeEncodingError("custom-wavelet occurrence alignment changed sequence length")
+        encoded = _apply_post_encode_transform(
+            encoded,
+            self.settings.post_encode_transform,
+        )
         if not np.isfinite(encoded).all():
             raise SpikeEncodingError("custom-wavelet output became non-finite")
         encoded.setflags(write=False)
@@ -348,6 +363,8 @@ class CustomWaveletEncoder:
                 "event_index_semantics": "wavelet_extrema_occurrence_index",
                 "max_filter_frequency_bands": self._frequency_window_bands,
                 "output_dtype": self.settings.output_dtype,
+                "post_encode_transform": self.settings.post_encode_transform,
+                "event_representation": self.representation,
             },
         )
 
@@ -528,6 +545,29 @@ def _positive_finite_float(name: str, value: object) -> float:
 def _positive_integer(name: str, value: object) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise CustomWaveletSettingsError(f"{name} must be a positive integer")
+
+
+def _validate_post_encode_transform(value: object) -> None:
+    if value is not None and (not isinstance(value, str) or value != "AbsRectify"):
+        raise CustomWaveletSettingsError(
+            "post_encode_transform must be None or the exact string 'AbsRectify'"
+        )
+
+
+def _event_representation(transform: str | None) -> str:
+    if transform == "AbsRectify":
+        return "abs_rectified_sparse_wavelet_extrema"
+    return "signed_sparse_wavelet_extrema"
+
+
+def _apply_post_encode_transform(values: np.ndarray, transform: str | None) -> np.ndarray:
+    """Apply the validated transform to final occurrence-aligned values."""
+
+    _validate_post_encode_transform(transform)
+    if transform is None:
+        return values
+    np.abs(values, out=values)
+    return values
 
 
 def _is_finite_real(value: object) -> bool:

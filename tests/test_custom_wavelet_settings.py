@@ -57,6 +57,25 @@ def test_settings_reject_width_that_cannot_support_prony_orders() -> None:
         CustomWaveletSettings(frequencies_hz=(50.0,))
 
 
+@pytest.mark.parametrize(
+    "transform",
+    ["abs", "rectify", "ABSRECTIFY", "Binary", True, 1, 0],
+)
+def test_settings_reject_noncanonical_post_encode_transforms(transform: object) -> None:
+    with pytest.raises(CustomWaveletSettingsError, match="post_encode_transform"):
+        CustomWaveletSettings(post_encode_transform=transform)  # type: ignore[arg-type]
+
+
+def test_settings_accept_only_none_or_exact_abs_rectify_transform() -> None:
+    assert CustomWaveletSettings().post_encode_transform is None
+    assert (
+        CustomWaveletSettings.from_mapping(
+            {"post_encode_transform": "AbsRectify"}
+        ).post_encode_transform
+        == "AbsRectify"
+    )
+
+
 def test_acceleration_wavelet_matches_the_reference_equation() -> None:
     length = 7
     scale = 7.0

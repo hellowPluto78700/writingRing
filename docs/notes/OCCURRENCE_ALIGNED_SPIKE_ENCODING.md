@@ -23,8 +23,13 @@ The summary explicitly records those limits and the accepted reflect-boundary
 assumption.
 
 The encoder retains all fifteen default axis-major/frequency-minor event
-channels. Events are signed wavelet-response local maxima and minima. A local
-plateau that is both a maximum and a minimum emits the centre amplitude once.
+channels. Without a post-encode transform, events are signed wavelet-response
+local maxima and minima. A local plateau that is both a maximum and a minimum
+emits the centre amplitude once. `AbsRectify`, when explicitly selected,
+applies absolute value only after the exported occurrence-aligned `(N, C)`
+matrix has been cropped; extrema detection and alignment remain signed.
+Rectification therefore preserves event occurrence rows, channel layout, and
+the exact nonzero mask.
 
 Publication remains atomic and source arrays remain read-only. Each result now
 contains both `(N, 15)` `spikeEvents.npy` and `(N, 21)` `spikeIMU.npy`. Custom

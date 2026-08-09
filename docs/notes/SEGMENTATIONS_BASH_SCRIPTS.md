@@ -39,7 +39,8 @@ ring_0 discovery
 The default configuration is `DATA_ROOT=data`, `ACTION=0`, nominal
 `SAMPLING_RATE=200`, `ENCODER=custom-wavelet`,
 `ENCODER_SETTINGS=configs/spike_encoding/custom_wavelet.json`,
-`CONDA_ENV=writingring-viz`, and `PIPELINE_MODE=continue`. Relative paths are
+`POST_ENCODE_TRANSFORM=none`, `CONDA_ENV=writingring-viz`, and
+`PIPELINE_MODE=continue`. Relative paths are
 resolved from the project root. `LOW_PASS_CUTOFF_HZ`, `MADGWICK_BETA`,
 `MADGWICK_PROVISIONAL=0`, `OUTPUT_BASE`, and the other defaults can be
 overridden with environment variables. Padding is enabled for every entry
@@ -83,6 +84,12 @@ each stage, retains complete valid stages, and resumes at a missing later
 stage. Any partial/invalid stage, or downstream output without its prerequisite,
 causes a full rebuild from preprocessing with overwrite flags. Set
 `PIPELINE_MODE=overwrite` to rebuild from preprocessing without resume checks.
+For encoded SpikeIMU artifacts, validity also requires the published
+`settings.post_encode_transform` to equal the requested
+`POST_ENCODE_TRANSFORM` (`none` is metadata `null`). Legacy metadata with no
+transform key is treated as `none`; a transform mismatch makes encoding
+invalid and uses this same existing preprocessing/full-rebuild path rather
+than a transform-specific resume mode.
 `OVERWRITE=1` is a legacy alias only when `PIPELINE_MODE` is unset; an explicit
 `PIPELINE_MODE` takes precedence. A failed preprocessing, encoding, alignment,
 or user segmentation command stops the run. Label mode adds only

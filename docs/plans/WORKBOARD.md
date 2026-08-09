@@ -2,15 +2,12 @@
 
 ## Active plan
 
-- **Plan:** none
-- **Task file:** none
-- **Most recently completed plan:**
-  `docs/plans/Done/02_SNN_Train_Process_Correction_Plan.md`
-- **Companion task file:**
-  `docs/plans/Done/02_SNN_Train_Process_Correction_TASKS.md`
-- **Baseline commit:** `29da4396b60d9357e0b8edffdb6f02ec4011a987`
+- **Plan:** none — most recently completed:
+  `docs/plans/Done/03_Spike_Post_Encode_Transform_Plan.md`
+- **Task file:** `docs/plans/Done/03_Spike_Post_Encode_Transform_TASKS.md`
+- **Baseline commit:** `d45ae108d54641a406bd0a582baaaac52e6a1aad`
 - **Current task:** none
-- **Status:** DONE — 02 SNN training process correction plan closed
+- **Status:** DONE
 
 ## Task state
 
@@ -19,64 +16,64 @@
 | T001 | DONE | — |
 | T002 | DONE | T001 |
 | T003 | DONE | T002 |
-| T004 | DONE — Scope B | T003 |
-| T004B | DONE | T004 |
-| T005 | DONE | T003, T004B |
-| T006 | DONE | T005 |
+| T004 | DONE | T001, T002, T003 |
 
 ## Focus and next action
 
-- Focus: no active plan. The completed 02 plan is retained under `Done/` with
-  its companion TaskSpec for durable audit.
-- Blockers: none recorded. User authorized an isolated `writingring-test`
-  environment; `writingring-viz` remains untouched.
-- Probe digest: T001 confirmed stable root metadata and required fields;
-  package counts are diagnostic, and summary/provenance rate is not measured
-  data. No replan trigger found.
-- Worker/verifier digest: PASS. Metadata/rate/target validation was implemented
-  in the frozen scope; focused and related tests passed with no producer or
-  SynNet dynamics change.
-- Probe digest: T002 confirmed exact class-dimension, valid-step loss, and
-  same-batch dry-run gaps; no baseline redesign required.
-- Worker/verifier digest: PASS. Exact class validation, valid-step loss, and
-  same-batch dry-run landed within frozen scope. Python 3.11 validation remains
-  unavailable; `writingring-viz` reports 3.10.20.
-- Probe digest: existing checkpoint loading lacks explicit restore semantics.
-  PRIMARY adopted the plan's preferred configuration-compatible model-restore
-  direction; no exact resume/optimizer continuation is claimed.
-- Re-probe digest: CONFIRMED. Schema-v1 model-only new-run restore is safe;
-  no external Action0 consumer requires legacy compatibility.
-- Worker/verifier digest: PASS. Schema-v1 model-only restore landed in the
-  frozen scope; focused verification passed. Python 3.11 remains unverified.
-- Scope decision: user selected Scope B. T004 records repository-wide `/snn`
-  portability acceptance; T004B is now required before T005.
-- Verifier digest: PASS. Scope B was recorded with no legacy implementation
-  edit; T004B is correctly required before T005.
-- Probe digest: T004B confirmed active HAR old-machine paths and import
-  coupling; no external launcher contract was found.
-- Worker/verifier digest: PASS. Frozen legacy portability cleanup passed scoped
-  tests; no HAR or Action0 behavior changed.
-- Prior probe digest: BLOCKED. `writingring-viz` is Python 3.10.20, not required
-  3.11. Its 3.10 diagnostics passed:
-  targeted 26, supplemental 29, full 502 passed/1 skipped, plus real lowpass
-  producer dry run. These cannot satisfy T005's policy gate.
-- Environment reconciliation: `writingring-test` was created independently at
-  Python 3.11.15 with the current direct runtime pins mirrored and the local
-  project installed editable without dependency resolution. `pip check` and
-  key imports pass. Re-probe: CONFIRMED that it is an authorized isolated
-  Python 3.11 target; prior diagnostics establish the exact T005 matrix.
-- T005 verification digest: PASS. `writingring-test` is Python 3.11.15 with
-  mirrored direct pins and `pip check` clean; targeted Action0 26 passed,
-  supplemental checkpoint/legacy 29 passed, full suite 502 passed/1 known
-  unavailable-real-artifact skip, and the real lowpass producer dry run passed.
-  Torch 2.5.1+cpu and snnTorch 1.0.0 executed. No Python 3.11, resolver, or
-  T005 implementation failure was observed; `writingring-viz` remains 3.10.20
-  and untouched by user direction.
-- T006 probe digest: CONFIRMED. Update the Action0 note, plan/task/workboard,
-  and a concise historical Check0 annotation only; keep README unchanged and
-  do not overclaim rate measurement, exact resume, or a one-forward dry run.
-- T006 verifier digests: initial FAIL identified only stale lifecycle markers;
-  PRIMARY synchronized them and a fresh verifier PASS confirmed the durable
-  Action0/Scope-B documentation, unchanged README, correct limitations, and
-  consistent state. The plan and task record are now closed under `Done/`.
-- Next action: initialize a new plan only when requested.
+- Completed focus: `AbsRectify` is applied after complete occurrence-aligned
+  signed encoding while preserving sparsity, rows, channels, timestamps, and
+  the six trailing IMU values.
+- Baseline hygiene: inherited uncommitted plan relocations and
+  `scripts/action0_pipeline/SNN_Bash/` are outside this plan unless a frozen
+  TaskSpec explicitly includes them.
+- Documentation gate: do not modify README or `docs/notes/**` before T001
+  contract baseline has passed independent verification.
+- Probe digest: CONFIRMED. The transform can be post-crop without detector or
+  row/sparsity changes; no direct consumer interprets the legacy schema name
+  as a mandatory polarity guarantee. Publication metadata must explicitly
+  describe rectification while retaining the legacy layout schema.
+- Worker digest: DONE. Strict settings, post-crop rectification, dynamic
+  representation, and truthful publication metadata landed only in frozen
+  paths. Python 3.11.15 fallback: focused 30 passed, full 512 passed/1 skipped;
+  `writingring-viz` is unavailable with `NoWritableEnvsDirError`.
+- T001 verifier digest: PASS. PRIMARY documented only verified transform and
+  representation behavior after acceptance; README remains unchanged. The
+  Python 3.11.15 fallback has 30 focused passed and 512 passed/1 known skip;
+  `writingring-viz` remains unavailable with `NoWritableEnvsDirError`.
+- T002 probe digest: CONFIRMED. Omitted CLI can preserve settings while
+  explicit values override; `_common.bash` has one encoding call site inherited
+  by all wrappers. PRIMARY froze Custom-Wavelet-only explicit option handling
+  and final-representation status wording.
+- T002 worker digest: DONE. The frozen option precedence, Custom-Wavelet-only
+  explicit validation, Bash final authority, logging wiring, and truthful CLI
+  status landed in scope. Python 3.11.15 fallback: 516 passed/1 known skip;
+  `writingring-viz` remains unavailable.
+- T002 verifier digest: PASS. PRIMARY documented verified CLI/Bash controls;
+  defaults and wrappers are unchanged. Fallback Python 3.11.15 evidence is
+  516 passed/1 known skip; `writingring-viz` remains unavailable.
+- T003 probe digest: CONFIRMED. Missing/null transform metadata is legacy
+  `None`; mismatch can safely use the current invalid-output full-rebuild
+  policy. Both continue and final-QA validator call sites require the expected
+  transform.
+- T003 worker digest: DONE. Artifact transform provenance now participates in
+  both existing validation sites; mismatch uses the existing preprocess/full
+  rebuild. Python 3.11.15 fallback: focused 60 passed, full 527 passed/1 known
+  skip; `writingring-viz` remains unavailable.
+- T003 verifier digest: PASS. PRIMARY documented the verified legacy/mismatch
+  continue behavior; fallback Python 3.11.15 evidence is 61 focused passed and
+  527 passed/1 known skip, while `writingring-viz` remains unavailable.
+- T004 probe digest: CONFIRMED. No code repair is indicated; final acceptance
+  needs a temporary same-input fixture for tail/timestamp provenance alongside
+  focused/full test evidence and truthful environment classification.
+- T004 execution digest: temporary producer-backed paired matrix PASS. Signed
+  and rectified event values/masks/rows/channels, SpikeIMU tails, timestamp
+  provenance, legacy schema, metadata, and final statistics meet the frozen
+  acceptance criteria. Fallback Python 3.11.15: 61 focused passed; 527
+  passed/1 known skip full. Bash syntax and `git diff --check` passed.
+  `writingring-viz` cannot be entered (`NoWritableEnvsDirError`), an
+  environment-access limitation rather than test evidence.
+- T004 verifier digest: PASS. Independent review confirmed the paired
+  producer-backed artifacts, compatibility/provenance invariants, test
+  evidence, and environment classification; no blocker or replan is needed.
+- Next action: none — plan complete and records archived under
+  `docs/plans/Done/`.

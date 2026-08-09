@@ -8,6 +8,10 @@ import numpy as np
 import pytest
 
 from writingring.spike_encoding.contracts import SpikeEncodingError, SpikeEncodingSequenceResult
+from writingring.spike_encoding.encoders.custom_wavelet import (
+    CustomWaveletEncoder,
+    CustomWaveletSettings,
+)
 from writingring.spike_encoding.io import load_spike_encoding_input
 from writingring.spike_encoding.publication import (
     publish_spike_encoding,
@@ -174,3 +178,94 @@ def test_publication_preserves_declared_encoder_channel_order(tmp_path: Path) ->
     )
 
     assert summary["output"]["channel_order"] == "encoder_defined_order"
+
+
+def test_publication_records_rectified_representation_and_preserves_spike_imu_tail(
+    tmp_path: Path,
+) -> None:
+    acceleration_g = np.column_stack(
+        (
+            np.sin(np.arange(160) / 3.0),
+            np.zeros(160),
+            -np.sin(np.arange(160) / 3.0),
+        )
+    ).astype(np.float32)
+    raw = np.column_stack(
+        (
+            acceleration_g,
+            acceleration_g * 9.80665,
+            np.arange(160 * 3, dtype=np.float32).reshape(160, 3),
+        )
+    )
+
+    def publish(root: Path, transform: str | None):
+        root.mkdir()
+        raw_path = root / "recording_rawIMU.npy"
+        np.save(raw_path, raw, allow_pickle=False)
+        input_data = load_spike_encoding_input(raw_path)
+        encoder = CustomWaveletEncoder(
+            CustomWaveletSettings(
+                frequencies_hz=(0.5, 1.0, 2.0, 4.0, 8.0),
+                post_encode_transform=transform,
+                output_dtype="float32",
+            )
+        )
+        output = run_spike_encoder(
+            encoder,
+            acceleration_g=input_data.acceleration_g,
+            sequence_offsets=np.array([0, len(raw)], dtype=np.int64),
+            sequence_boundary_semantics="recording",
+        )
+        paths = spike_encoding_output_paths(
+            raw_imu_path=raw_path,
+            encoder_name=encoder.name,
+            output_stem=None,
+            output_root=None,
+        )
+        summary = publish_spike_encoding(
+            output=output,
+            input_data=input_data,
+            encoder=encoder,
+            effective_settings={"sampling_rate_hz": 200.0},
+            source_summary=None,
+            sequence_mode="offsets",
+            offsets_source="recording offsets",
+            output_dtype="float32",
+            paths=paths,
+            overwrite=False,
+        )
+        return raw, paths, summary
+
+    signed_raw, signed_paths, signed_summary = publish(tmp_path / "signed", None)
+    rectified_raw, rectified_paths, rectified_summary = publish(
+        tmp_path / "rectified", "AbsRectify"
+    )
+    signed_events = np.load(signed_paths.spike_events_path, allow_pickle=False)
+    rectified_events = np.load(rectified_paths.spike_events_path, allow_pickle=False)
+    np.testing.assert_array_equal(rectified_events, np.abs(signed_events))
+    np.testing.assert_array_equal(rectified_events != 0.0, signed_events != 0.0)
+    np.testing.assert_array_equal(
+        np.load(rectified_paths.spike_imu_path, allow_pickle=False)[:, 15:],
+        rectified_raw[:, 3:9],
+    )
+    assert signed_raw.shape == rectified_raw.shape == (160, 9)
+    assert signed_summary["encoder"]["representation"] == "signed_sparse_wavelet_extrema"
+    assert signed_summary["encoder"]["post_encode_transform"] is None
+    assert signed_summary["output"]["polarity_preserved"] is True
+    assert signed_summary["spike_imu"]["event_representation"] == (
+        "signed_sparse_wavelet_extrema"
+    )
+    assert rectified_summary["encoder"]["representation"] == (
+        "abs_rectified_sparse_wavelet_extrema"
+    )
+    assert rectified_summary["encoder"]["event_representation"] == (
+        "abs_rectified_sparse_wavelet_extrema"
+    )
+    assert rectified_summary["encoder"]["post_encode_transform"] == "AbsRectify"
+    assert rectified_summary["output"]["polarity_preserved"] is False
+    assert rectified_summary["spike_imu"]["schema"] == "signed_wavelet_events_plus_imu_v1"
+    assert rectified_summary["spike_imu"]["event_representation"] == (
+        "abs_rectified_sparse_wavelet_extrema"
+    )
+    assert rectified_summary["spike_imu"]["post_encode_transform"] == "AbsRectify"
+    assert rectified_summary["statistics"]["negative_event_count"] == 0

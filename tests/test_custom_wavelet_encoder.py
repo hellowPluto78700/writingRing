@@ -61,6 +61,49 @@ def test_encoder_emits_dynamic_axis_major_channel_count_and_names() -> None:
     assert np.isfinite(result.values).all()
 
 
+def test_post_encode_abs_rectify_preserves_occurrences_and_signed_step() -> None:
+    settings = dict(
+        frequencies_hz=(2.0, 4.0, 8.0),
+        max_filter_time_s=0.3,
+        output_dtype="float64",
+    )
+    samples = np.column_stack(
+        (
+            np.sin(np.arange(160) / 3.0),
+            np.zeros(160),
+            -np.sin(np.arange(160) / 3.0),
+        )
+    )
+    signed_encoder = CustomWaveletEncoder(CustomWaveletSettings(**settings))
+    rectified_encoder = CustomWaveletEncoder(
+        CustomWaveletSettings(**settings, post_encode_transform="AbsRectify")
+    )
+
+    signed_step = signed_encoder.step(samples[0])
+    rectified_step = rectified_encoder.step(samples[0])
+    np.testing.assert_array_equal(rectified_step, signed_step)
+    signed_encoder.reset()
+    rectified_encoder.reset()
+
+    signed = signed_encoder.encode_sequence(samples)
+    rectified = rectified_encoder.encode_sequence(samples)
+
+    assert signed.representation == "signed_sparse_wavelet_extrema"
+    assert rectified.representation == "abs_rectified_sparse_wavelet_extrema"
+    np.testing.assert_array_equal(rectified.values, np.abs(signed.values))
+    np.testing.assert_array_equal(rectified.values != 0.0, signed.values != 0.0)
+    assert rectified.values.shape == signed.values.shape == (160, 9)
+    assert rectified.channel_names == signed.channel_names
+    assert np.all(rectified.values >= 0.0)
+    assert np.count_nonzero(signed.values < 0.0) > 0
+    assert not signed.values.flags.writeable
+    assert not rectified.values.flags.writeable
+    assert rectified.diagnostics["post_encode_transform"] == "AbsRectify"
+    assert rectified.diagnostics["event_representation"] == rectified.representation
+    assert rectified_encoder.encoding_metadata["post_encode_transform"] == "AbsRectify"
+    assert rectified_encoder.encoding_metadata["event_representation"] == rectified.representation
+
+
 def test_encoder_reset_reproduces_one_sequence_and_runner_resets_each_boundary() -> None:
     settings = {
         "frequencies_hz": [2.0, 4.0],

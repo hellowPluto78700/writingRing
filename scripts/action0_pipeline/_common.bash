@@ -126,6 +126,7 @@ pipeline_init() {
     ACTION="${ACTION:-0}"
     SAMPLING_RATE="${SAMPLING_RATE:-200}"
     ENCODER="${ENCODER:-custom-wavelet}"
+    POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
     ENCODER_SETTINGS="$(_pipeline_resolve_path "${ENCODER_SETTINGS:-configs/spike_encoding/custom_wavelet.json}")"
     LEGACY_OVERWRITE="${OVERWRITE:-}"
     if [[ -n "$LEGACY_OVERWRITE" && "$LEGACY_OVERWRITE" != "0" && "$LEGACY_OVERWRITE" != "1" ]]; then
@@ -156,6 +157,12 @@ pipeline_init() {
     if [[ "$ENCODER" != "custom-wavelet" ]]; then
         pipeline_die "action-0 scripts require ENCODER=custom-wavelet"
     fi
+    case "$POST_ENCODE_TRANSFORM" in
+        none|AbsRectify) ;;
+        *)
+            pipeline_die "POST_ENCODE_TRANSFORM must be none or AbsRectify"
+            ;;
+    esac
     if [[ "$MADGWICK_PROVISIONAL" != "0" && "$MADGWICK_PROVISIONAL" != "1" ]]; then
         pipeline_die "MADGWICK_PROVISIONAL must be 0 or 1"
     fi
@@ -344,6 +351,7 @@ pipeline_encode() {
         --output-root "$SPIKE_OUTPUT_ROOT"
         --encoder "$ENCODER"
         --encoder-settings "$ENCODER_SETTINGS"
+        --post-encode-transform "$POST_ENCODE_TRANSFORM"
     )
     if [[ "$GRAVITY_METHOD" == "raw" ]]; then
         command_args+=(--allow-gravity-included)
@@ -477,13 +485,16 @@ pipeline_validate_spike_artifact() {
     local values_path="$1"
     local metadata_path="$2"
     local timestamps_path="$3"
+    local requested_transform="$4"
     pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
 from pathlib import Path
 import json
 import numpy as np
 import sys
 
-values_path, metadata_path, timestamps_path = map(Path, sys.argv[1:])
+values_path, metadata_path, timestamps_path = map(Path, sys.argv[1:4])
+expected = sys.argv[4]
+expected_transform = None if expected == "none" else expected
 values = np.load(values_path, allow_pickle=False)
 timestamps = np.load(timestamps_path, allow_pickle=False)
 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -494,8 +505,16 @@ if timestamps.ndim != 1 or len(timestamps) != len(values):
 spike_imu = metadata.get("spike_imu", {})
 if spike_imu.get("channel_count") != 21:
     raise SystemExit(f"metadata does not declare 21 SpikeIMU channels: {metadata_path}")
+settings = metadata.get("settings") or {}
+actual_transform = settings.get("post_encode_transform")
+if actual_transform != expected_transform:
+    raise SystemExit(
+        "SpikeIMU post_encode_transform mismatch: "
+        f"expected={expected_transform!r}, "
+        f"actual={actual_transform!r}"
+    )
 print(f"validated SpikeIMU rows={len(values)} channels={values.shape[1]}: {values_path}")
-' "$values_path" "$metadata_path" "$timestamps_path"
+' "$values_path" "$metadata_path" "$timestamps_path" "$requested_transform"
 }
 
 pipeline_validate_segment_artifact() {
@@ -758,7 +777,8 @@ pipeline_encode_outputs_valid() {
         pipeline_validate_spike_artifact \
             "$directory/spikeIMU.npy" \
             "$directory/metadata.json" \
-            "$timestamps_path" || return 1
+            "$timestamps_path" \
+            "$POST_ENCODE_TRANSFORM" || return 1
     done
 }
 
@@ -1001,7 +1021,8 @@ pipeline_qa() {
         pipeline_validate_spike_artifact \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/spikeIMU.npy" \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/metadata.json" \
-            "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy"
+            "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy" \
+            "$POST_ENCODE_TRANSFORM"
     done
 
     for record_user in "${PIPELINE_USERS[@]}"; do
