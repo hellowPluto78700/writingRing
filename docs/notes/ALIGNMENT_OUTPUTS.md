@@ -15,6 +15,13 @@ spacing. The reported effective work-axis rate is derived from the canonical
 endpoints and sample count. Neither rate establishes an upstream acquisition
 rate or timestamp-unit guarantee.
 
+When a Board timestamp has its first backward jump, alignment considers only
+the positional initial monotonic prefix. A valid press/lift pair is eligible
+only if both endpoints are in that prefix. Events from a cross-boundary valid
+pair are not alignment events, including the pre-jump press; invalid and
+transient event rows remain audit diagnostics. Timestamp overlap from a later
+epoch cannot extend the selected prefix.
+
 ## Timestamp and offset domains
 
 ```text
@@ -42,6 +49,23 @@ variation is first warned and then rejected according to the configured
 constant-offset guard.
 
 ## Success and publication
+
+The report is the final authoritative completion manifest. A completed
+recording is exactly one of `SUCCESS` or `SKIPPED`: success has the offset TXT
+and verification PNG declared by the report, while skipped has its sibling
+skip JSON and no success artifacts. A `FAILED` report is diagnostic only and
+is never a completed outcome. Consumers must use the Python outcome validator
+with current input provenance, rather than infer completion from a TXT or JSON
+file alone.
+
+Only a `SUCCESS`/`SKIPPED` replacement is a completed-state transition and
+requires explicit outcome-transition authorization. Publishing a new completed
+outcome after `FAILED` follows the ordinary overwrite permission for the new
+target artifacts; stale opposite artifacts are removed so the final manifest
+is conflict-free. Malformed reports, artifacts, or skip diagnostics fail
+through `AlignmentOutcomeError`. A skip proves a backward timestamp jump,
+positive global valid-pair count, zero usable-prefix valid pairs, and coherent
+prefix/jump frame diagnostics.
 
 A failed work-axis match retains its report but writes no offset TXT or
 verification PNG. A successful work-axis match whose canonical projection

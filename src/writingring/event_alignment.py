@@ -429,6 +429,9 @@ def select_board_interval_from_presses(
         prefix_frame_identity_set,
     )
     valid_pairs = globally_valid_pairs.loc[usable_pair_mask].copy()
+    usable_pair_ids = set(
+        valid_pairs["paired_touch_index"].astype(np.int64).tolist()
+    )
     if len(backward_positions) and global_valid_pair_count > 0 and valid_pairs.empty:
         jump_position = int(backward_positions[0])
         previous_frame = frames.iloc[jump_position - 1]
@@ -508,10 +511,16 @@ def select_board_interval_from_presses(
             prefix_frame_identity_set,
         )
     ]
-    event_mask = prefix_events["frame_timestamp_raw"].between(
-        board_start,
-        actual_end,
-        inclusive="both",
+    event_mask = (
+        prefix_events["frame_timestamp_raw"].between(
+            board_start,
+            actual_end,
+            inclusive="both",
+        )
+        & (
+            ~prefix_events["valid_touch"].astype(bool)
+            | prefix_events["paired_touch_index"].isin(usable_pair_ids)
+        )
     )
     selected_contacts = board_contacts.loc[contact_mask].copy()
     selected_events = prefix_events.loc[event_mask].copy()

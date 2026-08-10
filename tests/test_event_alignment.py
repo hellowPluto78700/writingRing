@@ -359,6 +359,51 @@ def test_dynamic_interval_prefixes_mixed_pairs_and_identity_contacts() -> None:
     assert selected.metadata["valid_press_count_available"] == 1
 
 
+def test_dynamic_interval_excludes_cross_boundary_pair_events_from_alignment() -> None:
+    timestamps = [
+        0,
+        1_000_000,
+        1_100_000,
+        1_200_000,
+        1_300_000,
+        1_400_000,
+        100_000,
+        200_000,
+        300_000,
+        400_000,
+    ]
+    frames = _frames(
+        [False, True, True, True, False, True, True, True, True, False],
+        timestamps=timestamps,
+    )
+    detection = detect_board_events(frames)
+
+    selected = select_board_interval_from_presses(
+        frames,
+        _contacts_with_global_ids(timestamps),
+        detection,
+        target_valid_press_count=1,
+    )
+
+    assert selected.touch_pairs["paired_touch_index"].tolist() == [0]
+    selected_event_ids = set(selected.events["event_index"].tolist())
+    crossboundary_pair = detection.touch_pairs.loc[
+        detection.touch_pairs["paired_touch_index"] == 1
+    ].iloc[0]
+    crossboundary_event_ids = {
+        int(crossboundary_pair["press_event_index"]),
+        int(crossboundary_pair["lift_event_index"]),
+    }
+    assert crossboundary_event_ids.isdisjoint(selected_event_ids)
+    matching_valid_events = selected.events.loc[
+        selected.events["valid_touch"].astype(bool)
+    ]
+    assert matching_valid_events["paired_touch_index"].tolist() == [0, 0]
+    assert crossboundary_event_ids.isdisjoint(
+        set(matching_valid_events["event_index"].tolist())
+    )
+
+
 def test_peak_detection_returns_ordered_region() -> None:
     score = np.zeros(101)
     score[48:53] = [1.0, 3.0, 8.0, 3.0, 1.0]

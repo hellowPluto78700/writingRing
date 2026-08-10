@@ -96,7 +96,12 @@ pipeline_configure_overwrite_args() {
     if [[ "$OVERWRITE" == "1" ]]; then
         PREPROCESS_OVERWRITE_ARGS+=(--overwrite)
         ENCODE_OVERWRITE_ARGS+=(--overwrite)
-        ALIGN_OVERWRITE_ARGS+=(--overwrite-offset --overwrite-report --overwrite-verification)
+        ALIGN_OVERWRITE_ARGS+=(
+            --overwrite-offset
+            --overwrite-report
+            --overwrite-verification
+            --overwrite-outcome
+        )
         SEGMENT_OVERWRITE_ARGS+=(--overwrite)
     fi
 }
@@ -406,18 +411,13 @@ pipeline_align() {
             --offset-output-root "$OFFSET_ROOT"
             --report-output-root "$ALIGNMENT_REPORT_ROOT"
             --verification-output-root "$ALIGNMENT_VERIFICATION_ROOT"
+            --initial-interval-policy skip
         )
         command_args+=("${ALIGN_OVERWRITE_ARGS[@]}")
         pipeline_run_logged "$log_path" "${command_args[@]}"
-        pipeline_require_file \
-            "$OFFSET_ROOT/$record_user/action_${record_action}/${dataset_id}_ring_board_offset.txt" \
-            "alignment offset"
-        pipeline_require_file \
-            "$ALIGNMENT_REPORT_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_report.json" \
-            "alignment report"
-        pipeline_require_file \
-            "$ALIGNMENT_VERIFICATION_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_verification.png" \
-            "alignment verification image"
+        pipeline_validate_alignment_outcome \
+            "$record_user" "$record_action" "$dataset_id" || \
+            pipeline_die "alignment outcome is invalid for ${record_user}/${record_action}/${dataset_id}"
     done
 }
 
@@ -635,27 +635,113 @@ print(f"validated preprocessing rows={len(values)} channels={values.shape[1]}: {
 ' "$values_path" "$timestamps_path" "$metadata_path"
 }
 
-pipeline_validate_alignment_artifact() {
-    local offset_path="$1"
-    local report_path="$2"
-    pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
+pipeline_validate_alignment_outcome() {
+    local record_user="$1"
+    local record_action="$2"
+    local dataset_id="$3"
+    local validation_log="${QA_LOG:-/dev/null}"
+    local status=""
+    local -a command_args=(
+        "${PYTHON_CMD[@]}" -c '
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
-import json
-import math
 import sys
 
-offset_path, report_path = map(Path, sys.argv[1:])
+data_root = Path(sys.argv[1])
+spike_root = Path(sys.argv[2])
+offset_root = Path(sys.argv[3])
+verification_root = Path(sys.argv[4])
+report_root = Path(sys.argv[5])
+user = sys.argv[6]
+action = sys.argv[7]
+dataset_id = int(sys.argv[8])
+
 try:
-    offset = float(offset_path.read_text(encoding="utf-8").strip())
-except (OSError, ValueError) as error:
-    raise SystemExit(f"invalid alignment offset {offset_path}: {error}") from error
-if not math.isfinite(offset):
-    raise SystemExit(f"alignment offset is not finite: {offset_path}")
-report = json.loads(report_path.read_text(encoding="utf-8"))
-if not isinstance(report, dict):
-    raise SystemExit(f"alignment report is not a JSON object: {report_path}")
-print(f"validated alignment offset={offset}: {offset_path}")
-' "$offset_path" "$report_path"
+    # These imports and loaders are the same source-identity/provenance path
+    # used by the alignment producer.  Their incidental output must not become
+    # part of the typed status returned to Bash.
+    with redirect_stdout(StringIO()):
+        from writingring.alignment_io import (
+            build_alignment_input_provenance,
+            build_board_chunk_provenance,
+            validate_alignment_outcome,
+        )
+        from writingring.board_loader import load_board
+        from writingring.discovery import discover_recordings
+        from writingring.recording_features import load_recording_features
+        from writingring.selection import select_recording
+
+        recording = select_recording(
+            discover_recordings(data_root),
+            user=user,
+            action=action,
+            dataset_id=dataset_id,
+        )
+        feature_input = load_recording_features(
+            recording,
+            input_kind="spike-imu",
+            spike_root=spike_root,
+        )
+        board_data = load_board(recording)
+        input_provenance = build_alignment_input_provenance(feature_input)
+        board_provenance = build_board_chunk_provenance(board_data)
+        outcome = validate_alignment_outcome(
+            offset_root,
+            verification_root,
+            report_root,
+            expected_recording={
+                "user": user,
+                "action": action,
+                "dataset_id": dataset_id,
+            },
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board_provenance,
+        )
+        status = outcome.status_name
+except Exception as error:
+    print(f"alignment outcome validation failed: {error}", file=sys.stderr)
+    raise SystemExit(1) from error
+
+if status not in {"SUCCESS", "SKIPPED"}:
+    print(f"alignment outcome returned unsupported status: {status}", file=sys.stderr)
+    raise SystemExit(1)
+sys.stdout.write(status)
+' \
+        "$DATA_ROOT" \
+        "$SPIKE_ROOT" \
+        "$OFFSET_ROOT" \
+        "$ALIGNMENT_VERIFICATION_ROOT" \
+        "$ALIGNMENT_REPORT_ROOT" \
+        "$record_user" \
+        "$record_action" \
+        "$dataset_id"
+    )
+
+    pipeline_log_command "$validation_log" "${command_args[@]}"
+    if ! status="$("${command_args[@]}" 2>>"$validation_log")"; then
+        PIPELINE_LAST_ALIGNMENT_STATUS="INVALID"
+        printf 'alignment_outcome_status=%s user=%s action=%s dataset_id=%s\n' \
+            "INVALID" "$record_user" "$record_action" "$dataset_id" \
+            >>"$validation_log"
+        return 1
+    fi
+    case "$status" in
+        SUCCESS|SKIPPED)
+            PIPELINE_LAST_ALIGNMENT_STATUS="$status"
+            printf 'alignment_outcome_status=%s user=%s action=%s dataset_id=%s\n' \
+                "$status" "$record_user" "$record_action" "$dataset_id" \
+                >>"$validation_log"
+            return 0
+            ;;
+        *)
+            PIPELINE_LAST_ALIGNMENT_STATUS="INVALID"
+            printf 'alignment_outcome_status=%s user=%s action=%s dataset_id=%s\n' \
+                "INVALID" "$record_user" "$record_action" "$dataset_id" \
+                >>"$validation_log"
+            return 1
+            ;;
+    esac
 }
 
 pipeline_validate_segment_package() {
@@ -791,19 +877,16 @@ pipeline_encode_outputs_valid() {
 }
 
 pipeline_alignment_outputs_valid() {
-    local index record_user record_action dataset_id offset_path report_path verification_path
+    local index record_user record_action dataset_id
+    local invalid_count=0
     for index in "${!RECORD_USERS[@]}"; do
         record_user="${RECORD_USERS[$index]}"
         record_action="${RECORD_ACTIONS[$index]}"
         dataset_id="${RECORD_DATASET_IDS[$index]}"
-        offset_path="$OFFSET_ROOT/$record_user/action_${record_action}/${dataset_id}_ring_board_offset.txt"
-        report_path="$ALIGNMENT_REPORT_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_report.json"
-        verification_path="$ALIGNMENT_VERIFICATION_ROOT/$record_user/action_${record_action}/${dataset_id}_alignment_verification.png"
-        [[ -s "$offset_path" ]] || return 1
-        [[ -s "$report_path" ]] || return 1
-        [[ -s "$verification_path" ]] || return 1
-        pipeline_validate_alignment_artifact "$offset_path" "$report_path" || return 1
+        pipeline_validate_alignment_outcome \
+            "$record_user" "$record_action" "$dataset_id" || invalid_count=$((invalid_count + 1))
     done
+    [[ "$invalid_count" -eq 0 ]]
 }
 
 pipeline_segment_outputs_valid() {
@@ -981,21 +1064,15 @@ pipeline_execute_from_stage() {
 
 pipeline_qa() {
     local ring_count="${#RING_FILES[@]}"
-    local preprocessing_count spike_count offset_count summary_count padded_summary_count
+    local preprocessing_count spike_count summary_count padded_summary_count
     preprocessing_count="$(pipeline_count_files "$PREPROCESS_ROOT" '*_preprocessing.json')"
     spike_count="$(pipeline_count_files "$SPIKE_ROOT" 'spikeIMU.npy')"
     summary_count="$(pipeline_count_files "$SEGMENT_ROOT" '*_segmentation_summary.json')"
     padded_summary_count="$(pipeline_count_files "$PADDING_OUTPUT_ROOT" 'padding_dataset_summary.json')"
-    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
-        offset_count="$(pipeline_count_files "$OFFSET_ROOT" '*_ring_board_offset.txt')"
-    else
-        offset_count=0
-    fi
 
     printf 'ring_0_recordings=%s\n' "$ring_count" >>"$QA_LOG"
     printf 'preprocessing_summaries=%s\n' "$preprocessing_count" >>"$QA_LOG"
     printf 'spikeIMU_matrices=%s\n' "$spike_count" >>"$QA_LOG"
-    printf 'alignment_offsets=%s\n' "$offset_count" >>"$QA_LOG"
     printf 'segmentation_summaries=%s\n' "$summary_count" >>"$QA_LOG"
     printf 'padded_dataset_summaries=%s\n' "$padded_summary_count" >>"$QA_LOG"
 
@@ -1005,9 +1082,6 @@ pipeline_qa() {
     if [[ "$spike_count" -ne "$ring_count" ]]; then
         pipeline_die "SpikeIMU count ${spike_count} != ring_0 count ${ring_count}"
     fi
-    if [[ "$BOUNDARY_MODE" == "aligned-board-events" && "$offset_count" -ne "$ring_count" ]]; then
-        pipeline_die "alignment offset count ${offset_count} != ring_0 count ${ring_count}"
-    fi
     if [[ "$summary_count" -ne "${#PIPELINE_USERS[@]}" ]]; then
         pipeline_die "segmentation summary count ${summary_count} != user count ${#PIPELINE_USERS[@]}"
     fi
@@ -1015,7 +1089,43 @@ pipeline_qa() {
         pipeline_die "padded dataset summary count ${padded_summary_count} != 1"
     fi
 
-    local index record_user record_action dataset_id segment_directory
+    local alignment_total_count=0
+    local alignment_success_count=0
+    local alignment_skipped_count=0
+    local alignment_invalid_count=0
+    local index record_user record_action dataset_id
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        alignment_total_count="${#RECORD_USERS[@]}"
+        for index in "${!RECORD_USERS[@]}"; do
+            record_user="${RECORD_USERS[$index]}"
+            record_action="${RECORD_ACTIONS[$index]}"
+            dataset_id="${RECORD_DATASET_IDS[$index]}"
+            if pipeline_validate_alignment_outcome \
+                "$record_user" "$record_action" "$dataset_id"; then
+                case "$PIPELINE_LAST_ALIGNMENT_STATUS" in
+                    SUCCESS) alignment_success_count=$((alignment_success_count + 1)) ;;
+                    SKIPPED) alignment_skipped_count=$((alignment_skipped_count + 1)) ;;
+                    *) alignment_invalid_count=$((alignment_invalid_count + 1)) ;;
+                esac
+            else
+                alignment_invalid_count=$((alignment_invalid_count + 1))
+            fi
+        done
+        printf 'alignment_outcomes_total=%s\n' "$alignment_total_count" >>"$QA_LOG"
+        printf 'alignment_outcomes_success=%s\n' "$alignment_success_count" >>"$QA_LOG"
+        printf 'alignment_outcomes_skipped=%s\n' "$alignment_skipped_count" >>"$QA_LOG"
+        printf 'alignment_outcomes_invalid=%s\n' "$alignment_invalid_count" >>"$QA_LOG"
+        printf 'Alignment outcomes: total=%s success=%s skipped=%s invalid=%s\n' \
+            "$alignment_total_count" \
+            "$alignment_success_count" \
+            "$alignment_skipped_count" \
+            "$alignment_invalid_count"
+        if [[ "$alignment_invalid_count" -ne 0 ]]; then
+            pipeline_die \
+                "alignment outcome validation failed for ${alignment_invalid_count} recording(s)"
+        fi
+    fi
+
     for index in "${!RECORD_USERS[@]}"; do
         record_user="${RECORD_USERS[$index]}"
         record_action="${RECORD_ACTIONS[$index]}"

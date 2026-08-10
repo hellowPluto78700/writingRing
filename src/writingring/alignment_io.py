@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import tempfile
 from collections.abc import Mapping, Sequence
+from functools import wraps
 from typing import Final, Any
 
 import numpy as np
@@ -56,6 +57,36 @@ AlignmentStatus = AlignmentOutcomeStatus
 
 class AlignmentOutcomeError(AlignmentOffsetExportError):
     """Raised when an alignment outcome is absent, stale, or inconsistent."""
+
+
+def _normalize_outcome_errors(function: Any) -> Any:
+    """Normalize malformed public outcome inputs to ``AlignmentOutcomeError``.
+
+    The low-level offset helpers intentionally retain their historical
+    ``AlignmentOffsetExportError`` contract.  Outcome and skip readers sit on
+    top of those helpers, so malformed JSON/provenance fields must cross this
+    public boundary as the more specific outcome error instead of leaking a
+    ``KeyError``, a built-in parsing error, or the base offset exception.
+    """
+
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return function(*args, **kwargs)
+        except AlignmentOutcomeError:
+            raise
+        except (
+            AlignmentOffsetExportError,
+            KeyError,
+            TypeError,
+            ValueError,
+            OverflowError,
+        ) as error:
+            raise AlignmentOutcomeError(
+                f"malformed alignment outcome: {error}"
+            ) from error
+
+    return wrapped
 
 
 def sha256_array(values: np.ndarray) -> str:
@@ -1572,7 +1603,7 @@ def _finite_float(value: object, *, name: str) -> float:
         raise AlignmentOffsetExportError(f"{name} must be finite")
     try:
         number = float(value)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise AlignmentOffsetExportError(f"{name} must be finite") from error
     if not math.isfinite(number):
         raise AlignmentOffsetExportError(f"{name} must be finite")
@@ -1852,6 +1883,7 @@ class AlignmentSkipArtifact:
     def schema_version(self) -> int:
         return self.alignment_skip_schema_version
 
+    @_normalize_outcome_errors
     def to_dict(self) -> dict[str, object]:
         recording = _validated_recording_mapping(self.recording)
         diagnostics = _validate_skip_diagnostics(self.diagnostics)
@@ -1876,6 +1908,7 @@ class AlignmentSkipArtifact:
         }
 
     @classmethod
+    @_normalize_outcome_errors
     def from_dict(cls, payload: Mapping[str, object]) -> "AlignmentSkipArtifact":
         if not isinstance(payload, Mapping):
             raise AlignmentOutcomeError("alignment skip artifact must be a JSON object")
@@ -2147,6 +2180,7 @@ def _build_alignment_report_path(
     )
 
 
+@_normalize_outcome_errors
 def make_alignment_skip_artifact(
     error: object,
     *,
@@ -2176,6 +2210,7 @@ def make_alignment_skip_artifact(
 build_alignment_skip_artifact = make_alignment_skip_artifact
 
 
+@_normalize_outcome_errors
 def write_alignment_skip_artifact(
     artifact: AlignmentSkipArtifact | Mapping[str, object],
     output_path: Path,
@@ -2199,6 +2234,7 @@ def write_alignment_skip_artifact(
 write_alignment_skip_json = write_alignment_skip_artifact
 
 
+@_normalize_outcome_errors
 def read_alignment_skip_artifact(
     path: Path,
     *,
@@ -2238,6 +2274,7 @@ def read_alignment_skip_artifact(
 validate_alignment_skip_artifact = read_alignment_skip_artifact
 
 
+@_normalize_outcome_errors
 def validate_alignment_outcome(
     paths_or_offset_root: AlignmentOutcomePaths | Path,
     verification_root: Path | None = None,
@@ -2300,7 +2337,9 @@ def validate_alignment_outcome(
     if report.get("board_provenance") != expected_board:
         raise AlignmentOutcomeError("alignment report Board provenance is stale")
 
-    entries = _validate_manifest(report["outcome_artifacts"])
+    # ``get`` is intentional: a missing manifest is a malformed outcome, not
+    # an implementation-level ``KeyError``.
+    entries = _validate_manifest(report.get("outcome_artifacts"))
     if status is AlignmentOutcomeStatus.SUCCESS:
         if report.get("alignment_success") is not True:
             raise AlignmentOutcomeError(
@@ -2391,12 +2430,16 @@ validate_alignment_completion = validate_alignment_outcome
 read_alignment_outcome = validate_alignment_outcome
 
 
+@_normalize_outcome_errors
 def read_alignment_outcome_report(path: Path) -> dict[str, object]:
     """Read a v1 report manifest without treating it as completion."""
 
-    return _read_strict_json(Path(path), label="alignment outcome report")
+    payload = _read_strict_json(Path(path), label="alignment outcome report")
+    _validate_manifest(payload.get("outcome_artifacts"))
+    return payload
 
 
+@_normalize_outcome_errors
 def publish_alignment_outcome(
     paths: AlignmentOutcomePaths,
     *,
@@ -2522,13 +2565,41 @@ def publish_alignment_outcome(
 
     old_state = _existing_outcome_state(paths)
     requested_state = outcome_status
-    transition = old_state is not None and old_state is not requested_state
+    completed_states = {
+        AlignmentOutcomeStatus.SUCCESS,
+        AlignmentOutcomeStatus.SKIPPED,
+    }
+    # FAILED is a report-only state, not a completed outcome transition.  It
+    # therefore never grants the cross-artifact overwrite authorization that a
+    # SUCCESS <-> SKIPPED replacement receives.
+    transition = (
+        old_state in completed_states
+        and requested_state in completed_states
+        and old_state is not requested_state
+    )
     opposite_present = _opposite_artifact_present(paths, requested_state)
-    if (transition or opposite_present) and not overwrite_outcome:
+    # A FAILED report is not a completed outcome.  If it coexists with stale
+    # opposite-state artifacts, those artifacts are cleaned as part of the
+    # requested publication; they do not create a completed-state transition
+    # authorization requirement.
+    outcome_transition_required = transition or (
+        opposite_present and old_state is not AlignmentOutcomeStatus.FAILED
+    )
+    if outcome_transition_required and not overwrite_outcome:
         raise AlignmentOutcomeError(
             "success/skip outcome transition requires overwrite_outcome=True"
         )
-    transition_authorized = bool(overwrite_outcome and (transition or opposite_present))
+    transition_authorized = bool(
+        overwrite_outcome
+        and (
+            transition
+            or (opposite_present and old_state is not AlignmentOutcomeStatus.FAILED)
+        )
+    )
+    remove_obsolete_authorized = bool(
+        transition_authorized
+        or (old_state is AlignmentOutcomeStatus.FAILED and opposite_present)
+    )
     _preflight_outcome_targets(
         paths,
         status=outcome_status,
@@ -2594,7 +2665,7 @@ def publish_alignment_outcome(
             for temporary, destination in tuple(staged):
                 os.replace(temporary, destination)
                 staged.remove((temporary, destination))
-            if transition_authorized:
+            if remove_obsolete_authorized:
                 _remove_obsolete_artifacts(paths, outcome_status)
             # The report is intentionally replaced last.  Missing or stale
             # report/artifact combinations fail the authoritative validator.
@@ -2617,6 +2688,7 @@ def publish_alignment_outcome(
     )
 
 
+@_normalize_outcome_errors
 def publish_alignment_success(
     paths: AlignmentOutcomePaths,
     *,
@@ -2641,6 +2713,7 @@ def publish_alignment_success(
     )
 
 
+@_normalize_outcome_errors
 def publish_alignment_skip(
     paths: AlignmentOutcomePaths,
     *,
@@ -2663,6 +2736,7 @@ def publish_alignment_skip(
     )
 
 
+@_normalize_outcome_errors
 def write_alignment_outcome_report(
     path: Path,
     report: Mapping[str, object],
@@ -2678,6 +2752,7 @@ def write_alignment_outcome_report(
     if identity is None:
         raise AlignmentOutcomeError("alignment outcome report must declare recording identity")
     _validate_report_header(payload, identity=identity)
+    _validate_manifest(payload.get("outcome_artifacts"))
     _preflight_single_target(Path(path), overwrite=overwrite, label="alignment report")
     _atomic_write_json(Path(path), payload)
     return Path(path)
@@ -2971,9 +3046,51 @@ def _validate_skip_diagnostics(value: object) -> dict[str, object]:
     }
     for key, item in value.items():
         if key in integer_keys:
+            if isinstance(item, (bool, np.bool_)) or not isinstance(
+                item, (int, np.integer)
+            ):
+                raise AlignmentOutcomeError(
+                    f"diagnostics.{key} must be a nonnegative integer"
+                )
             result[key] = _nonnegative_int(item, name=f"diagnostics.{key}")
         else:
+            if isinstance(item, (bool, np.bool_)) or not isinstance(
+                item, (int, float, np.integer, np.floating)
+            ):
+                raise AlignmentOutcomeError(
+                    f"diagnostics.{key} must be a finite number"
+                )
             result[key] = _finite_float(item, name=f"diagnostics.{key}")
+
+    if result["total_global_valid_pair_count"] <= 0:
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics require a positive total global valid-pair count"
+        )
+    if result["usable_prefix_valid_pair_count"] != 0:
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics require zero usable-prefix valid pairs"
+        )
+    if not (
+        result["next_timestamp_raw"] < result["previous_timestamp_raw"]
+    ):
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics require a raw backward timestamp jump"
+        )
+    prefix_boundary = result["prefix_boundary_position"]
+    if prefix_boundary <= 0:
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics require a positive prefix boundary"
+        )
+    previous_global = result["previous_global_frame_index"]
+    next_global = result["next_global_frame_index"]
+    if result["last_pre_jump_global_frame_index"] != previous_global:
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics last-pre frame must equal previous frame"
+        )
+    if previous_global != prefix_boundary - 1 or next_global != prefix_boundary:
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics frame identities must be contiguous at the prefix boundary"
+        )
     return result
 
 

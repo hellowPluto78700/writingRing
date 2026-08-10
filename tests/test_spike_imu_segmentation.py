@@ -13,6 +13,10 @@ from scripts import align_ring_board, encode_spikes, segment_ring_imu
 from writingring.alignment_io import (
     AlignmentOffset,
     AlignmentOffsetExportError,
+    build_alignment_input_provenance,
+    build_alignment_outcome_paths,
+    build_board_chunk_provenance,
+    publish_alignment_success,
     build_alignment_time_axes,
     read_alignment_offset_txt,
     write_alignment_offset_txt,
@@ -170,6 +174,43 @@ def _matching_spike_offset(feature_input: RecordingFeatureInput) -> AlignmentOff
     )
 
 
+def _publish_spike_success_outcome(
+    offset_root: Path,
+    feature_input: RecordingFeatureInput,
+    board_path: Path,
+    *,
+    offset: AlignmentOffset | None = None,
+) -> None:
+    """Publish a complete provenance-bearing SUCCESS outcome for a fixture."""
+
+    input_provenance = build_alignment_input_provenance(feature_input)
+    board_provenance = build_board_chunk_provenance((board_path,))
+    paths = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user=feature_input.user,
+        action=feature_input.action,
+        dataset_id=feature_input.dataset_id,
+    )
+    verification_source = offset_root.parent / f"{feature_input.dataset_id}-alignment-source.png"
+    verification_source.write_bytes(b"alignment verification")
+    publish_alignment_success(
+        paths,
+        offset=offset or _matching_spike_offset(feature_input),
+        report={
+            "recording": {
+                "user": feature_input.user,
+                "action": feature_input.action,
+                "dataset_id": feature_input.dataset_id,
+            },
+            "input_provenance": input_provenance,
+            "board_provenance": board_provenance,
+        },
+        verification_path=verification_source,
+    )
+
+
 def test_common_spike_sampling_rate_reports_reference_and_conflict(
     tmp_path: Path,
 ) -> None:
@@ -255,6 +296,7 @@ def test_spike_label_aggregation_rejects_mixed_sampling_rates(
 
 def test_spike_aligned_board_aggregation_rejects_mixed_sampling_rates(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = _data_root(tmp_path)
     _add_data_recording(data_root, dataset_id=1)
@@ -271,6 +313,46 @@ def test_spike_aligned_board_aggregation_rejects_mixed_sampling_rates(
         sampling_rate_hz=100.0,
     )
     output_root = tmp_path / "mixed-aligned-output"
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for path in board_paths.values():
+        path.write_bytes(b"board provenance")
+    features = {
+        dataset_id: load_spike_imu_features(
+            next(
+                recording
+                for recording in discover_recordings(data_root)
+                if recording.dataset_id == dataset_id
+            ),
+            spike_root=spike_root,
+        )
+        for dataset_id in (0, 1)
+    }
+    for dataset_id in (0, 1):
+        _publish_spike_success_outcome(
+            offset_root,
+            features[dataset_id],
+            board_paths[dataset_id],
+        )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(4),
+            "frame_timestamp_raw": [1_000_000.0, 1_001_000.0, 1_002_000.0, 1_003_000.0],
+            "chunk_index": 0,
+            "contact_count": [0, 0, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(4)}),
+            chunk_paths=(board_paths[recording.dataset_id],),
+        ),
+    )
 
     with pytest.raises(
         BoardEventSegmentationError,
@@ -281,7 +363,7 @@ def test_spike_aligned_board_aggregation_rejects_mixed_sampling_rates(
             user="writer_a",
             action="letters",
             output_root=output_root,
-            alignment_offset_root=tmp_path / "offsets",
+            alignment_offset_root=offset_root,
             input_kind="spike-imu",
             spike_root=spike_root,
         )
@@ -391,6 +473,7 @@ def test_canonical_batch_encoding_metadata_is_consumable_by_spike_loader(
 def test_spike_label_cli_never_reapplies_gravity_and_rejects_invalid_modes(
     tmp_path: Path,
     capsys,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_root = _data_root(tmp_path)
     spike_root, _ = _write_spike_artifact(tmp_path, data_root)
@@ -437,12 +520,31 @@ def test_spike_label_cli_never_reapplies_gravity_and_rejects_invalid_modes(
     ) == 2
     assert "not valid for --input-kind spike-imu" in capsys.readouterr().err
 
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(4),
+            "frame_timestamp_raw": [1_000_000.0, 1_001_000.0, 1_002_000.0, 1_003_000.0],
+            "chunk_index": 0,
+            "contact_count": [0, 0, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(4)}),
+            chunk_paths=(board_path,),
+        ),
+    )
+
     assert segment_ring_imu.main(
         [*common[:-2], "--output-root", str(tmp_path / "aligned-cli-output"),
          "--boundary-mode", "aligned-board-events",
          "--alignment-offset-root", str(tmp_path / "offsets")]
     ) == 2
-    assert "alignment offset is required" in capsys.readouterr().err
+    assert "alignment outcome validation failed" in capsys.readouterr().err
 
 
 def test_spike_board_assist_publishes_21_channels_and_board_targets(
@@ -458,12 +560,8 @@ def test_spike_board_assist_publishes_21_channels_and_board_targets(
         expected_sampling_rate_hz=1_000.0,
     )
     offset_root = tmp_path / "offsets"
-    write_alignment_offset_txt(
-        _matching_spike_offset(feature_input),
-        output_path=(
-            offset_root / "writer_a" / "action_letters" / "0_ring_board_offset.txt"
-        ),
-    )
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
     frames = pd.DataFrame(
         {
             "global_frame_index": np.arange(6),
@@ -484,8 +582,10 @@ def test_spike_board_assist_publishes_21_channels_and_board_targets(
         lambda _recording: SimpleNamespace(
             frames=frames,
             contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
+            chunk_paths=(board_path,),
         ),
     )
+    _publish_spike_success_outcome(offset_root, feature_input, board_path)
 
     result = segment_user_action_by_aligned_board_events(
         data_root=data_root,
@@ -512,6 +612,9 @@ def test_spike_board_assist_publishes_21_channels_and_board_targets(
     assert result.summary["channel_count"] == 21
     assert result.summary["alignment_input_hash_match_verified"] is True
     assert result.summary["board_event_targets_present"] is True
+    assert result.summary["source_recording_count"] == 1
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == 0
     assert result.summary["feature_values_sha256"] == [feature_input.values_sha256]
     assert result.summary["timestamps_sha256"] == [feature_input.timestamps_sha256]
     assert result.output_paths.board_event_targets_path.is_file()
@@ -937,9 +1040,9 @@ def test_real_raw_and_spike_alignment_are_representation_invariant(
 @pytest.mark.parametrize(
     ("field", "replacement", "message"),
     [
-        ("alignment_signal_source", "raw-ring", "signal source"),
-        ("feature_values_sha256", "0" * 64, "feature values SHA-256"),
-        ("timestamp_sha256", "1" * 64, "timestamp SHA-256"),
+        ("alignment_signal_source", "raw-ring", "alignment outcome validation"),
+        ("feature_values_sha256", "0" * 64, "alignment outcome validation"),
+        ("timestamp_sha256", "1" * 64, "alignment outcome validation"),
     ],
 )
 def test_spike_board_assist_rejects_stale_alignment_provenance(
@@ -958,17 +1061,29 @@ def test_spike_board_assist_rejects_stale_alignment_provenance(
         expected_sampling_rate_hz=1_000.0,
     )
     offset_root = tmp_path / "offsets"
-    write_alignment_offset_txt(
-        replace(_matching_spike_offset(feature_input), **{field: replacement}),
-        output_path=(
-            offset_root / "writer_a" / "action_letters" / "0_ring_board_offset.txt"
-        ),
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(4),
+            "frame_timestamp_raw": [1_000_000.0, 1_001_000.0, 1_002_000.0, 1_003_000.0],
+            "chunk_index": 0,
+            "contact_count": [0, 0, 0, 0],
+        }
     )
     monkeypatch.setattr(
         "writingring.board_event_segmentation.load_board",
-        lambda _recording: (_ for _ in ()).throw(
-            AssertionError("Board must not load before provenance validation")
+        lambda _recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(4)}),
+            chunk_paths=(board_path,),
         ),
+    )
+    _publish_spike_success_outcome(
+        offset_root,
+        feature_input,
+        board_path,
+        offset=replace(_matching_spike_offset(feature_input), **{field: replacement}),
     )
 
     with pytest.raises(BoardEventSegmentationError, match=message):

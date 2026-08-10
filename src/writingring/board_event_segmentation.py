@@ -25,10 +25,14 @@ from writingring.alignment_io import (
     ALIGNMENT_WORK_AXIS_DOMAIN,
     AlignmentOffset,
     AlignmentOffsetExportError,
+    AlignmentOutcomeError,
     apply_board_to_ring_offset,
-    build_alignment_offset_path,
+    build_alignment_input_provenance,
+    build_board_chunk_provenance,
     build_offset_domain_timestamps,
+    read_alignment_skip_artifact,
     read_alignment_offset_txt,
+    validate_alignment_outcome,
     validate_alignment_feature_provenance,
 )
 from writingring.discovery import Recording
@@ -735,13 +739,11 @@ def segment_user_action_by_aligned_board_events(
                 expected_sampling_rate_hz=expected_sampling_rate_hz,
             )
             preloaded_feature_inputs[recording.dataset_id] = feature_input
-        try:
-            validate_common_feature_sampling_rate(
-                tuple(preloaded_feature_inputs[recording.dataset_id] for recording in selected)
-            )
-        except RecordingFeatureError as error:
-            raise BoardEventSegmentationError(str(error)) from error
-    paths.output_directory.parent.mkdir(parents=True, exist_ok=True)
+    output_parent = paths.output_directory.parent
+    output_root_directory = output_parent.parent
+    output_parent_existed = output_parent.exists()
+    output_root_existed = output_root_directory.exists()
+    output_parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(
             prefix=f".{paths.output_directory.name}.",
@@ -749,7 +751,7 @@ def segment_user_action_by_aligned_board_events(
         )
     )
     try:
-        artifacts = _build_aligned_recording_artifacts(
+        recording_artifacts = _build_aligned_recording_artifacts(
             selected,
             staging_directory=staging,
             alignment_offset_root=Path(alignment_offset_root),
@@ -767,7 +769,7 @@ def segment_user_action_by_aligned_board_events(
             verification_error=SegmentationVerificationError,
         )
         result = _aggregate_and_write_aligned_outputs(
-            artifacts,
+            recording_artifacts,
             user=user,
             action=action,
             output_directory=staging,
@@ -790,6 +792,16 @@ def segment_user_action_by_aligned_board_events(
     except Exception:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
+        for directory, existed in (
+            (output_parent, output_parent_existed),
+            (output_root_directory, output_root_existed),
+        ):
+            if existed or not directory.exists():
+                continue
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
         raise
 
 
@@ -804,6 +816,24 @@ class _RecordingArtifacts:
     offset: AlignmentOffset
     offset_path: Path
     verification_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _SkippedRecordingArtifacts:
+    """One provenance-valid recording-level alignment skip."""
+
+    recording: Recording
+    reason: str
+    diagnostics: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class _AlignedRecordingArtifacts:
+    """All selected recordings partitioned by validated alignment outcome."""
+
+    processed: tuple[_RecordingArtifacts, ...]
+    skipped: tuple[_SkippedRecordingArtifacts, ...]
+    source_recording_count: int
 
 
 def _build_aligned_recording_artifacts(
@@ -821,31 +851,21 @@ def _build_aligned_recording_artifacts(
     build_verification_path: object,
     create_verification_figure: object,
     verification_error: type[Exception],
-) -> tuple[_RecordingArtifacts, ...]:
-    """Complete every verification before allowing data into aggregate buffers."""
+) -> _AlignedRecordingArtifacts:
+    """Validate outcomes, then prepare only SUCCESS recordings for export.
+
+    Feature and Board inputs are loaded before the public alignment outcome
+    validator so both completed states are checked against current
+    provenance.  A validated SKIPPED recording is retained only as an audit
+    detail; it never enters label, event, segment, verification, or aggregate
+    processing.
+    """
 
     artifacts: list[_RecordingArtifacts] = []
+    skipped_recordings: list[_SkippedRecordingArtifacts] = []
+    report_root = Path(alignment_offset_root).parent / "reports"
+    verification_root = Path(alignment_offset_root).parent / "verification"
     for recording in recordings:
-        if recording.timestamp_path is None:
-            raise BoardEventSegmentationError(
-                f"dataset {recording.dataset_id} is missing its timestamp label file"
-            )
-        offset_path = build_alignment_offset_path(
-            alignment_offset_root,
-            user=recording.user,
-            action=recording.action,
-            dataset_id=recording.dataset_id,
-        )
-        if not offset_path.is_file():
-            raise BoardEventSegmentationError(
-                "alignment offset is required for aligned-board-events segmentation: "
-                f"{recording.user}/{recording.action}/dataset {recording.dataset_id}"
-            )
-        offset = read_recording_alignment_offset(offset_path, recording=recording)
-        if config.require_successful_alignment and not offset.alignment_success:
-            raise BoardEventSegmentationError(
-                f"alignment was not successful for dataset {recording.dataset_id}"
-            )
         if preloaded_feature_inputs is None:
             feature_input = _load_alignment_feature_input(
                 recording,
@@ -863,6 +883,68 @@ def _build_aligned_recording_artifacts(
                 ) from error
         ring_imu = feature_input.values
         timestamps = feature_input.timestamps_us
+
+        try:
+            board = load_board(recording)
+        except BoardLoadError as error:
+            raise BoardEventSegmentationError(
+                f"could not load Board data for dataset {recording.dataset_id}: {error}"
+            ) from error
+        try:
+            input_provenance = build_alignment_input_provenance(feature_input)
+            board_provenance = build_board_chunk_provenance(board)
+            outcome = validate_alignment_outcome(
+                alignment_offset_root,
+                verification_root,
+                report_root,
+                expected_recording={
+                    "user": recording.user,
+                    "action": recording.action,
+                    "dataset_id": recording.dataset_id,
+                },
+                expected_input_provenance=input_provenance,
+                expected_board_provenance=board_provenance,
+            )
+        except AlignmentOutcomeError as error:
+            raise BoardEventSegmentationError(
+                f"alignment outcome validation failed for dataset "
+                f"{recording.dataset_id}: {error}"
+            ) from error
+
+        if outcome.is_skipped:
+            try:
+                skip = read_alignment_skip_artifact(
+                    outcome.paths.skip_json_path,
+                    expected_user=recording.user,
+                    expected_action=recording.action,
+                    expected_dataset_id=recording.dataset_id,
+                    expected_input_provenance=input_provenance,
+                    expected_board_provenance=board_provenance,
+                )
+            except AlignmentOutcomeError as error:
+                raise BoardEventSegmentationError(
+                    f"alignment skip validation failed for dataset "
+                    f"{recording.dataset_id}: {error}"
+                ) from error
+            skipped_recordings.append(
+                _SkippedRecordingArtifacts(
+                    recording=recording,
+                    reason=skip.reason,
+                    diagnostics=dict(skip.diagnostics),
+                )
+            )
+            continue
+        if not outcome.is_success:
+            raise BoardEventSegmentationError(
+                f"alignment outcome for dataset {recording.dataset_id} is not SUCCESS"
+            )
+
+        offset_path = outcome.paths.offset_txt_path
+        offset = read_recording_alignment_offset(offset_path, recording=recording)
+        if config.require_successful_alignment and not offset.alignment_success:
+            raise BoardEventSegmentationError(
+                f"alignment was not successful for dataset {recording.dataset_id}"
+            )
         if input_kind == "spike-imu":
             try:
                 validate_alignment_feature_provenance(offset, feature_input)
@@ -883,6 +965,10 @@ def _build_aligned_recording_artifacts(
                 f"could not build alignment boundary axis for dataset "
                 f"{recording.dataset_id}: {error}"
             ) from error
+        if recording.timestamp_path is None:
+            raise BoardEventSegmentationError(
+                f"dataset {recording.dataset_id} is missing its timestamp label file"
+            )
         source_labels = load_timestamp_labels(recording.timestamp_path)
         boundary_labels = _labels_in_boundary_domain(
             source_labels,
@@ -891,12 +977,6 @@ def _build_aligned_recording_artifacts(
             offset_us=offset.boundary_offset_us,
             label_time_domain=config.label_time_domain,
         )
-        try:
-            board = load_board(recording)
-        except BoardLoadError as error:
-            raise BoardEventSegmentationError(
-                f"could not load Board data for dataset {recording.dataset_id}: {error}"
-            ) from error
         prepared = prepare_complete_board_events(
             board.frames,
             board.contacts,
@@ -972,11 +1052,15 @@ def _build_aligned_recording_artifacts(
                 verification_path=verification_path,
             )
         )
-    return tuple(artifacts)
+    return _AlignedRecordingArtifacts(
+        processed=tuple(artifacts),
+        skipped=tuple(skipped_recordings),
+        source_recording_count=len(recordings),
+    )
 
 
 def _aggregate_and_write_aligned_outputs(
-    artifacts: Sequence[_RecordingArtifacts],
+    recording_artifacts: _AlignedRecordingArtifacts,
     *,
     user: str,
     action: str,
@@ -987,6 +1071,12 @@ def _aggregate_and_write_aligned_outputs(
     input_kind: str,
     published_output_directory: Path,
 ) -> BoardEventUserActionSegmentationResult:
+    if not recording_artifacts.processed:
+        raise BoardEventSegmentationError(
+            "aligned-board-events segmentation requires at least one SUCCESS "
+            "alignment outcome; all selected recordings were SKIPPED"
+        )
+    artifacts = recording_artifacts.processed
     all_samples: list[BoardEventSegmentedSample] = []
     manifest_rows: list[dict[str, object]] = []
     event_rows: list[dict[str, object]] = []
@@ -1042,7 +1132,7 @@ def _aggregate_and_write_aligned_outputs(
         channel_count=channel_count,
     )
     summary = _aligned_summary(
-        artifacts,
+        recording_artifacts,
         samples=all_samples,
         output_dtype=np.dtype(config.output_dtype),
         alignment_offset_root=alignment_offset_root,
@@ -1419,7 +1509,7 @@ def _event_target_channel(event: object) -> int | None:
 
 
 def _aligned_summary(
-    artifacts: Sequence[_RecordingArtifacts],
+    recording_artifacts: _AlignedRecordingArtifacts,
     *,
     samples: Sequence[BoardEventSegmentedSample],
     output_dtype: np.dtype,
@@ -1428,6 +1518,7 @@ def _aligned_summary(
     gravity_config: GravityRemovalConfig | None,
     input_kind: str,
 ) -> dict[str, object]:
+    artifacts = recording_artifacts.processed
     if not artifacts:
         raise BoardEventSegmentationError("aligned summary requires at least one recording")
     feature_inputs = [artifact.feature_input for artifact in artifacts]
@@ -1528,6 +1619,21 @@ def _aligned_summary(
         "board_event_target_channels": ["valid_press", "valid_lift", "transient_press", "transient_lift"],
         "boundary_source_counts": dict(sorted(boundary_counts.items())),
         "recording_count": len(artifacts),
+        "source_recording_count": recording_artifacts.source_recording_count,
+        "processed_recording_count": len(artifacts),
+        "skipped_recording_count": len(recording_artifacts.skipped),
+        "recording_skips": [
+            {
+                "identity": {
+                    "user": skipped.recording.user,
+                    "action": skipped.recording.action,
+                    "dataset_id": skipped.recording.dataset_id,
+                },
+                "reason": skipped.reason,
+                "diagnostics": dict(skipped.diagnostics),
+            }
+            for skipped in recording_artifacts.skipped
+        ],
         "verification_image_count": len(verification_paths),
         "recordings_without_verification": [
             artifact.recording.dataset_id

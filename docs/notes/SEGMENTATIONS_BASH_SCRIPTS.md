@@ -96,11 +96,23 @@ or user segmentation command stops the run. Label mode adds only
 `--overwrite` to segmentation because it does not create verification images;
 Board mode additionally passes `--overwrite-verification`.
 
-Before reporting success, the shared QA checks compare discovered `ring_0`,
-preprocessing-summary, SpikeIMU, Board-offset (aligned mode), per-user
-segmentation-summary, and padded-summary counts. It also verifies canonical
-timestamp sidecars, metadata, matrices, manifests, Board targets/audits, the
-`(N, 21)` SpikeIMU contract, and that padded source/exported/skipped counts
+For aligned-Board mode, alignment explicitly permits the defined initial
+interval skip policy. The alignment stage validates one provenance-current
+Python outcome for every discovered recording: `SUCCESS` proceeds to Board
+segmentation and `SKIPPED` is a completed recording outcome that segmentation
+omits. Missing, stale, malformed, conflicting, or `FAILED` outcomes invalidate
+the whole stage and retain the existing full-rebuild `continue` behavior. Bash
+does not parse alignment TXT or JSON artifacts; it only consumes the validated
+terminal status returned by the Python outcome contract.
+
+Before reporting success, the shared QA validates every aligned recording
+through the Python outcome contract and reports total, success, skipped, and
+invalid recording counts. It then reconciles discovered `ring_0`,
+preprocessing-summary, SpikeIMU, per-user segmentation-summary, and
+padded-summary counts; completed recording skips are not expected to produce
+segments. It also verifies canonical timestamp sidecars, metadata, matrices,
+manifests, Board targets/audits for processed recordings, the `(N, 21)`
+SpikeIMU contract, and that padded source/exported/segment-skipped counts
 reconcile. Logs contain discovery, per-recording preprocessing and alignment,
 one encoding log, per-user segmentation, padding analysis/publish output, and
 QA output.

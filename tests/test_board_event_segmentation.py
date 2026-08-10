@@ -7,7 +7,16 @@ import pandas as pd
 import pytest
 
 import writingring.board_event_segmentation as board_event_segmentation
-from writingring.alignment_io import AlignmentOffset, write_alignment_offset_txt
+from writingring.alignment_io import (
+    AlignmentOffset,
+    build_alignment_input_provenance,
+    build_alignment_outcome_paths,
+    build_board_chunk_provenance,
+    make_alignment_skip_artifact,
+    publish_alignment_success,
+    publish_alignment_skip,
+    write_alignment_offset_txt,
+)
 from writingring.board_event_segmentation import (
     ALIGNED_BOARD_EVENT_COLUMNS,
     ALIGNED_TOUCH_PAIR_COLUMNS,
@@ -19,10 +28,12 @@ from writingring.board_event_segmentation import (
     segment_recording_by_aligned_board_events,
     segment_user_action_by_aligned_board_events,
 )
-from writingring.discovery import Recording
+from writingring.discovery import Recording, discover_recordings
+from writingring.recording_features import load_raw_ring_features
 from writingring.segmentation import SegmentLabel, segment_user_action
 from writingring.segmentation_verification import SegmentationVerificationError
 from writingring.gravity import GravityRemovalConfig
+from writingring.event_alignment import InitialIntervalNoUsablePairError
 
 
 def _ring(*, end_us: int = 15_000_000) -> tuple[np.ndarray, np.ndarray]:
@@ -35,6 +46,116 @@ def _labels(*values: tuple[float, str]) -> tuple[SegmentLabel, ...]:
     return tuple(
         SegmentLabel(timestamp_us=timestamp, label=label, source_line_number=index)
         for index, (timestamp, label) in enumerate(values, start=1)
+    )
+
+
+def _publish_raw_success_outcome(
+    data_root: Path,
+    offset_root: Path,
+    board_path: Path,
+    *,
+    dataset_id: int = 0,
+    offset: AlignmentOffset | None = None,
+) -> None:
+    """Publish the complete current outcome family for a raw fixture."""
+
+    recording = next(
+        item for item in discover_recordings(data_root) if item.dataset_id == dataset_id
+    )
+    feature = load_raw_ring_features(recording)
+    input_provenance = build_alignment_input_provenance(feature)
+    board_provenance = build_board_chunk_provenance((board_path,))
+    paths = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user=recording.user,
+        action=recording.action,
+        dataset_id=recording.dataset_id,
+    )
+    verification_source = offset_root.parent / f"{dataset_id}-alignment-source.png"
+    verification_source.write_bytes(b"alignment verification")
+    publish_alignment_success(
+        paths,
+        offset=offset
+        or AlignmentOffset(
+            user=recording.user,
+            action=recording.action,
+            dataset_id=recording.dataset_id,
+            ring_stream="ring_0",
+            offset_us=0.0,
+            alignment_model="constant_offset",
+            alignment_success=True,
+            event_coverage_ratio=1.0,
+            matched_event_count=2,
+            total_valid_event_count=2,
+        ),
+        report={
+            "recording": {
+                "user": recording.user,
+                "action": recording.action,
+                "dataset_id": recording.dataset_id,
+            },
+            "input_provenance": input_provenance,
+            "board_provenance": board_provenance,
+        },
+        verification_path=verification_source,
+    )
+
+
+def _publish_raw_skipped_outcome(
+    data_root: Path,
+    offset_root: Path,
+    board_path: Path,
+    *,
+    dataset_id: int,
+) -> None:
+    """Publish one strict provenance-valid SKIPPED outcome for a fixture."""
+
+    recording = next(
+        item for item in discover_recordings(data_root) if item.dataset_id == dataset_id
+    )
+    feature = load_raw_ring_features(recording)
+    input_provenance = build_alignment_input_provenance(feature)
+    board_provenance = build_board_chunk_provenance((board_path,))
+    paths = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user=recording.user,
+        action=recording.action,
+        dataset_id=recording.dataset_id,
+    )
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=0,
+        next_global_frame_index=1,
+        previous_timestamp_raw=1_000_000,
+        next_timestamp_raw=999_000,
+        prefix_boundary_position=1,
+        last_pre_jump_global_frame_index=0,
+        total_global_valid_pair_count=1,
+        usable_prefix_valid_pair_count=0,
+    )
+    skip = make_alignment_skip_artifact(
+        error,
+        user=recording.user,
+        action=recording.action,
+        dataset_id=recording.dataset_id,
+        input_provenance=input_provenance,
+        board_provenance=board_provenance,
+    )
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report={
+            "recording": {
+                "user": recording.user,
+                "action": recording.action,
+                "dataset_id": recording.dataset_id,
+            },
+            "input_provenance": input_provenance,
+            "board_provenance": board_provenance,
+        },
     )
 
 
@@ -522,15 +643,8 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     rows.astype(np.float64).tofile(action_dir / "0_ring_0.bin")
     (action_dir / "0_timestamp.txt").write_text("1000000 a\n3000000 b\n", encoding="utf-8")
     offset_root = tmp_path / "offsets"
-    offset_path = offset_root / "user_0" / "action_0" / "0_ring_board_offset.txt"
-    write_alignment_offset_txt(
-        AlignmentOffset(
-            user="user_0", action="0", dataset_id=0, ring_stream="ring_0",
-            offset_us=0.0, alignment_model="constant_offset", alignment_success=True,
-            event_coverage_ratio=1.0, matched_event_count=2, total_valid_event_count=2,
-        ),
-        output_path=offset_path,
-    )
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
     frames = pd.DataFrame(
         {
             "global_frame_index": np.arange(10),
@@ -544,8 +658,17 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     )
     monkeypatch.setattr(
         "writingring.board_event_segmentation.load_board",
-        lambda recording: type("Board", (), {"frames": frames, "contacts": pd.DataFrame({"global_frame_index": np.arange(10)})})(),
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
+                "chunk_paths": (board_path,),
+            },
+        )(),
     )
+    _publish_raw_success_outcome(data_root, offset_root, board_path)
 
     result = segment_user_action_by_aligned_board_events(
         data_root=data_root,
@@ -562,6 +685,10 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     assert result.segment_offsets.shape == (len(result.labels) + 1,)
     assert result.summary["verification_image_count"] == 1
     assert result.summary["recordings_without_verification"] == []
+    assert result.summary["source_recording_count"] == 1
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == 0
+    assert result.summary["recording_skips"] == []
     assert (base / "0_ring_0_segmentation_verification.png").is_file()
     assert result.output_paths.board_events_csv_path.is_file()
     assert len(result.manifest) == 2
@@ -589,14 +716,246 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     assert result.output_paths.raw_imu_path.is_file()
 
 
-def test_user_action_aligned_mode_rejects_missing_offset_without_publishing(tmp_path: Path) -> None:
+def test_user_action_mixed_success_and_skipped_excludes_recording_skip_from_outputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     data_root = tmp_path / "data"
     action_dir = data_root / "user_0" / "0"
     action_dir.mkdir(parents=True)
-    np.zeros((10, 7), dtype=np.float64).tofile(action_dir / "0_ring_0.bin")
-    (action_dir / "0_timestamp.txt").write_text("0 a\n", encoding="utf-8")
+    for dataset_id in (0, 1):
+        timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+        rows = np.column_stack(
+            (
+                np.zeros((len(timestamps), 2)),
+                np.full(len(timestamps), 9.8),
+                np.zeros((len(timestamps), 3)),
+                timestamps,
+            )
+        )
+        rows.astype(np.float64).tofile(action_dir / f"{dataset_id}_ring_0.bin")
+    (action_dir / "0_timestamp.txt").write_text(
+        "1000000 a\n3000000 b\n", encoding="utf-8"
+    )
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for path in board_paths.values():
+        path.write_bytes(b"board provenance")
+    _publish_raw_success_outcome(
+        data_root, offset_root, board_paths[0], dataset_id=0
+    )
+    _publish_raw_skipped_outcome(
+        data_root, offset_root, board_paths[1], dataset_id=1
+    )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(10),
+            "frame_timestamp_raw": [
+                1_000_000,
+                1_500_000,
+                1_600_000,
+                1_700_000,
+                1_800_000,
+                1_900_000,
+                2_000_000,
+                2_100_000,
+                2_200_000,
+                2_300_000,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
+                "chunk_paths": (board_paths[recording.dataset_id],),
+            },
+        )(),
+    )
 
-    with pytest.raises(BoardEventSegmentationError, match="alignment offset is required"):
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="user_0",
+        action="0",
+        output_root=tmp_path / "outputs",
+        alignment_offset_root=offset_root,
+    )
+
+    assert result.summary["source_recording_count"] == 2
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == 1
+    assert result.summary["skipped_segment_count"] == 1
+    assert result.summary["recording_skips"] == [
+        {
+            "identity": {"user": "user_0", "action": "0", "dataset_id": 1},
+            "reason": "initial_interval_no_usable_pair",
+            "diagnostics": {
+                "previous_global_frame_index": 0,
+                "next_global_frame_index": 1,
+                "previous_timestamp_raw": 1_000_000.0,
+                "next_timestamp_raw": 999_000.0,
+                "prefix_boundary_position": 1,
+                "last_pre_jump_global_frame_index": 0,
+                "total_global_valid_pair_count": 1,
+                "usable_prefix_valid_pair_count": 0,
+            },
+        }
+    ]
+    assert set(result.manifest["dataset_id"]) == {0}
+    assert set(result.board_events["dataset_id"]) == {0}
+    assert result.summary["verification_image_count"] == 1
+
+
+def test_user_action_stale_skipped_outcome_fails_before_labels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+    rows = np.column_stack(
+        (
+            np.zeros((len(timestamps), 2)),
+            np.full(len(timestamps), 9.8),
+            np.zeros((len(timestamps), 3)),
+            timestamps,
+        )
+    )
+    rows.astype(np.float64).tofile(action_dir / "0_ring_0.bin")
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
+    _publish_raw_skipped_outcome(
+        data_root, tmp_path / "offsets", board_path, dataset_id=0
+    )
+    board_path.write_bytes(b"stale board provenance")
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda _recording: type(
+            "Board",
+            (),
+            {
+                "frames": pd.DataFrame(),
+                "contacts": pd.DataFrame(),
+                "chunk_paths": (board_path,),
+            },
+        )(),
+    )
+
+    with pytest.raises(BoardEventSegmentationError, match="alignment outcome validation failed"):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="user_0",
+            action="0",
+            output_root=tmp_path / "outputs",
+            alignment_offset_root=tmp_path / "offsets",
+        )
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_user_action_all_skipped_fails_before_empty_aggregate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    for dataset_id in (0, 1):
+        timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+        rows = np.column_stack(
+            (
+                np.zeros((len(timestamps), 2)),
+                np.full(len(timestamps), 9.8),
+                np.zeros((len(timestamps), 3)),
+                timestamps,
+            )
+        )
+        rows.astype(np.float64).tofile(action_dir / f"{dataset_id}_ring_0.bin")
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for dataset_id, path in board_paths.items():
+        path.write_bytes(b"board provenance")
+        _publish_raw_skipped_outcome(
+            data_root, offset_root, path, dataset_id=dataset_id
+        )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": pd.DataFrame(),
+                "contacts": pd.DataFrame(),
+                "chunk_paths": (board_paths[recording.dataset_id],),
+            },
+        )(),
+    )
+
+    with pytest.raises(BoardEventSegmentationError, match="at least one SUCCESS"):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="user_0",
+            action="0",
+            output_root=tmp_path / "outputs",
+            alignment_offset_root=offset_root,
+        )
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_user_action_aligned_mode_rejects_missing_outcome_without_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+    rows = np.column_stack(
+        (
+            np.zeros((len(timestamps), 2)),
+            np.full(len(timestamps), 9.8),
+            np.zeros((len(timestamps), 3)),
+            timestamps,
+        )
+    )
+    rows.astype(np.float64).tofile(action_dir / "0_ring_0.bin")
+    (action_dir / "0_timestamp.txt").write_text("0 a\n", encoding="utf-8")
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(4),
+            "frame_timestamp_raw": [1_000_000, 1_100_000, 1_200_000, 1_300_000],
+            "chunk_index": 0,
+            "contact_count": [0, 0, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda _recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(4)}),
+                "chunk_paths": (board_path,),
+            },
+        )(),
+    )
+
+    with pytest.raises(BoardEventSegmentationError, match="alignment outcome validation failed"):
         segment_user_action_by_aligned_board_events(
             data_root=data_root,
             user="user_0",
@@ -669,14 +1028,8 @@ def test_verification_failure_preserves_existing_aligned_output(
     rows.astype(np.float64).tofile(action_dir / "0_ring_0.bin")
     (action_dir / "0_timestamp.txt").write_text("1000000 a\n3000000 b\n", encoding="utf-8")
     offset_root = tmp_path / "offsets"
-    write_alignment_offset_txt(
-        AlignmentOffset(
-            user="user_0", action="0", dataset_id=0, ring_stream="ring_0",
-            offset_us=0.0, alignment_model="constant_offset", alignment_success=True,
-            event_coverage_ratio=1.0, matched_event_count=2, total_valid_event_count=2,
-        ),
-        output_path=offset_root / "user_0" / "action_0" / "0_ring_board_offset.txt",
-    )
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
     frames = pd.DataFrame(
         {
             "global_frame_index": np.arange(5),
@@ -687,8 +1040,17 @@ def test_verification_failure_preserves_existing_aligned_output(
     )
     monkeypatch.setattr(
         "writingring.board_event_segmentation.load_board",
-        lambda recording: type("Board", (), {"frames": frames, "contacts": pd.DataFrame({"global_frame_index": np.arange(5)})})(),
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(5)}),
+                "chunk_paths": (board_path,),
+            },
+        )(),
     )
+    _publish_raw_success_outcome(data_root, offset_root, board_path)
 
     def fail_verification(**kwargs: object) -> None:
         raise SegmentationVerificationError("simulated PNG write failure")

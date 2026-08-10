@@ -16,17 +16,23 @@ canonical timestamp source; preprocessing/gravity flags are invalid.
 
 ## Run aligned mode
 
-Create a successful Ring--Board offset for every recording first. The offset
-root must follow the alignment export layout:
+Create a validated Ring--Board outcome for every recording first. The aligned
+outcome family uses sibling roots:
 
 ```text
-outputs/alignment/offsets/
-└── user_0/
-    └── action_0/
-        ├── 0_ring_board_offset.txt
-        ├── 1_ring_board_offset.txt
-        └── ...
+outputs/alignment/
+├── offsets/
+├── reports/
+└── verification/
 ```
+
+Segmentation receives the `offsets/` root and derives the sibling report and
+verification roots. It validates current feature and numeric-order Board
+provenance before loading labels or preparing Board events. `SUCCESS` records
+are segmented normally. A provenance-valid `SKIPPED` record is omitted without
+requiring a timestamp label, and does not enter sampling-rate or aggregate
+calculations. `FAILED`, missing, stale, malformed, or conflicting outcomes
+hard fail.
 
 Then run:
 
@@ -40,18 +46,20 @@ conda run --no-capture-output -n writingring-viz \
     --alignment-offset-root outputs/alignment/offsets
 ```
 
-The command never estimates an offset. A missing, unsuccessful, malformed, or
-identity-mismatched offset fails the run; it does not fall back to `label`.
+The command never estimates an offset. An invalid outcome never falls back to
+`label`. If every selected recording is provenance-valid `SKIPPED`, the command
+fails explicitly before aggregate output construction.
 Use `--overwrite` to replace an existing complete aligned output set.
 
 For `--input-kind spike-imu`, all selected artifacts are loaded before staging
-is created. Each artifact is checked against an explicitly supplied
+is created. Each processed (`SUCCESS`) artifact is checked against an explicitly supplied
 `--sampling-rate` when present, then the metadata rates are compared across the
 user/action with absolute tolerance `1e-12`. Mixed rates fail with both
 conflicting dataset IDs and rates, and no aggregate or staging directory is
 published. A successful aggregate records the validated common rate in its
-top-level `sampling_rate_hz`; raw-ring mode retains its existing processing and
-offset-validation order.
+top-level `sampling_rate_hz`; recording-level skips do not participate in that
+comparison. Raw-ring mode retains its existing processing and
+outcome-validation order.
 
 ## Boundary semantics
 
@@ -153,10 +161,17 @@ For SpikeIMU mode the feature file is named `*_spikeIMU.npy`, has shape
 count. The output summary records `feature_schema`, channel slices
 `[0,15]`, `[15,18]`, `[18,21]`, and per-recording feature/metadata/timestamp
 hashes, plus the single validated common `sampling_rate_hz`. Before Board
-loading or slicing, the offset must prove the same recording identity and all
-of those hashes; a raw-ring or stale SpikeIMU offset is rejected.
+event preparation or slicing, the validated outcome must prove the same
+recording identity and all of those hashes; a raw-ring or stale SpikeIMU
+outcome is rejected.
 
 Each verification image covers the full Ring recording in vertically stacked
 10-second panels. It shows the caller-final segment boundaries only, plus the
 aligned Board event lines, labels, skipped labels, and transient score. If its
 PNG cannot be written and validated, no partial aggregate output is published.
+
+The segmentation summary retains `skipped_segment_count` for segment-level
+policy skips and additionally records `source_recording_count`,
+`processed_recording_count`, `skipped_recording_count`, and `recording_skips`.
+Each recording-skip entry includes its identity, validated reason, and
+diagnostics.

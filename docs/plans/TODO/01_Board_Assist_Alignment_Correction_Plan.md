@@ -1,5 +1,34 @@
 # Plan: Board-Assisted Alignment Skippable Outcome Correction
 
+## Active follow-up revision — Board-Assisted Alignment Outcome Follow-up Correction
+
+This revision supersedes the completion claim for the initial T1/T2 work. The
+active implementation DAG is:
+
+```text
+T1R Event-prefix correction
+        |
+        v
+T2R Outcome-contract correction
+      /   \
+     v     v
+T3 Action0  T4 Board segmentation
+      \   /
+       v v
+T5 End-to-end verification and state cleanup
+```
+
+The final contract is that a usable Board pair, and every event derived for
+alignment, must be wholly inside the initial monotonic prefix; `FAILED` is not
+a completed transition; malformed outcome reports always fail through the
+public alignment-outcome error family; and a `SKIPPED` artifact proves its
+reason with self-consistent diagnostics. T1R and T2R must each repeat the
+probe → freeze → implementation → fresh-verifier lifecycle before their
+respective corrected behavior may be recorded as DONE.
+
+The revision does not redesign alignment ranking, timestamp repair/sorting,
+skip reasons, per-recording Action0 resume, padding, SNN, or notebooks.
+
 ## 1. 目标
 
 当一个 Board recording 同时满足以下条件时：

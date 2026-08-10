@@ -35,6 +35,7 @@ from writingring.alignment_io import (
     publish_alignment_skip,
     publish_alignment_success,
     read_alignment_offset_txt,
+    read_alignment_outcome_report,
     read_alignment_skip_artifact,
     sha256_array,
     validate_alignment_outcome,
@@ -930,6 +931,232 @@ def test_alignment_success_skip_transition_requires_gate_and_cleans_opposite(
     )
     assert paths.offset_txt_path.is_file()
     assert not paths.skip_json_path.exists()
+
+
+def test_failed_to_success_uses_normal_artifact_overwrite_flags(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, offset, source, report = _outcome_fixture(tmp_path)
+    publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.FAILED,
+        report=report,
+    )
+
+    paths.offset_txt_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.offset_txt_path.write_bytes(b"stale offset")
+    paths.verification_png_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.verification_png_path.write_bytes(b"stale verification")
+
+    with pytest.raises(AlignmentOutcomeError, match="offset output"):
+        publish_alignment_success(
+            paths,
+            offset=offset,
+            report=report,
+            verification_path=source,
+            overwrite_outcome=True,
+            overwrite_report=True,
+        )
+
+    # FAILED is report-only and does not require completed-state authorization;
+    # each target is still protected by its ordinary overwrite flag.
+    publish_alignment_success(
+        paths,
+        offset=offset,
+        report=report,
+        verification_path=source,
+        overwrite_offset=True,
+        overwrite_verification=True,
+        overwrite_report=True,
+    )
+    outcome = validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+    assert outcome.status is AlignmentOutcomeStatus.SUCCESS
+
+
+def test_failed_to_skip_uses_skip_and_report_overwrite_flags(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, skip, report = _skip_fixture(tmp_path)
+    publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.FAILED,
+        report=report,
+    )
+    write_alignment_skip_artifact(skip, paths.skip_json_path)
+
+    with pytest.raises(AlignmentOutcomeError, match="skip output"):
+        publish_alignment_skip(
+            paths,
+            skip_artifact=skip,
+            report=report,
+            overwrite_outcome=True,
+            overwrite_report=True,
+        )
+
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report=report,
+        overwrite_offset=True,
+        overwrite_report=True,
+    )
+    outcome = validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+    assert outcome.status is AlignmentOutcomeStatus.SKIPPED
+
+
+def test_failed_success_cleans_stale_skip_without_outcome_authorization(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, offset, source, report = _outcome_fixture(tmp_path)
+    publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.FAILED,
+        report=report,
+    )
+    _skip_paths, _skip_input, _skip_board, skip, _skip_report = _skip_fixture(
+        tmp_path / "stale-skip"
+    )
+    write_alignment_skip_artifact(skip, paths.skip_json_path)
+
+    publish_alignment_success(
+        paths,
+        offset=offset,
+        report=report,
+        verification_path=source,
+        overwrite_offset=True,
+        overwrite_verification=True,
+        overwrite_report=True,
+    )
+    assert not paths.skip_json_path.exists()
+    validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+
+
+def test_failed_skip_cleans_stale_success_without_outcome_authorization(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, skip, report = _skip_fixture(tmp_path)
+    publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.FAILED,
+        report=report,
+    )
+    paths.offset_txt_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.offset_txt_path.write_bytes(b"stale offset")
+    paths.verification_png_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.verification_png_path.write_bytes(b"stale verification")
+
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report=report,
+        overwrite_offset=True,
+        overwrite_report=True,
+    )
+    assert not paths.offset_txt_path.exists()
+    assert not paths.verification_png_path.exists()
+    validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("total_global_valid_pair_count", 0),
+        ("usable_prefix_valid_pair_count", 1),
+        ("next_timestamp_raw", 1_001),
+        ("prefix_boundary_position", 0),
+        ("last_pre_jump_global_frame_index", 9),
+        ("previous_global_frame_index", 9),
+        ("next_global_frame_index", 12),
+        ("previous_global_frame_index", "10"),
+    ],
+)
+def test_skip_diagnostics_require_strict_coherent_predicates(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    _paths, _input, _board, skip, _report = _skip_fixture(tmp_path)
+    payload = skip.to_dict()
+    payload["diagnostics"][field] = value  # type: ignore[index]
+
+    with pytest.raises(AlignmentOutcomeError):
+        AlignmentSkipArtifact.from_dict(payload)
+
+
+def test_public_outcome_readers_normalize_missing_and_wrong_manifest_types(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path
+    )
+    report = json.loads(paths.report_path.read_text(encoding="utf-8"))
+    report.pop("outcome_artifacts")
+    paths.report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+    with pytest.raises(AlignmentOutcomeError):
+        read_alignment_outcome_report(paths.report_path)
+
+    report["outcome_artifacts"] = {"filename": "not-a-list"}
+    paths.report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+
+def test_public_skip_reader_normalizes_wrong_json_field_types(
+    tmp_path: Path,
+) -> None:
+    paths, _input, _board, skip, _report = _skip_fixture(tmp_path)
+    payload = skip.to_dict()
+    payload["diagnostics"]["previous_global_frame_index"] = "10"  # type: ignore[index]
+    paths.skip_json_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.skip_json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(AlignmentOutcomeError):
+        read_alignment_skip_artifact(paths.skip_json_path)
+
+
+def test_public_skip_reader_normalizes_oversized_numeric_diagnostics(
+    tmp_path: Path,
+) -> None:
+    paths, _input, _board, skip, _report = _skip_fixture(tmp_path)
+    payload = skip.to_dict()
+    payload["diagnostics"]["previous_timestamp_raw"] = 10**1000  # type: ignore[index]
+    paths.skip_json_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.skip_json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(AlignmentOutcomeError):
+        read_alignment_skip_artifact(paths.skip_json_path)
 
 
 def test_alignment_publication_writes_report_last_and_exports_public_api(
