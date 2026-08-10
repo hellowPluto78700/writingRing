@@ -26,6 +26,8 @@ declare -a RECORD_ACTIONS=()
 declare -a RECORD_DATASET_IDS=()
 declare -a RECORD_DATASET_TOKENS=()
 declare -a PIPELINE_USERS=()
+declare -a PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
+declare -a PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
 declare -A RECORDING_SEEN=()
 declare -A PIPELINE_USER_SEEN=()
 
@@ -93,6 +95,8 @@ pipeline_configure_overwrite_args() {
     ENCODE_OVERWRITE_ARGS=()
     ALIGN_OVERWRITE_ARGS=()
     SEGMENT_OVERWRITE_ARGS=()
+    PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
+    PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
     if [[ "$OVERWRITE" == "1" ]]; then
         PREPROCESS_OVERWRITE_ARGS+=(--overwrite)
         ENCODE_OVERWRITE_ARGS+=(--overwrite)
@@ -104,6 +108,14 @@ pipeline_configure_overwrite_args() {
         )
         SEGMENT_OVERWRITE_ARGS+=(--overwrite)
     fi
+}
+
+pipeline_prepare_downstream_overwrite() {
+    if [[ "$OVERWRITE" == "1" ]]; then
+        return 0
+    fi
+    PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=(--overwrite)
+    PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=(--overwrite)
 }
 
 pipeline_init() {
@@ -448,9 +460,13 @@ pipeline_segment() {
                 --verification-panel-seconds 10
                 --verification-dpi 200
                 "${SEGMENT_OVERWRITE_ARGS[@]}"
+                "${PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS[@]}"
             )
         else
-            command_args+=("${SEGMENT_OVERWRITE_ARGS[@]}")
+            command_args+=(
+                "${SEGMENT_OVERWRITE_ARGS[@]}"
+                "${PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS[@]}"
+            )
         fi
         pipeline_run_logged "$log_path" "${command_args[@]}"
     done
@@ -466,6 +482,7 @@ pipeline_padding() {
         --minimum-coverage "$PADDING_COVERAGE"
         --round-to "$PADDING_ROUND_TO"
     )
+    analysis_args+=("${PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS[@]}")
     if [[ "$OVERWRITE" == "1" ]]; then
         analysis_args+=(--overwrite)
     fi
@@ -481,6 +498,7 @@ pipeline_padding() {
         --sampling-rate "$SAMPLING_RATE"
         --padding-value "$PADDING_VALUE"
     )
+    padding_args+=("${PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS[@]}")
     if [[ "$OVERWRITE" == "1" ]]; then
         padding_args+=(--overwrite)
     fi
@@ -797,6 +815,177 @@ print(f"validated segment package segments={len(lengths)} rows={len(values)}: {v
 ' "$values_path" "$labels_path" "$offsets_path" "$lengths_path" "$summary_path" "$targets_path"
 }
 
+pipeline_compute_alignment_outcome_dependency() {
+    local record_user="$1"
+    local record_action="$2"
+    local validation_log="${QA_LOG:-/dev/null}"
+    local -a command_args=(
+        "${PYTHON_CMD[@]}" -c '
+from contextlib import redirect_stdout
+from io import StringIO
+import json
+from pathlib import Path
+import sys
+
+data_root = Path(sys.argv[1])
+spike_root = Path(sys.argv[2])
+offset_root = Path(sys.argv[3])
+verification_root = Path(sys.argv[4])
+report_root = Path(sys.argv[5])
+user = sys.argv[6]
+action = sys.argv[7]
+
+try:
+    # Keep the helper result typed: loader diagnostics and incidental output
+    # must never be mixed into the JSON consumed by Bash.
+    with redirect_stdout(StringIO()):
+        from writingring.alignment_io import (
+            build_alignment_input_provenance,
+            build_board_chunk_provenance,
+            read_alignment_skip_artifact,
+            validate_alignment_outcome,
+        )
+        from writingring.board_loader import load_board
+        from writingring.discovery import discover_recordings
+        from writingring.preprocessing_io import sha256_file
+        from writingring.recording_features import load_recording_features
+
+        recordings = sorted(
+            (
+                recording
+                for recording in discover_recordings(data_root)
+                if recording.user == user and recording.action == action
+            ),
+            key=lambda recording: recording.dataset_id,
+        )
+        if not recordings:
+            raise ValueError(
+                f"no recordings discovered for {user}/{action}"
+            )
+
+        dependency = {
+            "source_recording_ids": [
+                {
+                    "user": recording.user,
+                    "action": recording.action,
+                    "dataset_id": recording.dataset_id,
+                }
+                for recording in recordings
+            ],
+            "outcomes_by_status": {"SUCCESS": [], "SKIPPED": []},
+        }
+        for recording in recordings:
+            identity = {
+                "user": recording.user,
+                "action": recording.action,
+                "dataset_id": recording.dataset_id,
+            }
+            feature_input = load_recording_features(
+                recording,
+                input_kind="spike-imu",
+                spike_root=spike_root,
+            )
+            board_data = load_board(recording)
+            input_provenance = build_alignment_input_provenance(feature_input)
+            board_provenance = build_board_chunk_provenance(board_data)
+            outcome = validate_alignment_outcome(
+                offset_root,
+                verification_root,
+                report_root,
+                expected_recording=identity,
+                expected_input_provenance=input_provenance,
+                expected_board_provenance=board_provenance,
+            )
+            status = outcome.status_name
+            if status not in {"SUCCESS", "SKIPPED"}:
+                raise ValueError(
+                    f"unsupported alignment outcome status: {status}"
+                )
+            entry = {
+                "identity": identity,
+                "report_sha256": sha256_file(outcome.paths.report_path),
+            }
+            if status == "SKIPPED":
+                skip = read_alignment_skip_artifact(
+                    outcome.paths.skip_json_path,
+                    expected_user=recording.user,
+                    expected_action=recording.action,
+                    expected_dataset_id=recording.dataset_id,
+                    expected_input_provenance=input_provenance,
+                    expected_board_provenance=board_provenance,
+                )
+                entry["reason"] = skip.reason
+            dependency["outcomes_by_status"][status].append(entry)
+except Exception as error:
+    print(f"alignment outcome dependency recomputation failed: {error}", file=sys.stderr)
+    raise SystemExit(1) from error
+
+sys.stdout.write(json.dumps(dependency, sort_keys=True, separators=(",", ":")))
+' \
+        "$DATA_ROOT" \
+        "$SPIKE_ROOT" \
+        "$OFFSET_ROOT" \
+        "$ALIGNMENT_VERIFICATION_ROOT" \
+        "$ALIGNMENT_REPORT_ROOT" \
+        "$record_user" \
+        "$record_action"
+    )
+
+    "${command_args[@]}" 2>>"$validation_log"
+}
+
+pipeline_alignment_outcome_dependency_matches() {
+    local record_user="$1"
+    local record_action="$2"
+    local segment_directory="$SEGMENT_ROOT/$record_user/action_$record_action"
+    local summary_path="$segment_directory/${record_user}_action_${record_action}_segmentation_summary.json"
+    local current_dependency=""
+    local comparison_log="${QA_LOG:-/dev/null}"
+    local -a comparison_args=()
+
+    if ! current_dependency="$(
+        pipeline_compute_alignment_outcome_dependency \
+            "$record_user" "$record_action"
+    )"; then
+        return 2
+    fi
+
+    comparison_args=(
+        "${PYTHON_CMD[@]}" -c '
+import json
+from pathlib import Path
+import sys
+
+summary_path = Path(sys.argv[1])
+expected = json.loads(sys.argv[2])
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+if not isinstance(summary, dict):
+    raise SystemExit("segmentation summary is not a JSON object")
+actual = summary.get("alignment_outcome_dependency")
+if actual != expected:
+    raise SystemExit("alignment outcome dependency is stale")
+' \
+        "$summary_path" \
+        "$current_dependency"
+    )
+    if "${comparison_args[@]}" 2>>"$comparison_log"; then
+        return 0
+    fi
+    return 1
+}
+
+pipeline_alignment_outcome_dependencies_valid() {
+    local record_user dependency_status=0
+    for record_user in "${PIPELINE_USERS[@]}"; do
+        pipeline_alignment_outcome_dependency_matches \
+            "$record_user" "$ACTION" || {
+                dependency_status=$?
+                return "$dependency_status"
+            }
+    done
+    return 0
+}
+
 pipeline_path_has_files() {
     local root="$1"
     local first=""
@@ -932,8 +1121,11 @@ pipeline_force_full_rebuild() {
 
 pipeline_plan_continue() {
     local preprocess_any=0 encode_any=0 alignment_any=0 segment_any=0 padding_any=0
+    local dependency_status=0
     PIPELINE_RESUME_STAGE="preprocess"
     PIPELINE_FORCE_REBUILD=0
+    PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
+    PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
 
     pipeline_preprocess_has_any_output && preprocess_any=1
     pipeline_encode_has_any_output && encode_any=1
@@ -1004,6 +1196,26 @@ pipeline_plan_continue() {
         return 0
     fi
     pipeline_note "segmentation outputs are complete and valid; skipping segmentation"
+
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        pipeline_alignment_outcome_dependencies_valid || dependency_status=$?
+        case "$dependency_status" in
+            0)
+                ;;
+            1)
+                pipeline_prepare_downstream_overwrite
+                PIPELINE_RESUME_STAGE="segment"
+                pipeline_note \
+                    "alignment outcome dependency is stale; resuming from segmentation with downstream overwrite"
+                return 0
+                ;;
+            *)
+                pipeline_force_full_rebuild \
+                    "alignment outcome dependency could not be recomputed"
+                return 0
+                ;;
+        esac
+    fi
 
     if [[ "$padding_any" == "0" ]]; then
         PIPELINE_RESUME_STAGE="padding"
@@ -1124,6 +1336,21 @@ pipeline_qa() {
             pipeline_die \
                 "alignment outcome validation failed for ${alignment_invalid_count} recording(s)"
         fi
+
+        local dependency_status=0
+        pipeline_alignment_outcome_dependencies_valid || dependency_status=$?
+        case "$dependency_status" in
+            0)
+                ;;
+            1)
+                pipeline_die \
+                    "alignment outcome dependency is missing, malformed, or stale"
+                ;;
+            *)
+                pipeline_die \
+                    "alignment outcome dependency could not be recomputed"
+                ;;
+        esac
     fi
 
     for index in "${!RECORD_USERS[@]}"; do

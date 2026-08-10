@@ -96,6 +96,19 @@ or user segmentation command stops the run. Label mode adds only
 `--overwrite` to segmentation because it does not create verification images;
 Board mode additionally passes `--overwrite-verification`.
 
+There is one aligned-Board downstream-staleness exception to the otherwise
+structural full-rebuild rule. For a structurally readable segmentation summary,
+`continue` reconstructs the current
+`alignment_outcome_dependency` from public discovery, current feature/Board
+provenance, validated outcomes, validated skip reasons, and report SHA-256
+digests. A missing, legacy, malformed, or unequal dependency means that the
+summary is stale even when its arrays are structurally valid. Alignment stays
+reusable; the pipeline resumes at segmentation, explicitly replaces only the
+segmentation and padding outputs, and regenerates padding. A missing,
+unreadable, or non-object summary remains structural invalidity and retains the
+full preprocessing rebuild policy. This is stage-level behavior, never
+per-recording resume, and it does not alter standalone padding's schema.
+
 For aligned-Board mode, alignment explicitly permits the defined initial
 interval skip policy. The alignment stage validates one provenance-current
 Python outcome for every discovered recording: `SUCCESS` proceeds to Board
@@ -107,7 +120,9 @@ terminal status returned by the Python outcome contract.
 
 Before reporting success, the shared QA validates every aligned recording
 through the Python outcome contract and reports total, success, skipped, and
-invalid recording counts. It then reconciles discovered `ring_0`,
+invalid recording counts, and repeats the exact per-user
+`alignment_outcome_dependency` reconciliation used by continue planning. It
+then reconciles discovered `ring_0`,
 preprocessing-summary, SpikeIMU, per-user segmentation-summary, and
 padded-summary counts; completed recording skips are not expected to produce
 segments. It also verifies canonical timestamp sidecars, metadata, matrices,

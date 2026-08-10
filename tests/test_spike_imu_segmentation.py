@@ -16,6 +16,8 @@ from writingring.alignment_io import (
     build_alignment_input_provenance,
     build_alignment_outcome_paths,
     build_board_chunk_provenance,
+    make_alignment_skip_artifact,
+    publish_alignment_skip,
     publish_alignment_success,
     build_alignment_time_axes,
     read_alignment_offset_txt,
@@ -211,6 +213,136 @@ def _publish_spike_success_outcome(
     )
 
 
+def _publish_spike_skipped_outcome(
+    offset_root: Path,
+    feature_input: RecordingFeatureInput,
+    board_path: Path,
+) -> None:
+    """Publish one complete provenance-bearing SKIPPED outcome for a fixture."""
+
+    input_provenance = build_alignment_input_provenance(feature_input)
+    board_provenance = build_board_chunk_provenance((board_path,))
+    paths = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user=feature_input.user,
+        action=feature_input.action,
+        dataset_id=feature_input.dataset_id,
+    )
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=0,
+        next_global_frame_index=1,
+        previous_timestamp_raw=1_000_000,
+        next_timestamp_raw=999_000,
+        prefix_boundary_position=1,
+        last_pre_jump_global_frame_index=0,
+        total_global_valid_pair_count=1,
+        usable_prefix_valid_pair_count=0,
+    )
+    skip = make_alignment_skip_artifact(
+        error,
+        user=feature_input.user,
+        action=feature_input.action,
+        dataset_id=feature_input.dataset_id,
+        input_provenance=input_provenance,
+        board_provenance=board_provenance,
+    )
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report={
+            "recording": {
+                "user": feature_input.user,
+                "action": feature_input.action,
+                "dataset_id": feature_input.dataset_id,
+            },
+            "input_provenance": input_provenance,
+            "board_provenance": board_provenance,
+        },
+    )
+
+
+def _prepare_spike_aligned_fixture(
+    tmp_path: Path,
+    *,
+    sampling_rates_hz: dict[int, float],
+    skipped_dataset_ids: set[int] | frozenset[int] = frozenset(),
+) -> tuple[Path, Path, Path, dict[int, Path]]:
+    """Create provenance-complete SpikeIMU outcomes for aligned tests."""
+
+    data_root = _data_root(tmp_path)
+    for dataset_id in sorted(sampling_rates_hz):
+        if dataset_id != 0:
+            _add_data_recording(data_root, dataset_id=dataset_id)
+    spike_root = tmp_path / "spike"
+    for dataset_id, sampling_rate_hz in sorted(sampling_rates_hz.items()):
+        _write_spike_artifact(
+            tmp_path,
+            data_root,
+            dataset_id=dataset_id,
+            sampling_rate_hz=sampling_rate_hz,
+        )
+    features = {
+        recording.dataset_id: load_spike_imu_features(
+            recording,
+            spike_root=spike_root,
+        )
+        for recording in discover_recordings(data_root)
+    }
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in sorted(sampling_rates_hz)
+    }
+    for dataset_id, board_path in board_paths.items():
+        board_path.write_bytes(b"board provenance")
+        if dataset_id in skipped_dataset_ids:
+            _publish_spike_skipped_outcome(
+                offset_root,
+                features[dataset_id],
+                board_path,
+            )
+        else:
+            _publish_spike_success_outcome(
+                offset_root,
+                features[dataset_id],
+                board_path,
+            )
+    return data_root, spike_root, offset_root, board_paths
+
+
+def _patch_spike_aligned_board_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    board_paths: dict[int, Path],
+) -> None:
+    """Use a deterministic Board table while validating fixture provenance."""
+
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(6),
+            "frame_timestamp_raw": [
+                1_000_000.0,
+                1_020_000.0,
+                1_030_000.0,
+                1_040_000.0,
+                1_050_000.0,
+                1_060_000.0,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
+            chunk_paths=(board_paths[recording.dataset_id],),
+        ),
+    )
+
+
 def test_common_spike_sampling_rate_reports_reference_and_conflict(
     tmp_path: Path,
 ) -> None:
@@ -225,6 +357,68 @@ def test_common_spike_sampling_rate_reports_reference_and_conflict(
         match=r"dataset 0 uses 1000 Hz, but dataset 1 uses 100 Hz",
     ):
         validate_common_feature_sampling_rate((reference, conflict))
+
+
+def test_spike_aligned_skipped_rate_is_excluded_from_requested_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root, spike_root, offset_root, board_paths = _prepare_spike_aligned_fixture(
+        tmp_path,
+        sampling_rates_hz={0: 200.0, 1: 100.0},
+        skipped_dataset_ids={1},
+    )
+    _patch_spike_aligned_board_loader(monkeypatch, board_paths)
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="writer_a",
+        action="letters",
+        output_root=tmp_path / "segmented",
+        alignment_offset_root=offset_root,
+        input_kind="spike-imu",
+        spike_root=spike_root,
+        expected_sampling_rate_hz=200.0,
+        config=BoardEventSegmentationConfig(
+            pre_press_context_us=0.0,
+            post_lift_context_us=0.0,
+        ),
+    )
+
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == 1
+    assert result.summary["sampling_rate_hz"] == 200.0
+    assert result.summary["alignment_outcome_dependency"]["outcomes_by_status"][
+        "SKIPPED"
+    ][0]["identity"]["dataset_id"] == 1
+
+
+def test_spike_aligned_success_rate_must_match_requested_rate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root, spike_root, offset_root, board_paths = _prepare_spike_aligned_fixture(
+        tmp_path,
+        sampling_rates_hz={0: 100.0},
+    )
+    _patch_spike_aligned_board_loader(monkeypatch, board_paths)
+    output_root = tmp_path / "segmented"
+
+    with pytest.raises(
+        BoardEventSegmentationError,
+        match=r"SpikeIMU metadata sampling_rate_hz does not match the requested rate",
+    ):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="writer_a",
+            action="letters",
+            output_root=output_root,
+            alignment_offset_root=offset_root,
+            input_kind="spike-imu",
+            spike_root=spike_root,
+            expected_sampling_rate_hz=200.0,
+        )
+    assert not output_root.exists()
 
 
 def test_spike_label_segmentation_publishes_21_channel_slices(
@@ -647,6 +841,110 @@ def test_spike_board_assist_publishes_21_channels_and_board_targets(
         .read_text(encoding="utf-8")
     )
     assert cli_summary["alignment_input_hash_match_verified"] is True
+
+
+def test_spike_board_assist_publishes_alignment_outcome_dependency_for_mixed_states(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _data_root(tmp_path)
+    _add_data_recording(data_root, dataset_id=1)
+    spike_root, _ = _write_spike_artifact(tmp_path, data_root, dataset_id=0)
+    _write_spike_artifact(tmp_path, data_root, dataset_id=1)
+    recordings = discover_recordings(data_root)
+    features = {
+        recording.dataset_id: load_spike_imu_features(
+            recording,
+            spike_root=spike_root,
+            expected_sampling_rate_hz=1_000.0,
+        )
+        for recording in recordings
+    }
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for path in board_paths.values():
+        path.write_bytes(b"board provenance")
+    _publish_spike_success_outcome(
+        offset_root,
+        features[0],
+        board_paths[0],
+    )
+    _publish_spike_skipped_outcome(
+        offset_root,
+        features[1],
+        board_paths[1],
+    )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(6),
+            "frame_timestamp_raw": [
+                1_000_000.0,
+                1_020_000.0,
+                1_030_000.0,
+                1_040_000.0,
+                1_050_000.0,
+                1_060_000.0,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: SimpleNamespace(
+            frames=frames,
+            contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
+            chunk_paths=(board_paths[recording.dataset_id],),
+        ),
+    )
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="writer_a",
+        action="letters",
+        output_root=tmp_path / "segmented",
+        alignment_offset_root=offset_root,
+        input_kind="spike-imu",
+        spike_root=spike_root,
+        expected_sampling_rate_hz=1_000.0,
+        config=BoardEventSegmentationConfig(
+            pre_press_context_us=0.0,
+            post_lift_context_us=0.0,
+        ),
+    )
+
+    dependency = result.summary["alignment_outcome_dependency"]
+    assert dependency["source_recording_ids"] == [
+        {"user": "writer_a", "action": "letters", "dataset_id": 0},
+        {"user": "writer_a", "action": "letters", "dataset_id": 1},
+    ]
+    assert [
+        item["identity"]["dataset_id"]
+        for item in dependency["outcomes_by_status"]["SUCCESS"]
+    ] == [0]
+    skipped = dependency["outcomes_by_status"]["SKIPPED"]
+    assert [item["identity"]["dataset_id"] for item in skipped] == [1]
+    assert skipped[0]["reason"] == "initial_interval_no_usable_pair"
+    for item in dependency["outcomes_by_status"]["SUCCESS"] + skipped:
+        identity = item["identity"]
+        report_path = build_alignment_outcome_paths(
+            offset_root,
+            offset_root.parent / "verification",
+            offset_root.parent / "reports",
+            user=identity["user"],
+            action=identity["action"],
+            dataset_id=identity["dataset_id"],
+        ).report_path
+        assert item["report_sha256"] == sha256_file(report_path)
+        assert len(item["report_sha256"]) == 64
+        assert all(character in "0123456789abcdef" for character in item["report_sha256"])
+    assert result.summary["source_recording_count"] == 2
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == len(skipped) == 1
+    assert result.summary["skipped_segment_count"] == 1
 
 
 def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(

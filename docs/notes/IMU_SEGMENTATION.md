@@ -102,10 +102,13 @@ alignment during segmentation. Label mode slices all 21 channels with the same
 `searchsorted(canonical_timestamps_us, ..., side="left")` rule. Aligned Board
 mode additionally requires an offset whose feature, metadata, and timestamp
 hashes match the loaded SpikeIMU artifact. An explicit `--sampling-rate` is
-checked per recording. When a user/action selects multiple SpikeIMU recordings,
-their metadata rates must also match within `1e-12`; this is checked before
-label or aligned-Board aggregation, so mixed-rate actions do not publish
-partial outputs and successful summaries contain one common `sampling_rate_hz`.
+checked per recording in label mode. In aligned-Board mode the artifact and
+Board provenance are validated first, then the explicit rate is checked only
+for final `SUCCESS` recordings; a validated recording-level `SKIPPED` outcome
+does not enter either requested-rate or common-rate validation. When a
+user/action selects multiple final SUCCESS SpikeIMU recordings, their metadata
+rates must match within `1e-12`; mixed successful rates do not publish partial
+outputs and successful summaries contain one common `sampling_rate_hz`.
 
 Spike label verification scores only channels `15:21`; channels `0:15` are
 signed wavelet event channels and cannot affect segmentation. The optional

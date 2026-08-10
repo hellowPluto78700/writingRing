@@ -2,9 +2,9 @@
 
 ## Active plan
 
-- **Plan:** `docs/plans/TODO/01_Board_Assist_Alignment_Correction_Plan.md`
-- **Task file:** `docs/plans/TODO/01_Board_Assist_Alignment_Correction_TASKS.md`
-- **Follow-up baseline:** `f0e519d16fcd59f774f2000c8fe737ff3ac09763`
+- **Plan:** `docs/plans/TODO/02_Alignment_Outcome_Downstream_Consistency_Correction_Plan.md`
+- **Task file:** `docs/plans/TODO/02_Alignment_Outcome_Downstream_Consistency_Correction_TASKS.md`
+- **Baseline:** `a1cd88be4ab9d9f4bca3babd1019da0adc5c1ed8`
 - **Current task:** none
 - **Status:** COMPLETE
 
@@ -12,30 +12,25 @@
 
 | Task | State | Depends on | Compact evidence |
 | --- | --- | --- | --- |
-| T1R | DONE | — | revised probe; worker; fresh PASS; 52 focused / 543 full passed, 1 skipped |
-| T2R | DONE | T1R | probe; in-scope repair; fresh PASS; 59 focused / 558 full passed, 1 skipped |
-| T3 | DONE | T2R | probe; worker; fresh PASS; 23 focused / stable 571 full passed, 1 skipped |
-| T4 | DONE | T2R | revised probe; worker; fresh PASS; 42 focused / stable 571 full passed, 1 skipped |
-| T5 | DONE | T3, T4 | PRIMARY combined regression/full pytest, documentation audit, and fresh verifier PASS |
+| T6 | DONE | — | Probe, worker, and fresh verifier PASS; 43 focused / 572 full passed, 1 skipped. |
+| T7 | DONE | T6 | Revised probe, worker, and fresh verifier PASS; bash -n / 30 focused / 581 full passed, 1 skipped. |
+| T8 | DONE | T6 | Probe, worker, and fresh verifier PASS; 45 focused / 574 full passed, 1 skipped. |
+| T9 | DONE | T7, T8 | PRIMARY validation and fresh final verifier PASS; bash -n / 75 focused / 581 full passed, 1 skipped. |
 
 ## Verified contract digest
 
-- T1R: only usable-prefix pair IDs supply alignment-valid `valid_touch`
-  events; cross-boundary endpoints cannot leak to matching.
-- T2R: `SUCCESS`/`SKIPPED` are the only completed outcomes; FAILED recovery
-  uses target overwrite rules; malformed outcomes fail as
-  `AlignmentOutcomeError`; SKIPPED diagnostics prove their condition.
-- T3: Action0 calls the public validator for every authoritative recording,
-  permits defined skips, retains stage-level rebuild, and QA reports outcome
-  counts without parsing artifacts.
-- T4: segmentation validates sibling outcome roots and current provenance,
-  omits validated SKIPPED recordings before labels/rate/aggregate work, and
-  records distinct recording and segment skip accounting.
+- The previous Board-assisted alignment plan is COMPLETE and establishes the
+  current `SUCCESS`/`SKIPPED` validation, sibling roots, and recording-skip
+  accounting contract.
+- T6 adds an aligned-only `alignment_outcome_dependency`: authoritative source
+  IDs plus validated SUCCESS/SKIPPED entries and report SHA-256 digests.  A
+  missing or unequal dependency is stale for downstream consumers.
+- T7 compares that exact dependency in continue and final QA. Readable stale
+  summaries rebuild segment plus padding only; structural invalidity retains
+  full rebuild policy. T8 makes requested-rate validation SUCCESS-only after
+  provenance/current-outcome validation.
 
 ## Next required action
 
-T5 complete. Combined focused regression passed 137 with 1 skipped, and full
-Python 3.11 pytest passed 571 with 1 skipped in `writingring-gpu`; `git diff
---check` passed. Fresh final verifier PASS confirmed implementation, consumer
-contracts, documentation, and state cleanup. No superseded TaskSpec or stale
-DRAFT task is retained in the active task file.
+Plan complete. T6–T9 and the fresh final verifier PASS are recorded; optional
+T10 remains deferred and is not required by the requested Action0 contract.

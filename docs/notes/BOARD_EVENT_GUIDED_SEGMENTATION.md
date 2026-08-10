@@ -34,6 +34,13 @@ requiring a timestamp label, and does not enter sampling-rate or aggregate
 calculations. `FAILED`, missing, stale, malformed, or conflicting outcomes
 hard fail.
 
+For SpikeIMU inputs, loading before outcome validation still verifies feature
+identity/content, metadata/timestamps, and metadata-rate validity, but does
+not reject the caller-requested rate yet. Once the outcome is validated, only
+`SUCCESS` recordings are checked against that requested rate and included in
+the common-rate contract. Thus a provenance-valid `SKIPPED` recording with a
+different rate cannot reject an otherwise valid SUCCESS partition.
+
 Then run:
 
 ```bash
@@ -175,3 +182,15 @@ policy skips and additionally records `source_recording_count`,
 `processed_recording_count`, `skipped_recording_count`, and `recording_skips`.
 Each recording-skip entry includes its identity, validated reason, and
 diagnostics.
+
+For aligned-Board summaries only, `alignment_outcome_dependency` is the
+machine-readable downstream reuse contract.  Its ordered
+`source_recording_ids` list comes from the authoritative discovered `ring_0`
+recordings.  `outcomes_by_status.SUCCESS` contains each processed recording's
+identity and SHA-256 of its validated alignment report; `SKIPPED` contains the
+same identity and report digest plus the validated skip reason.  The two lists
+are disjoint and their union is exactly the source list.  This dependency is
+separate from both the audit-oriented `recording_skips` and label-policy
+`skipped_segment_count`; it is absent from label-mode summaries.  Consumers
+must treat a missing or unequal dependency as stale, rather than infer outcome
+state from offset files or artifact counts.

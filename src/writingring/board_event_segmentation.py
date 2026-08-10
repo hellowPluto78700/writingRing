@@ -26,6 +26,7 @@ from writingring.alignment_io import (
     AlignmentOffset,
     AlignmentOffsetExportError,
     AlignmentOutcomeError,
+    AlignmentOutcome,
     apply_board_to_ring_offset,
     build_alignment_input_provenance,
     build_board_chunk_provenance,
@@ -61,6 +62,7 @@ from writingring.recording_features import (
     load_recording_features,
     validate_common_feature_sampling_rate,
 )
+from writingring.preprocessing_io import sha256_file
 from writingring.segmentation import (
     SegmentLabel,
     SegmentationConfig,
@@ -736,7 +738,11 @@ def segment_user_action_by_aligned_board_events(
                 input_kind=input_kind,
                 gravity_config=effective_gravity,
                 spike_root=spike_root,
-                expected_sampling_rate_hz=expected_sampling_rate_hz,
+                # The caller-requested rate is a SUCCESS-only condition in
+                # aligned mode.  Load and validate every feature artifact
+                # before classifying its alignment outcome so a valid
+                # SKIPPED recording cannot fail this check prematurely.
+                expected_sampling_rate_hz=None,
             )
             preloaded_feature_inputs[recording.dataset_id] = feature_input
     output_parent = paths.output_directory.parent
@@ -816,6 +822,7 @@ class _RecordingArtifacts:
     offset: AlignmentOffset
     offset_path: Path
     verification_path: Path
+    outcome: AlignmentOutcome
 
 
 @dataclass(frozen=True, slots=True)
@@ -825,6 +832,7 @@ class _SkippedRecordingArtifacts:
     recording: Recording
     reason: str
     diagnostics: Mapping[str, object]
+    outcome: AlignmentOutcome
 
 
 @dataclass(frozen=True, slots=True)
@@ -833,6 +841,7 @@ class _AlignedRecordingArtifacts:
 
     processed: tuple[_RecordingArtifacts, ...]
     skipped: tuple[_SkippedRecordingArtifacts, ...]
+    source_recordings: tuple[Recording, ...]
     source_recording_count: int
 
 
@@ -861,18 +870,23 @@ def _build_aligned_recording_artifacts(
     processing.
     """
 
+    ordered_recordings = tuple(
+        sorted(recordings, key=lambda recording: recording.dataset_id)
+    )
     artifacts: list[_RecordingArtifacts] = []
     skipped_recordings: list[_SkippedRecordingArtifacts] = []
     report_root = Path(alignment_offset_root).parent / "reports"
     verification_root = Path(alignment_offset_root).parent / "verification"
-    for recording in recordings:
+    for recording in ordered_recordings:
         if preloaded_feature_inputs is None:
             feature_input = _load_alignment_feature_input(
                 recording,
                 input_kind=input_kind,
                 gravity_config=gravity_config,
                 spike_root=spike_root,
-                expected_sampling_rate_hz=expected_sampling_rate_hz,
+                expected_sampling_rate_hz=(
+                    None if input_kind == "spike-imu" else expected_sampling_rate_hz
+                ),
             )
         else:
             try:
@@ -931,12 +945,18 @@ def _build_aligned_recording_artifacts(
                     recording=recording,
                     reason=skip.reason,
                     diagnostics=dict(skip.diagnostics),
+                    outcome=outcome,
                 )
             )
             continue
         if not outcome.is_success:
             raise BoardEventSegmentationError(
                 f"alignment outcome for dataset {recording.dataset_id} is not SUCCESS"
+            )
+        if input_kind == "spike-imu":
+            _validate_requested_spike_sampling_rate(
+                feature_input,
+                expected_sampling_rate_hz=expected_sampling_rate_hz,
             )
 
         offset_path = outcome.paths.offset_txt_path
@@ -1050,12 +1070,14 @@ def _build_aligned_recording_artifacts(
                 offset=offset,
                 offset_path=offset_path,
                 verification_path=verification_path,
+                outcome=outcome,
             )
         )
     return _AlignedRecordingArtifacts(
         processed=tuple(artifacts),
         skipped=tuple(skipped_recordings),
-        source_recording_count=len(recordings),
+        source_recordings=ordered_recordings,
+        source_recording_count=len(ordered_recordings),
     )
 
 
@@ -1196,6 +1218,48 @@ def _load_alignment_feature_input(
             f"could not load alignment feature input for dataset "
             f"{recording.dataset_id}: {error}"
         ) from error
+
+
+def _validate_requested_spike_sampling_rate(
+    feature_input: RecordingFeatureInput,
+    *,
+    expected_sampling_rate_hz: float | None,
+) -> None:
+    """Apply the caller-rate check to a validated SUCCESS feature input."""
+
+    if expected_sampling_rate_hz is None:
+        return
+    if isinstance(expected_sampling_rate_hz, bool):
+        raise BoardEventSegmentationError(
+            "could not load alignment feature input for dataset "
+            f"{feature_input.dataset_id}: expected sampling_rate_hz must be a "
+            "finite positive number"
+        )
+    try:
+        expected_rate = float(expected_sampling_rate_hz)
+    except (TypeError, ValueError) as error:
+        raise BoardEventSegmentationError(
+            "could not load alignment feature input for dataset "
+            f"{feature_input.dataset_id}: expected sampling_rate_hz must be a "
+            "finite positive number"
+        ) from error
+    if not math.isfinite(expected_rate) or expected_rate <= 0.0:
+        raise BoardEventSegmentationError(
+            "could not load alignment feature input for dataset "
+            f"{feature_input.dataset_id}: expected sampling_rate_hz must be a "
+            "finite positive number"
+        )
+    if not math.isclose(
+        feature_input.sampling_rate_hz,
+        expected_rate,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise BoardEventSegmentationError(
+            "could not load alignment feature input for dataset "
+            f"{feature_input.dataset_id}: SpikeIMU metadata sampling_rate_hz "
+            "does not match the requested rate"
+        )
 
 
 def _load_gravity_removed_ring(
@@ -1575,6 +1639,45 @@ def _aligned_summary(
         }
         for artifact in artifacts
     ]
+    alignment_outcome_dependency = {
+        "source_recording_ids": [
+            {
+                "user": recording.user,
+                "action": recording.action,
+                "dataset_id": recording.dataset_id,
+            }
+            for recording in recording_artifacts.source_recordings
+        ],
+        "outcomes_by_status": {
+            "SUCCESS": [
+                {
+                    "identity": {
+                        "user": artifact.recording.user,
+                        "action": artifact.recording.action,
+                        "dataset_id": artifact.recording.dataset_id,
+                    },
+                    "report_sha256": sha256_file(
+                        artifact.outcome.paths.report_path
+                    ),
+                }
+                for artifact in artifacts
+            ],
+            "SKIPPED": [
+                {
+                    "identity": {
+                        "user": artifact.recording.user,
+                        "action": artifact.recording.action,
+                        "dataset_id": artifact.recording.dataset_id,
+                    },
+                    "reason": artifact.reason,
+                    "report_sha256": sha256_file(
+                        artifact.outcome.paths.report_path
+                    ),
+                }
+                for artifact in recording_artifacts.skipped
+            ],
+        },
+    }
     return {
         "input_kind": input_kind,
         "boundary_mode": "aligned_board_events",
@@ -1634,6 +1737,7 @@ def _aligned_summary(
             }
             for skipped in recording_artifacts.skipped
         ],
+        "alignment_outcome_dependency": alignment_outcome_dependency,
         "verification_image_count": len(verification_paths),
         "recordings_without_verification": [
             artifact.recording.dataset_id

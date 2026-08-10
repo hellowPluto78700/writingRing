@@ -236,6 +236,340 @@ def test_continue_validation_reuses_matching_transform_and_rebuilds_on_mismatch(
     assert "rebuilding from preprocess with overwrite enabled" in mismatching.stdout
 
 
+@pytest.mark.parametrize(
+    ("old_dependency", "current_dependency"),
+    [
+        (
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "report_sha256": "a" * 64,
+                        }
+                    ],
+                    "SKIPPED": [],
+                },
+            },
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [],
+                    "SKIPPED": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "reason": "alignment_initial_interval_skipped",
+                            "report_sha256": "b" * 64,
+                        }
+                    ],
+                },
+            },
+        ),
+        (
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [],
+                    "SKIPPED": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "reason": "alignment_initial_interval_skipped",
+                            "report_sha256": "a" * 64,
+                        }
+                    ],
+                },
+            },
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "report_sha256": "b" * 64,
+                        }
+                    ],
+                    "SKIPPED": [],
+                },
+            },
+        ),
+        (
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "report_sha256": "a" * 64,
+                        }
+                    ],
+                    "SKIPPED": [],
+                },
+            },
+            {
+                "source_recording_ids": [{"user": "u", "action": "0", "dataset_id": 0}],
+                "outcomes_by_status": {
+                    "SUCCESS": [
+                        {
+                            "identity": {"user": "u", "action": "0", "dataset_id": 0},
+                            "report_sha256": "b" * 64,
+                        }
+                    ],
+                    "SKIPPED": [],
+                },
+            },
+        ),
+    ],
+)
+def test_aligned_dependency_transition_selects_segment_and_only_downstream_overwrite(
+    tmp_path: Path,
+    old_dependency: dict[str, object],
+    current_dependency: dict[str, object],
+) -> None:
+    summary_path = (
+        tmp_path
+        / "segmentation"
+        / "u"
+        / "action_0"
+        / "u_action_0_segmentation_summary.json"
+    )
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text(
+        json.dumps({"alignment_outcome_dependency": old_dependency}),
+        encoding="utf-8",
+    )
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"QA_LOG={shlex.quote(str(tmp_path / 'qa.log'))}",
+            f"PREPROCESS_ROOT={shlex.quote(str(tmp_path / 'preprocessed'))}",
+            f"SPIKE_ROOT={shlex.quote(str(tmp_path / 'spikes'))}",
+            f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segmentation'))}",
+            f"PADDING_OUTPUT_ROOT={shlex.quote(str(tmp_path / 'padded'))}",
+            "PYTHON_CMD=(python3)",
+            "DATA_ROOT=/unused",
+            "OFFSET_ROOT=/unused",
+            "ALIGNMENT_VERIFICATION_ROOT=/unused",
+            "ALIGNMENT_REPORT_ROOT=/unused",
+            "RECORD_USERS=(u)",
+            "RECORD_ACTIONS=(0)",
+            "RECORD_DATASET_IDS=(0)",
+            "PIPELINE_USERS=(u)",
+            "ACTION=0",
+            "BOUNDARY_MODE=aligned-board-events",
+            "OVERWRITE=0",
+            "pipeline_preprocess_has_any_output() { return 0; }",
+            "pipeline_encode_has_any_output() { return 0; }",
+            "pipeline_alignment_has_any_output() { return 0; }",
+            "pipeline_segment_has_any_output() { return 0; }",
+            "pipeline_padding_has_any_output() { return 0; }",
+            "pipeline_preprocess_outputs_valid() { return 0; }",
+            "pipeline_encode_outputs_valid() { return 0; }",
+            "pipeline_alignment_outputs_valid() { return 0; }",
+            "pipeline_segment_outputs_valid() { return 0; }",
+            "pipeline_padding_outputs_valid() { return 0; }",
+            "pipeline_compute_alignment_outcome_dependency() {",
+            f"  printf '%s' {shlex.quote(json.dumps(current_dependency))}",
+            "}",
+            "pipeline_plan_continue",
+            'printf "stage=%s force=%s overwrite=%s segment_args=%s padding_args=%s\\n" '
+            '"$PIPELINE_RESUME_STAGE" "$PIPELINE_FORCE_REBUILD" "$OVERWRITE" '
+            '"${PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS[*]}" '
+            '"${PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS[*]}"',
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "stage=segment force=0 overwrite=0" in completed.stdout
+    assert "segment_args=--overwrite" in completed.stdout
+    assert "padding_args=--overwrite" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    "readable_summary",
+    [
+        {"source_recording_count": 1},
+        {"alignment_outcome_dependency": {"source_recording_ids": "malformed"}},
+    ],
+)
+def test_readable_legacy_dependency_is_downstream_stale_but_structural_summary_rebuilds(
+    tmp_path: Path,
+    readable_summary: dict[str, object],
+) -> None:
+    common_setup = [
+        f"source {shlex.quote(str(COMMON_PATH))}",
+        f"QA_LOG={shlex.quote(str(tmp_path / 'qa.log'))}",
+        f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segmentation'))}",
+        "RECORD_USERS=(u)",
+        "RECORD_ACTIONS=(0)",
+        "RECORD_DATASET_IDS=(0)",
+        "PIPELINE_USERS=(u)",
+        "ACTION=0",
+        "BOUNDARY_MODE=aligned-board-events",
+        "OVERWRITE=0",
+        "pipeline_preprocess_has_any_output() { return 0; }",
+        "pipeline_encode_has_any_output() { return 0; }",
+        "pipeline_alignment_has_any_output() { return 0; }",
+        "pipeline_segment_has_any_output() { return 0; }",
+        "pipeline_padding_has_any_output() { return 0; }",
+        "pipeline_preprocess_outputs_valid() { return 0; }",
+        "pipeline_encode_outputs_valid() { return 0; }",
+        "pipeline_alignment_outputs_valid() { return 0; }",
+        "pipeline_padding_outputs_valid() { return 0; }",
+        "pipeline_compute_alignment_outcome_dependency() { printf '{}'; }",
+    ]
+    readable = tmp_path / "segmentation" / "u" / "action_0"
+    readable.mkdir(parents=True)
+    (readable / "u_action_0_segmentation_summary.json").write_text(
+        json.dumps(readable_summary),
+        encoding="utf-8",
+    )
+    readable_script = "\n".join(
+        common_setup
+        + [
+            "pipeline_segment_outputs_valid() { return 0; }",
+            "pipeline_plan_continue",
+            'printf "stage=%s force=%s\\n" "$PIPELINE_RESUME_STAGE" "$PIPELINE_FORCE_REBUILD"',
+        ]
+    )
+    readable_result = subprocess.run(
+        ["bash", "-c", readable_script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert readable_result.returncode == 0, readable_result.stdout + readable_result.stderr
+    assert "stage=segment force=0" in readable_result.stdout
+
+    structural_script = "\n".join(
+        common_setup
+        + [
+            "pipeline_segment_outputs_valid() { return 1; }",
+            "pipeline_plan_continue",
+            'printf "stage=%s force=%s overwrite=%s\\n" "$PIPELINE_RESUME_STAGE" "$PIPELINE_FORCE_REBUILD" "$OVERWRITE"',
+        ]
+    )
+    structural_result = subprocess.run(
+        ["bash", "-c", structural_script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert structural_result.returncode == 0, structural_result.stdout + structural_result.stderr
+    assert "stage=preprocess force=1 overwrite=1" in structural_result.stdout
+
+
+def test_final_qa_reconciles_dependency_after_planning(tmp_path: Path) -> None:
+    summary_path = (
+        tmp_path
+        / "segmentation"
+        / "u"
+        / "action_0"
+        / "u_action_0_segmentation_summary.json"
+    )
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text(
+        json.dumps({"alignment_outcome_dependency": {"version": "old"}}),
+        encoding="utf-8",
+    )
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"QA_LOG={shlex.quote(str(tmp_path / 'qa.log'))}",
+            f"PREPROCESS_ROOT={shlex.quote(str(tmp_path / 'preprocessed'))}",
+            f"SPIKE_ROOT={shlex.quote(str(tmp_path / 'spikes'))}",
+            f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segmentation'))}",
+            f"PADDING_OUTPUT_ROOT={shlex.quote(str(tmp_path / 'padded'))}",
+            "PYTHON_CMD=(python3)",
+            "RING_FILES=(ring)",
+            "RECORD_USERS=(u)",
+            "RECORD_ACTIONS=(0)",
+            "RECORD_DATASET_IDS=(0)",
+            "PIPELINE_USERS=(u)",
+            "ACTION=0",
+            "BOUNDARY_MODE=aligned-board-events",
+            "pipeline_count_files() {",
+            "  case \"$2\" in",
+            "    *_preprocessing.json|spikeIMU.npy|*_segmentation_summary.json|padding_dataset_summary.json) printf '1\\n';;",
+            "    *) printf '0\\n';;",
+            "  esac",
+            "}",
+            "pipeline_require_file() { :; }",
+            "pipeline_validate_spike_artifact() { :; }",
+            "pipeline_validate_segment_artifact() { :; }",
+            "pipeline_validate_padding_artifact() { :; }",
+            "pipeline_validate_alignment_outcome() { PIPELINE_LAST_ALIGNMENT_STATUS=SUCCESS; return 0; }",
+            "pipeline_compute_alignment_outcome_dependency() { printf '{\"version\":\"new\"}'; }",
+            "pipeline_qa",
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0
+    assert "alignment outcome dependency is missing, malformed, or stale" in completed.stderr
+
+
+def test_downstream_segment_stage_overwrites_only_segment_and_padding_publishers(
+    tmp_path: Path,
+) -> None:
+    calls_path = tmp_path / "calls.log"
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"LOG_ROOT={shlex.quote(str(tmp_path))}",
+            f"PADDING_LOG={shlex.quote(str(tmp_path / 'padding.log'))}",
+            f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segment'))}",
+            f"PADDING_ANALYSIS_DIR={shlex.quote(str(tmp_path / 'analysis'))}",
+            f"PADDING_OUTPUT_ROOT={shlex.quote(str(tmp_path / 'padded'))}",
+            f"CALLS={shlex.quote(str(calls_path))}",
+            "PYTHON_CMD=(python3)",
+            "PIPELINE_USERS=(u)",
+            "ACTION=0",
+            "BOUNDARY_MODE=aligned-board-events",
+            "DATA_ROOT=/unused",
+            "SPIKE_ROOT=/unused",
+            "OFFSET_ROOT=/unused",
+            "SAMPLING_RATE=200",
+            "PADDING_COVERAGE=0.99",
+            "PADDING_ROUND_TO=1",
+            "PADDING_RECOMMENDATION=balanced",
+            "PADDING_VALUE=0.0",
+            "OVERWRITE=0",
+            "pipeline_run_logged() { printf '%s\\n' \"$*\" >>\"$CALLS\"; }",
+            "pipeline_require_file() { :; }",
+            "pipeline_prepare_downstream_overwrite",
+            "pipeline_execute_from_stage segment",
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    calls = calls_path.read_text(encoding="utf-8").splitlines()
+    assert len(calls) == 3
+    assert "scripts/segment_ring_imu.py" in calls[0]
+    assert "scripts/analyze_segment_lengths.py" in calls[1]
+    assert "scripts/pad_segmented_imu.py" in calls[2]
+    assert all("--overwrite" in call for call in calls)
+
+
 def test_aligned_board_cli_requests_skip_and_authorized_outcome_overwrite() -> None:
     common = COMMON_PATH.read_text(encoding="utf-8")
     align_start = common.index("pipeline_align()")

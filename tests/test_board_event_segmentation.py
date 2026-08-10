@@ -34,6 +34,7 @@ from writingring.segmentation import SegmentLabel, segment_user_action
 from writingring.segmentation_verification import SegmentationVerificationError
 from writingring.gravity import GravityRemovalConfig
 from writingring.event_alignment import InitialIntervalNoUsablePairError
+from writingring.preprocessing_io import sha256_file
 
 
 def _ring(*, end_us: int = 15_000_000) -> tuple[np.ndarray, np.ndarray]:
@@ -689,6 +690,27 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     assert result.summary["processed_recording_count"] == 1
     assert result.summary["skipped_recording_count"] == 0
     assert result.summary["recording_skips"] == []
+    dependency = result.summary["alignment_outcome_dependency"]
+    assert dependency["source_recording_ids"] == [
+        {"user": "user_0", "action": "0", "dataset_id": 0}
+    ]
+    assert dependency["outcomes_by_status"]["SKIPPED"] == []
+    success_dependency = dependency["outcomes_by_status"]["SUCCESS"]
+    assert success_dependency[0]["identity"] == dependency["source_recording_ids"][0]
+    report_path = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user="user_0",
+        action="0",
+        dataset_id=0,
+    ).report_path
+    assert success_dependency[0]["report_sha256"] == sha256_file(report_path)
+    assert len(success_dependency[0]["report_sha256"]) == 64
+    assert all(
+        character in "0123456789abcdef"
+        for character in success_dependency[0]["report_sha256"]
+    )
     assert (base / "0_ring_0_segmentation_verification.png").is_file()
     assert result.output_paths.board_events_csv_path.is_file()
     assert len(result.manifest) == 2
@@ -712,6 +734,7 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
         output_root=tmp_path / "label_outputs",
     )
     assert label_result.summary["boundary_mode"] == "label"
+    assert "alignment_outcome_dependency" not in label_result.summary
     assert label_result.output_paths.raw_imu_path.is_file()
     assert result.output_paths.raw_imu_path.is_file()
 
@@ -810,6 +833,45 @@ def test_user_action_mixed_success_and_skipped_excludes_recording_skip_from_outp
             },
         }
     ]
+    dependency = result.summary["alignment_outcome_dependency"]
+    assert dependency["source_recording_ids"] == [
+        {"user": "user_0", "action": "0", "dataset_id": 0},
+        {"user": "user_0", "action": "0", "dataset_id": 1},
+    ]
+    assert [
+        entry["identity"]["dataset_id"]
+        for entry in dependency["outcomes_by_status"]["SUCCESS"]
+    ] == [0]
+    assert [
+        entry["identity"]["dataset_id"]
+        for entry in dependency["outcomes_by_status"]["SKIPPED"]
+    ] == [1]
+    skipped_dependency = dependency["outcomes_by_status"]["SKIPPED"][0]
+    assert skipped_dependency["reason"] == "initial_interval_no_usable_pair"
+    for entry in (
+        dependency["outcomes_by_status"]["SUCCESS"]
+        + dependency["outcomes_by_status"]["SKIPPED"]
+    ):
+        report_path = build_alignment_outcome_paths(
+            offset_root,
+            offset_root.parent / "verification",
+            offset_root.parent / "reports",
+            user="user_0",
+            action="0",
+            dataset_id=entry["identity"]["dataset_id"],
+        ).report_path
+        assert entry["report_sha256"] == sha256_file(report_path)
+        assert len(entry["report_sha256"]) == 64
+        assert all(character in "0123456789abcdef" for character in entry["report_sha256"])
+    assert {
+        entry["identity"]["dataset_id"]
+        for status_entries in dependency["outcomes_by_status"].values()
+        for entry in status_entries
+    } == {identity["dataset_id"] for identity in dependency["source_recording_ids"]}
+    assert result.summary["skipped_recording_count"] == len(
+        dependency["outcomes_by_status"]["SKIPPED"]
+    )
+    assert result.summary["skipped_segment_count"] == 1
     assert set(result.manifest["dataset_id"]) == {0}
     assert set(result.board_events["dataset_id"]) == {0}
     assert result.summary["verification_image_count"] == 1
