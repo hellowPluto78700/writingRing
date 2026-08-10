@@ -424,6 +424,7 @@ pipeline_align() {
             --report-output-root "$ALIGNMENT_REPORT_ROOT"
             --verification-output-root "$ALIGNMENT_VERIFICATION_ROOT"
             --initial-interval-policy skip
+            --unalignable-recording-policy skip
         )
         command_args+=("${ALIGN_OVERWRITE_ARGS[@]}")
         pipeline_run_logged "$log_path" "${command_args[@]}"

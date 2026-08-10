@@ -9,6 +9,7 @@ import pytest
 import writingring.board_event_segmentation as board_event_segmentation
 from writingring.alignment_io import (
     AlignmentOffset,
+    AlignmentSkipArtifact,
     build_alignment_input_provenance,
     build_alignment_outcome_paths,
     build_board_chunk_provenance,
@@ -144,6 +145,72 @@ def _publish_raw_skipped_outcome(
         dataset_id=recording.dataset_id,
         input_provenance=input_provenance,
         board_provenance=board_provenance,
+    )
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report={
+            "recording": {
+                "user": recording.user,
+                "action": recording.action,
+                "dataset_id": recording.dataset_id,
+            },
+            "input_provenance": input_provenance,
+            "board_provenance": board_provenance,
+        },
+    )
+
+
+def _publish_raw_event_coverage_skipped_outcome(
+    data_root: Path,
+    offset_root: Path,
+    board_path: Path,
+    *,
+    dataset_id: int,
+) -> None:
+    """Publish a valid confidence-derived skip without using the factory."""
+
+    recording = next(
+        item for item in discover_recordings(data_root) if item.dataset_id == dataset_id
+    )
+    feature = load_raw_ring_features(recording)
+    input_provenance = build_alignment_input_provenance(feature)
+    board_provenance = build_board_chunk_provenance((board_path,))
+    paths = build_alignment_outcome_paths(
+        offset_root,
+        offset_root.parent / "verification",
+        offset_root.parent / "reports",
+        user=recording.user,
+        action=recording.action,
+        dataset_id=recording.dataset_id,
+    )
+    skip = AlignmentSkipArtifact(
+        recording={
+            "user": recording.user,
+            "action": recording.action,
+            "dataset_id": recording.dataset_id,
+        },
+        diagnostics={
+            "matched_event_count": 3,
+            "total_valid_event_count": 10,
+            "event_coverage_ratio": 0.3,
+            "minimum_event_coverage_ratio": 0.75,
+            "matched_press_count": 2,
+            "total_valid_press_count": 4,
+            "press_coverage_ratio": 0.5,
+            "matched_lift_count": 1,
+            "total_valid_lift_count": 6,
+            "lift_coverage_ratio": 1 / 6,
+            "fully_matched_touch_pair_count": 1,
+            "total_valid_touch_pair_count": 5,
+            "minimum_valid_touch_pairs": 5,
+            "best_offset_us": -238_451.75,
+            "best_vs_second_best_nearly_tied": False,
+            "failed_confidence_checks": ["minimum_event_coverage_ratio"],
+        },
+        input_provenance=input_provenance,
+        board_provenance=board_provenance,
+        reason="insufficient_event_coverage",
     )
     publish_alignment_skip(
         paths,
@@ -877,6 +944,110 @@ def test_user_action_mixed_success_and_skipped_excludes_recording_skip_from_outp
     assert result.summary["verification_image_count"] == 1
 
 
+def test_user_action_mixed_success_and_event_coverage_skipped_processes_only_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    for dataset_id in (0, 1):
+        timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+        rows = np.column_stack(
+            (
+                np.zeros((len(timestamps), 2)),
+                np.full(len(timestamps), 9.8),
+                np.zeros((len(timestamps), 3)),
+                timestamps,
+            )
+        )
+        rows.astype(np.float64).tofile(action_dir / f"{dataset_id}_ring_0.bin")
+    (action_dir / "0_timestamp.txt").write_text(
+        "1000000 a\n3000000 b\n", encoding="utf-8"
+    )
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for path in board_paths.values():
+        path.write_bytes(b"board provenance")
+    _publish_raw_success_outcome(
+        data_root, offset_root, board_paths[0], dataset_id=0
+    )
+    _publish_raw_event_coverage_skipped_outcome(
+        data_root, offset_root, board_paths[1], dataset_id=1
+    )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(10),
+            "frame_timestamp_raw": [
+                1_000_000,
+                1_500_000,
+                1_600_000,
+                1_700_000,
+                1_800_000,
+                1_900_000,
+                2_000_000,
+                2_100_000,
+                2_200_000,
+                2_300_000,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
+                "chunk_paths": (board_paths[recording.dataset_id],),
+            },
+        )(),
+    )
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="user_0",
+        action="0",
+        output_root=tmp_path / "outputs",
+        alignment_offset_root=offset_root,
+    )
+
+    assert result.summary["processed_recording_count"] == 1
+    assert result.summary["skipped_recording_count"] == 1
+    assert result.summary["recording_skips"] == [
+        {
+            "identity": {"user": "user_0", "action": "0", "dataset_id": 1},
+            "reason": "insufficient_event_coverage",
+            "diagnostics": {
+                "matched_event_count": 3,
+                "total_valid_event_count": 10,
+                "event_coverage_ratio": 0.3,
+                "minimum_event_coverage_ratio": 0.75,
+                "matched_press_count": 2,
+                "total_valid_press_count": 4,
+                "press_coverage_ratio": 0.5,
+                "matched_lift_count": 1,
+                "total_valid_lift_count": 6,
+                "lift_coverage_ratio": 1 / 6,
+                "fully_matched_touch_pair_count": 1,
+                "total_valid_touch_pair_count": 5,
+                "minimum_valid_touch_pairs": 5,
+                "best_offset_us": -238_451.75,
+                "best_vs_second_best_nearly_tied": False,
+                "failed_confidence_checks": ["minimum_event_coverage_ratio"],
+            },
+        }
+    ]
+    assert set(result.manifest["dataset_id"]) == {0}
+    assert set(result.board_events["dataset_id"]) == {0}
+
+
 def test_user_action_stale_skipped_outcome_fails_before_labels(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -950,6 +1121,58 @@ def test_user_action_all_skipped_fails_before_empty_aggregate(
     for dataset_id, path in board_paths.items():
         path.write_bytes(b"board provenance")
         _publish_raw_skipped_outcome(
+            data_root, offset_root, path, dataset_id=dataset_id
+        )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": pd.DataFrame(),
+                "contacts": pd.DataFrame(),
+                "chunk_paths": (board_paths[recording.dataset_id],),
+            },
+        )(),
+    )
+
+    with pytest.raises(BoardEventSegmentationError, match="at least one SUCCESS"):
+        segment_user_action_by_aligned_board_events(
+            data_root=data_root,
+            user="user_0",
+            action="0",
+            output_root=tmp_path / "outputs",
+            alignment_offset_root=offset_root,
+        )
+    assert not (tmp_path / "outputs").exists()
+
+
+def test_user_action_all_event_coverage_skips_fail_before_aggregation_or_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    for dataset_id in (0, 1):
+        timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+        rows = np.column_stack(
+            (
+                np.zeros((len(timestamps), 2)),
+                np.full(len(timestamps), 9.8),
+                np.zeros((len(timestamps), 3)),
+                timestamps,
+            )
+        )
+        rows.astype(np.float64).tofile(action_dir / f"{dataset_id}_ring_0.bin")
+    offset_root = tmp_path / "offsets"
+    board_paths = {
+        dataset_id: tmp_path / f"{dataset_id}_board_0.gz"
+        for dataset_id in (0, 1)
+    }
+    for dataset_id, path in board_paths.items():
+        path.write_bytes(b"board provenance")
+        _publish_raw_event_coverage_skipped_outcome(
             data_root, offset_root, path, dataset_id=dataset_id
         )
     monkeypatch.setattr(

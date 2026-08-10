@@ -716,6 +716,81 @@ def test_low_coverage_returns_failed_alignment_without_forcing_all_events() -> N
     assert not result.success
     assert result.report["matched_event_count"] == 1
     assert result.event_matches["matched"].sum() == 1
+    assert result.report["confidence_checks"] == {
+        "minimum_valid_touch_pairs": {
+            "passed": True,
+            "actual": 2,
+            "minimum": 1,
+        },
+        "minimum_event_coverage_ratio": {
+            "passed": False,
+            "actual": pytest.approx(0.25),
+            "minimum": 0.75,
+        },
+    }
+    assert result.report["failed_confidence_checks"] == [
+        "minimum_event_coverage_ratio"
+    ]
+
+
+def test_confidence_checks_use_total_valid_pairs_and_preserve_order() -> None:
+    detection = detect_board_events(_many_touch_frames(3))
+    events = detection.events
+    pairs = detection.touch_pairs
+    peaks = _manual_peaks([600_000.0, 900_000.0])
+
+    result = align_events_to_transient_peaks(
+        events,
+        pairs,
+        peaks,
+        ring_timestamp_range=(0.0, 5_000_000.0),
+        config=AlignmentConfig(
+            offset_search_range_us=(0.0, 1_000_000.0),
+            minimum_event_coverage_ratio=0.25,
+            minimum_valid_touch_pairs=5,
+        ),
+    )
+
+    assert result.report["fully_matched_touch_pair_count"] == 1
+    assert result.report["total_valid_touch_pair_count"] == 3
+    assert result.report["confidence_checks"]["minimum_valid_touch_pairs"] == {
+        "passed": False,
+        "actual": 3,
+        "minimum": 5,
+    }
+    assert result.report["failed_confidence_checks"] == [
+        "minimum_valid_touch_pairs"
+    ]
+
+
+def test_exact_event_coverage_boundary_passes_confidence_check() -> None:
+    frames = _many_touch_frames(5)
+    detection = detect_board_events(frames)
+    events = detection.events
+    pairs = detection.touch_pairs
+    event_timestamps = events["frame_timestamp_raw"].to_numpy(dtype=float)
+    peaks = _manual_peaks((event_timestamps[:4] + 500_000.0).tolist())
+
+    result = align_events_to_transient_peaks(
+        events,
+        pairs,
+        peaks,
+        ring_timestamp_range=(0.0, 10_000_000.0),
+        config=AlignmentConfig(
+            offset_search_range_us=(500_000.0, 500_000.0),
+            minimum_event_coverage_ratio=0.40,
+            minimum_valid_touch_pairs=5,
+        ),
+    )
+
+    assert result.report["event_coverage_ratio"] == pytest.approx(0.40)
+    assert result.report["confidence_checks"]["minimum_event_coverage_ratio"] == {
+        "passed": True,
+        "actual": pytest.approx(0.40),
+        "minimum": 0.40,
+    }
+    assert result.success
+    assert result.report["failed_confidence_checks"] == []
 
 
 def test_residual_trend_is_reported_without_affine_correction() -> None:

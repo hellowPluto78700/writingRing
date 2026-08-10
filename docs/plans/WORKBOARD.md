@@ -2,35 +2,36 @@
 
 ## Active plan
 
-- **Plan:** `docs/plans/TODO/02_Alignment_Outcome_Downstream_Consistency_Correction_Plan.md`
-- **Task file:** `docs/plans/TODO/02_Alignment_Outcome_Downstream_Consistency_Correction_TASKS.md`
-- **Baseline:** `a1cd88be4ab9d9f4bca3babd1019da0adc5c1ed8`
-- **Current task:** none
-- **Status:** COMPLETE
+- **Plan:** `docs/plans/TODO/07_Plan_Skip_Low_Confidence_Alignment_Recordings.md`
+- **Task file:** `docs/plans/TODO/07_Plan_Skip_Low_Confidence_Alignment_Recordings_TASKS.md`
+- **Baseline:** `2b05be416b4893eb8fbf596a6ac29a8e43b639a9`
+- **Current task:** T6
+- **Status:** BLOCKED — persistent full-pipeline terminal evidence
 
 ## Current DAG state
 
 | Task | State | Depends on | Compact evidence |
 | --- | --- | --- | --- |
-| T6 | DONE | — | Probe, worker, and fresh verifier PASS; 43 focused / 572 full passed, 1 skipped. |
-| T7 | DONE | T6 | Revised probe, worker, and fresh verifier PASS; bash -n / 30 focused / 581 full passed, 1 skipped. |
-| T8 | DONE | T6 | Probe, worker, and fresh verifier PASS; 45 focused / 574 full passed, 1 skipped. |
-| T9 | DONE | T7, T8 | PRIMARY validation and fresh final verifier PASS; bash -n / 75 focused / 581 full passed, 1 skipped. |
+| T1 | DONE | — | Probe CONFIRMED; worker DONE; fresh verifier PASS. Worker: 33 focused / 583 full passed, 1 skipped; verifier direct smoke/diff PASS (pytest unavailable read-only). |
+| T2 | DONE | T1 | Revised Probe; worker; fresh verifier PASS. Full-suite rerun unavailable in verifier environment; final validation retained for T6. |
+| T3 | DONE | T2 | Repair worker DONE; fresh verifier PASS. Authentic T1 nested confidence minima publish valid skips. |
+| T4 | DONE | T3 | Repaired worker DONE; fresh verifier PASS. 32 focused / 612 full passed, 1 skipped; bash -n/diff PASS. |
+| T5 | DONE | T2 | Probe CONFIRMED; worker DONE; fresh verifier PASS. Generic consumer remains source-unchanged. |
+| T6 | BLOCKED | T4, T5 | User decision recorded; temporary tree correctly excludes only user_4/action_0/dataset_0, but environment repeatedly terminates full pipeline before terminal QA/padding. |
 
 ## Verified contract digest
 
-- The previous Board-assisted alignment plan is COMPLETE and establishes the
-  current `SUCCESS`/`SKIPPED` validation, sibling roots, and recording-skip
-  accounting contract.
-- T6 adds an aligned-only `alignment_outcome_dependency`: authoritative source
-  IDs plus validated SUCCESS/SKIPPED entries and report SHA-256 digests.  A
-  missing or unequal dependency is stale for downstream consumers.
-- T7 compares that exact dependency in continue and final QA. Readable stale
-  summaries rebuild segment plus padding only; structural invalidity retains
-  full rebuild policy. T8 makes requested-rate validation SUCCESS-only after
-  provenance/current-outcome validation.
+- Prior completed plans establish the current `SUCCESS`/`SKIPPED` outcome,
+  sibling-root, validated-provenance, recording-skip accounting, and aligned
+  `alignment_outcome_dependency` contracts.
+- The plan must retain standalone strict failure, add only structured
+  confidence-derived skips, and never create consumer-visible success
+  artifacts for a skipped recording.
+- Plan-body references to a `03_...` plan/task filename are reconciled to the
+  user-selected `07_...` companion task file; no duplicate plan is created.
 
 ## Next required action
 
-Plan complete. T6–T9 and the fresh final verifier PASS are recorded; optional
-T10 remains deferred and is not required by the requested Action0 contract.
+Run the full Action0 pipeline in a persistent environment against the prepared
+temporary acceptance input tree (excluding only user_4/action_0/dataset_0),
+retain exit-0 QA/padding evidence, then request a fresh T6 verifier.

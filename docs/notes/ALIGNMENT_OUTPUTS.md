@@ -63,9 +63,23 @@ requires explicit outcome-transition authorization. Publishing a new completed
 outcome after `FAILED` follows the ordinary overwrite permission for the new
 target artifacts; stale opposite artifacts are removed so the final manifest
 is conflict-free. Malformed reports, artifacts, or skip diagnostics fail
-through `AlignmentOutcomeError`. A skip proves a backward timestamp jump,
+through `AlignmentOutcomeError`.
+
+The only validated skip reasons are:
+
+```text
+initial_interval_no_usable_pair
+insufficient_valid_touch_pairs
+insufficient_event_coverage
+```
+
+The initial-interval reason proves the backward-jump/prefix condition,
 positive global valid-pair count, zero usable-prefix valid pairs, and coherent
-prefix/jump frame diagnostics.
+prefix/jump frame diagnostics. The confidence-derived reasons instead carry
+validated count, threshold, coverage, and failed-check diagnostics proving the
+corresponding insufficient evidence. Every `SKIPPED` outcome publishes its
+authoritative report and sibling skip JSON, and never publishes an offset TXT
+or verification PNG.
 
 A failed work-axis match retains its report but writes no offset TXT or
 verification PNG. A successful work-axis match whose canonical projection

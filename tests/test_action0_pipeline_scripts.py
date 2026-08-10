@@ -576,6 +576,7 @@ def test_aligned_board_cli_requests_skip_and_authorized_outcome_overwrite() -> N
     align_end = common.index("pipeline_segment()")
     align_block = common[align_start:align_end]
     assert "--initial-interval-policy skip" in align_block
+    assert "--unalignable-recording-policy skip" in align_block
     assert "pipeline_validate_alignment_outcome" in align_block
     assert "pipeline_require_file" not in align_block
 
@@ -721,6 +722,56 @@ def test_alignment_stage_validity_accepts_success_and_skip_but_rejects_invalid(
     assert invalid.returncode != 0
 
 
+def test_mixed_alignment_outcomes_continue_through_alignment_stage(
+    tmp_path: Path,
+) -> None:
+    calls_path = tmp_path / "calls.log"
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"CALLS={shlex.quote(str(calls_path))}",
+            "LOG_ROOT=/unused",
+            "PYTHON_CMD=(python3)",
+            "DATA_ROOT=/unused",
+            "SPIKE_ROOT=/unused",
+            "OFFSET_ROOT=/unused",
+            "ALIGNMENT_REPORT_ROOT=/unused",
+            "ALIGNMENT_VERIFICATION_ROOT=/unused",
+            "BOUNDARY_MODE=aligned-board-events",
+            "RECORD_USERS=(u u)",
+            "RECORD_ACTIONS=(0 0)",
+            "RECORD_DATASET_IDS=(0 1)",
+            "ALIGN_OVERWRITE_ARGS=()",
+            "pipeline_run_logged() { printf 'run:%s\\n' \"$*\" >>\"$CALLS\"; }",
+            "pipeline_validate_alignment_outcome() {",
+            "  case \"$3\" in",
+            "    0) PIPELINE_LAST_ALIGNMENT_STATUS=SUCCESS; return 0;;",
+            "    1) PIPELINE_LAST_ALIGNMENT_STATUS=SKIPPED; return 0;;",
+            "    *) PIPELINE_LAST_ALIGNMENT_STATUS=INVALID; return 1;;",
+            "  esac",
+            "}",
+            "pipeline_segment() { printf 'segment\\n' >>\"$CALLS\"; }",
+            "pipeline_padding() { printf 'padding\\n' >>\"$CALLS\"; }",
+            "pipeline_execute_from_stage align",
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    calls = calls_path.read_text(encoding="utf-8").splitlines()
+    assert len(calls) == 4
+    assert "--initial-interval-policy skip" in calls[0]
+    assert "--unalignable-recording-policy skip" in calls[0]
+    assert "--initial-interval-policy skip" in calls[1]
+    assert "--unalignable-recording-policy skip" in calls[1]
+    assert calls[2:] == ["segment", "padding"]
+
+
 def test_qa_accounts_success_skipped_and_invalid_recordings_after_one_contract_call(
     tmp_path: Path,
 ) -> None:
@@ -789,3 +840,70 @@ def test_qa_accounts_success_skipped_and_invalid_recordings_after_one_contract_c
     assert "alignment_outcomes_success=1" in log
     assert "alignment_outcomes_skipped=1" in log
     assert "alignment_outcomes_invalid=1" in log
+
+
+def test_qa_continues_after_mixed_success_and_skipped_alignment_outcomes(
+    tmp_path: Path,
+) -> None:
+    for relative in (
+        "preprocessedIMU/a_preprocessing.json",
+        "preprocessedIMU/b_preprocessing.json",
+        "spikeEncoding/a/spikeIMU.npy",
+        "spikeEncoding/b/spikeIMU.npy",
+        "segmentation/user/user_action_0_segmentation_summary.json",
+        "segmentation/user/user_action_0_spikeIMU.npy",
+        "segmentation-padded/padding_dataset_summary.json",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"artifact")
+
+    qa_log = tmp_path / "qa.log"
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"QA_LOG={shlex.quote(str(qa_log))}",
+            "POST_ENCODE_TRANSFORM=none",
+            "COMBINATION_ROOT=/unused",
+            "LOG_ROOT=/unused",
+            "RING_FILES=(a b)",
+            "RECORD_USERS=(u u)",
+            "RECORD_ACTIONS=(0 0)",
+            "RECORD_DATASET_IDS=(0 1)",
+            "PIPELINE_USERS=(user)",
+            "ACTION=0",
+            "BOUNDARY_MODE=aligned-board-events",
+            f"PREPROCESS_ROOT={shlex.quote(str(tmp_path / 'preprocessedIMU'))}",
+            f"SPIKE_ROOT={shlex.quote(str(tmp_path / 'spikeEncoding'))}",
+            f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segmentation'))}",
+            f"PADDING_OUTPUT_ROOT={shlex.quote(str(tmp_path / 'segmentation-padded'))}",
+            "pipeline_require_file() { :; }",
+            "pipeline_validate_spike_artifact() { :; }",
+            "pipeline_validate_segment_artifact() { :; }",
+            "pipeline_validate_padding_artifact() { :; }",
+            "pipeline_validate_alignment_outcome() {",
+            "  case \"$3\" in",
+            "    0) PIPELINE_LAST_ALIGNMENT_STATUS=SUCCESS; return 0;;",
+            "    1) PIPELINE_LAST_ALIGNMENT_STATUS=SKIPPED; return 0;;",
+            "    *) PIPELINE_LAST_ALIGNMENT_STATUS=INVALID; return 1;;",
+            "  esac",
+            "}",
+            "pipeline_alignment_outcome_dependencies_valid() { return 0; }",
+            "pipeline_qa",
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "Alignment outcomes: total=2 success=1 skipped=1 invalid=0" in completed.stdout
+    assert "QA passed for 2 ring_0 recording(s), 1 user(s)." in completed.stdout
+    log = qa_log.read_text(encoding="utf-8")
+    assert "alignment_outcomes_total=2" in log
+    assert "alignment_outcomes_success=1" in log
+    assert "alignment_outcomes_skipped=1" in log
+    assert "alignment_outcomes_invalid=0" in log

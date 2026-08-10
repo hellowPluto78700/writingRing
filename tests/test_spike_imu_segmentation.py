@@ -1160,6 +1160,232 @@ def test_alignment_cli_initial_interval_error_vs_explicit_skip(
     ).is_file()
 
 
+def _patch_failed_alignment_cli(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    failed_confidence_checks: object,
+) -> tuple[list[str], Path, Path, Path, Path]:
+    """Patch the CLI up to one structured, unsuccessful alignment result."""
+
+    data_root = _data_root(tmp_path)
+    board_chunk = tmp_path / "0_board_0.gz"
+    board_chunk.write_bytes(b"real ordered Board chunk")
+    board = SimpleNamespace(
+        frames=pd.DataFrame(),
+        contacts=pd.DataFrame(),
+        chunk_paths=(board_chunk,),
+        chunk_reports=(),
+    )
+    empty_events = pd.DataFrame()
+    monkeypatch.setattr("writingring.board_loader.load_board", lambda _recording: board)
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_board_events",
+        lambda _frames: SimpleNamespace(events=empty_events, touch_pairs=empty_events),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.select_board_interval_from_presses",
+        lambda _frames, _contacts, _detection: SimpleNamespace(
+            events=empty_events,
+            touch_pairs=empty_events,
+        ),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_transient_peak_regions",
+        lambda _score, _timestamps: pd.DataFrame(),
+    )
+    total_valid_touch_pair_count = (
+        3
+        if isinstance(failed_confidence_checks, list)
+        and "minimum_valid_touch_pairs" in failed_confidence_checks
+        else 5
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.align_events_to_transient_peaks",
+        lambda *_args, **_kwargs: SequenceAlignmentResult(
+            success=False,
+            best_offset_us=123.0,
+            second_best_offset_us=456.0,
+            candidates=pd.DataFrame(),
+            event_matches=pd.DataFrame(),
+            touch_pair_matches=pd.DataFrame(),
+            report={
+                "alignment_model": "constant_offset",
+                "failed_confidence_checks": failed_confidence_checks,
+                "confidence_checks": {
+                    "minimum_valid_touch_pairs": {
+                        "passed": total_valid_touch_pair_count >= 5,
+                        "actual": total_valid_touch_pair_count,
+                        "minimum": 5,
+                    },
+                    "minimum_event_coverage_ratio": {
+                        "passed": False,
+                        "actual": 0.1,
+                        "minimum": 0.4,
+                    },
+                },
+                "matched_event_count": 1,
+                "total_valid_event_count": 10,
+                "event_coverage_ratio": 0.1,
+                "matched_press_count": 1,
+                "total_valid_press_count": 5,
+                "press_coverage_ratio": 0.2,
+                "matched_lift_count": 0,
+                "total_valid_lift_count": 5,
+                "lift_coverage_ratio": 0.0,
+                "fully_matched_touch_pair_count": 0,
+                "total_valid_touch_pair_count": total_valid_touch_pair_count,
+                "best_offset_us": 123.0,
+                "best_vs_second_best_nearly_tied": False,
+            },
+            warnings=("low confidence",),
+        ),
+    )
+    offset_root = tmp_path / "offsets"
+    verification_root = tmp_path / "verification"
+    report_root = tmp_path / "reports"
+    common = [
+        "--data-root", str(data_root),
+        "--user", "writer_a", "--action", "letters", "--dataset-id", "0",
+        "--offset-output-root", str(offset_root),
+        "--verification-output-root", str(verification_root),
+        "--report-output-root", str(report_root),
+    ]
+    skip_path = offset_root / "writer_a" / "action_letters" / "0_ring_board_skip.json"
+    offset_path = offset_root / "writer_a" / "action_letters" / "0_ring_board_offset.txt"
+    verification_path = (
+        verification_root / "writer_a" / "action_letters"
+        / "0_alignment_verification.png"
+    )
+    report_path = report_root / "writer_a" / "action_letters" / "0_alignment_report.json"
+    return common, skip_path, offset_path, verification_path, report_path
+
+
+@pytest.mark.parametrize(
+    ("failed_confidence_checks", "expected_reason"),
+    [
+        (["minimum_event_coverage_ratio"], "insufficient_event_coverage"),
+        (["minimum_valid_touch_pairs"], "insufficient_valid_touch_pairs"),
+    ],
+)
+def test_alignment_cli_unalignable_policy_default_and_explicit_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_confidence_checks: list[str],
+    expected_reason: str,
+) -> None:
+    common, skip_path, offset_path, verification_path, report_path = (
+        _patch_failed_alignment_cli(
+            tmp_path,
+            monkeypatch,
+            failed_confidence_checks=failed_confidence_checks,
+        )
+    )
+
+    # Strict-by-default keeps an unsuccessful result FAILED and report-only.
+    assert align_ring_board.main(common) == 2
+    failed_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert failed_report["alignment_status"] == "failed"
+    assert not skip_path.exists()
+    assert not offset_path.exists()
+    assert not verification_path.exists()
+
+    # A new explicit opt-in publishes only the validated SKIPPED artifacts.
+    common.append("--unalignable-recording-policy")
+    common.append("skip")
+    common.extend(["--overwrite-report", "--overwrite-outcome"])
+    assert align_ring_board.main(common) == 0
+    skip = json.loads(skip_path.read_text(encoding="utf-8"))
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert skip["reason"] == expected_reason
+    assert skip["diagnostics"]["minimum_valid_touch_pairs"] == 5
+    assert skip["diagnostics"]["minimum_event_coverage_ratio"] == pytest.approx(0.4)
+    assert report["alignment_status"] == "skipped"
+    assert not offset_path.exists()
+    assert not verification_path.exists()
+
+
+@pytest.mark.parametrize(
+    "failed_confidence_checks",
+    [
+        None,
+        ["unexpected_check"],
+        ["minimum_event_coverage_ratio", "minimum_event_coverage_ratio"],
+        ["minimum_event_coverage_ratio", "minimum_valid_touch_pairs"],
+    ],
+)
+def test_alignment_cli_unalignable_policy_rejects_malformed_or_unexpected_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed_confidence_checks: object,
+) -> None:
+    common, skip_path, offset_path, verification_path, report_path = (
+        _patch_failed_alignment_cli(
+            tmp_path,
+            monkeypatch,
+            failed_confidence_checks=failed_confidence_checks,
+        )
+    )
+    common.extend(["--unalignable-recording-policy", "skip"])
+
+    assert align_ring_board.main(common) == 2
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["alignment_status"] == "failed"
+    assert not skip_path.exists()
+    assert not offset_path.exists()
+    assert not verification_path.exists()
+
+
+def test_alignment_cli_new_policy_also_controls_legacy_initial_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _data_root(tmp_path)
+    board_chunk = tmp_path / "0_board_0.gz"
+    board_chunk.write_bytes(b"real ordered Board chunk")
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=10,
+        next_global_frame_index=11,
+        previous_timestamp_raw=1_000,
+        next_timestamp_raw=900,
+        prefix_boundary_position=11,
+        last_pre_jump_global_frame_index=10,
+        total_global_valid_pair_count=1,
+        usable_prefix_valid_pair_count=0,
+    )
+    empty_events = pd.DataFrame()
+    monkeypatch.setattr(
+        "writingring.board_loader.load_board",
+        lambda _recording: SimpleNamespace(
+            frames=pd.DataFrame(),
+            contacts=pd.DataFrame(),
+            chunk_paths=(board_chunk,),
+            chunk_reports=(),
+        ),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_board_events",
+        lambda _frames: SimpleNamespace(events=empty_events, touch_pairs=empty_events),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.select_board_interval_from_presses",
+        lambda _frames, _contacts, _detection: (_ for _ in ()).throw(error),
+    )
+    common = [
+        "--data-root", str(data_root),
+        "--user", "writer_a", "--action", "letters", "--dataset-id", "0",
+        "--offset-output-root", str(tmp_path / "offsets"),
+        "--verification-output-root", str(tmp_path / "verification"),
+        "--report-output-root", str(tmp_path / "reports"),
+        "--unalignable-recording-policy", "skip",
+    ]
+    assert align_ring_board.main(common) == 0
+    assert (
+        tmp_path / "offsets" / "writer_a" / "action_letters"
+        / "0_ring_board_skip.json"
+    ).is_file()
+
+
 @pytest.mark.skipif(
     not (Path("data") / "user_1" / "4" / "2_ring_0.bin").is_file(),
     reason="repository sample data is unavailable",

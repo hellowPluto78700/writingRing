@@ -1724,6 +1724,48 @@ _SKIP_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(
         "usable_prefix_valid_pair_count",
     }
 )
+_SKIP_CONFIDENCE_CHECK_NAMES: Final[tuple[str, ...]] = (
+    "minimum_valid_touch_pairs",
+    "minimum_event_coverage_ratio",
+)
+_INSUFFICIENT_VALID_TOUCH_PAIR_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "total_valid_touch_pair_count",
+        "minimum_valid_touch_pairs",
+        "matched_event_count",
+        "total_valid_event_count",
+        "event_coverage_ratio",
+        "minimum_event_coverage_ratio",
+        "failed_confidence_checks",
+    }
+)
+_INSUFFICIENT_EVENT_COVERAGE_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "matched_event_count",
+        "total_valid_event_count",
+        "event_coverage_ratio",
+        "minimum_event_coverage_ratio",
+        "matched_press_count",
+        "total_valid_press_count",
+        "press_coverage_ratio",
+        "matched_lift_count",
+        "total_valid_lift_count",
+        "lift_coverage_ratio",
+        "fully_matched_touch_pair_count",
+        "total_valid_touch_pair_count",
+        "minimum_valid_touch_pairs",
+        "best_offset_us",
+        "best_vs_second_best_nearly_tied",
+        "failed_confidence_checks",
+    }
+)
+_ALIGNMENT_SKIP_REASONS: Final[frozenset[str]] = frozenset(
+    {
+        ALIGNMENT_SKIP_REASON,
+        "insufficient_valid_touch_pairs",
+        "insufficient_event_coverage",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1863,7 +1905,7 @@ AlignmentProvenance = AlignmentInputProvenance
 
 @dataclass(frozen=True, slots=True)
 class AlignmentSkipArtifact:
-    """Validated representation of the only publishable alignment skip."""
+    """Validated representation of a publishable alignment skip."""
 
     recording: Mapping[str, object]
     diagnostics: Mapping[str, object]
@@ -1878,6 +1920,7 @@ class AlignmentSkipArtifact:
             self.alignment_skip_schema_version,
             name="alignment_skip_schema_version",
         )
+        _validated_skip_reason(self.reason)
 
     @property
     def schema_version(self) -> int:
@@ -1886,7 +1929,11 @@ class AlignmentSkipArtifact:
     @_normalize_outcome_errors
     def to_dict(self) -> dict[str, object]:
         recording = _validated_recording_mapping(self.recording)
-        diagnostics = _validate_skip_diagnostics(self.diagnostics)
+        reason = _validated_skip_reason(self.reason)
+        diagnostics = _validate_skip_diagnostics(
+            self.diagnostics,
+            reason=reason,
+        )
         input_payload = _coerce_input_provenance(self.input_provenance).to_dict()
         board_payload = _coerce_board_provenance(self.board_provenance)
         _literal_schema_version(
@@ -1895,13 +1942,11 @@ class AlignmentSkipArtifact:
         )
         if self.artifact_kind != "alignment_skip":
             raise AlignmentOutcomeError("alignment skip artifact_kind is invalid")
-        if self.reason != ALIGNMENT_SKIP_REASON:
-            raise AlignmentOutcomeError("alignment skip reason is unsupported")
         return {
             "alignment_skip_schema_version": self.alignment_skip_schema_version,
             "artifact_kind": self.artifact_kind,
             "recording": recording,
-            "reason": self.reason,
+            "reason": reason,
             "diagnostics": diagnostics,
             "input_provenance": input_payload,
             "board_provenance": board_payload,
@@ -1927,12 +1972,16 @@ class AlignmentSkipArtifact:
                 "alignment skip artifact is missing required field(s): "
                 + ", ".join(missing)
             )
+        reason = _validated_skip_reason(payload["reason"])
         return cls(
             recording=_validated_recording_mapping(payload["recording"]),
-            diagnostics=_validate_skip_diagnostics(payload["diagnostics"]),
+            diagnostics=_validate_skip_diagnostics(
+                payload["diagnostics"],
+                reason=reason,
+            ),
             input_provenance=_coerce_input_provenance(payload["input_provenance"]),
             board_provenance=_coerce_board_provenance(payload["board_provenance"]),
-            reason=payload["reason"],  # type: ignore[arg-type]
+            reason=reason,
             alignment_skip_schema_version=_literal_schema_version(
                 payload["alignment_skip_schema_version"],
                 name="alignment_skip_schema_version",
@@ -2414,7 +2463,7 @@ def validate_alignment_outcome(
             expected_input_provenance=expected_input,
             expected_board_provenance=expected_board,
         )
-        if skip.reason != ALIGNMENT_SKIP_REASON:
+        if skip.reason not in _ALIGNMENT_SKIP_REASONS:
             raise AlignmentOutcomeError("alignment skip reason is unsupported")
     return AlignmentOutcome(
         status=status,
@@ -3021,7 +3070,28 @@ def _report_identity(report: Mapping[str, object]) -> dict[str, object] | None:
     return _validated_recording_mapping(value)
 
 
-def _validate_skip_diagnostics(value: object) -> dict[str, object]:
+def _validated_skip_reason(value: object) -> str:
+    if not isinstance(value, str) or value not in _ALIGNMENT_SKIP_REASONS:
+        raise AlignmentOutcomeError("alignment skip reason is unsupported")
+    return value
+
+
+def _validate_skip_diagnostics(
+    value: object,
+    *,
+    reason: str = ALIGNMENT_SKIP_REASON,
+) -> dict[str, object]:
+    """Validate diagnostics using the schema selected by ``reason``."""
+
+    validated_reason = _validated_skip_reason(reason)
+    if validated_reason == ALIGNMENT_SKIP_REASON:
+        return _validate_initial_interval_skip_diagnostics(value)
+    if validated_reason == "insufficient_valid_touch_pairs":
+        return _validate_insufficient_valid_touch_pair_diagnostics(value)
+    return _validate_insufficient_event_coverage_diagnostics(value)
+
+
+def _validate_initial_interval_skip_diagnostics(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise AlignmentOutcomeError("alignment skip diagnostics must be an object")
     if set(value) != _SKIP_DIAGNOSTIC_KEYS:
@@ -3091,6 +3161,339 @@ def _validate_skip_diagnostics(value: object) -> dict[str, object]:
         raise AlignmentOutcomeError(
             "alignment skip diagnostics frame identities must be contiguous at the prefix boundary"
         )
+    return result
+
+
+def _validate_exact_skip_diagnostic_keys(
+    value: object,
+    *,
+    expected: frozenset[str],
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise AlignmentOutcomeError("alignment skip diagnostics must be an object")
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(str(key) for key in expected - actual)
+        extra = sorted(str(key) for key in actual - expected)
+        details: list[str] = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if extra:
+            details.append("unknown " + ", ".join(extra))
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics keys are not exact ("
+            + "; ".join(details)
+            + ")"
+        )
+    return value
+
+
+def _skip_diagnostic_count(value: object, *, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (int, np.integer)
+    ):
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite nonnegative integer"
+        )
+    try:
+        result = int(value)
+        finite = math.isfinite(float(result))
+    except (TypeError, ValueError, OverflowError):
+        finite = False
+        result = 0
+    if not finite or result < 0:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite nonnegative integer"
+        )
+    return result
+
+
+def _skip_diagnostic_positive_count(value: object, *, name: str) -> int:
+    result = _skip_diagnostic_count(value, name=name)
+    if result <= 0:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite positive integer"
+        )
+    return result
+
+
+def _skip_diagnostic_ratio(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite ratio in [0, 1]"
+        )
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite ratio in [0, 1]"
+        ) from error
+    if not math.isfinite(result) or not 0.0 <= result <= 1.0:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite ratio in [0, 1]"
+        )
+    return result
+
+
+def _skip_diagnostic_finite_number(value: object, *, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise AlignmentOutcomeError(f"diagnostics.{name} must be a finite number")
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{name} must be a finite number"
+        ) from error
+    if not math.isfinite(result):
+        raise AlignmentOutcomeError(f"diagnostics.{name} must be a finite number")
+    return result
+
+
+def _validate_failed_confidence_checks(
+    value: object,
+    *,
+    reason: str,
+) -> list[str]:
+    if not isinstance(value, list):
+        raise AlignmentOutcomeError(
+            "diagnostics.failed_confidence_checks must be a list"
+        )
+    if any(not isinstance(item, str) for item in value):
+        raise AlignmentOutcomeError(
+            "diagnostics.failed_confidence_checks must contain strings"
+        )
+    if len(set(value)) != len(value):
+        raise AlignmentOutcomeError(
+            "diagnostics.failed_confidence_checks must not contain duplicates"
+        )
+    if any(item not in _SKIP_CONFIDENCE_CHECK_NAMES for item in value):
+        raise AlignmentOutcomeError(
+            "diagnostics.failed_confidence_checks contains an unknown check"
+        )
+    positions = [_SKIP_CONFIDENCE_CHECK_NAMES.index(item) for item in value]
+    if positions != sorted(positions):
+        raise AlignmentOutcomeError(
+            "diagnostics.failed_confidence_checks must preserve T1 check order"
+        )
+    if reason == "insufficient_valid_touch_pairs":
+        if "minimum_valid_touch_pairs" not in value:
+            raise AlignmentOutcomeError(
+                "insufficient valid-pair skips must fail minimum_valid_touch_pairs"
+            )
+    elif value != ["minimum_event_coverage_ratio"]:
+        raise AlignmentOutcomeError(
+            "insufficient event-coverage skips must fail only "
+            "minimum_event_coverage_ratio"
+        )
+    return list(value)
+
+
+def _validate_skip_coverage_triplet(
+    result: dict[str, object],
+    *,
+    matched_key: str,
+    total_key: str,
+    ratio_key: str,
+) -> None:
+    matched = int(result[matched_key])
+    total = int(result[total_key])
+    ratio = float(result[ratio_key])
+    if total <= 0:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{total_key} must be positive as a ratio denominator"
+        )
+    if matched > total:
+        raise AlignmentOutcomeError(
+            f"diagnostics.{matched_key} cannot exceed diagnostics.{total_key}"
+        )
+    if not math.isclose(
+        ratio,
+        matched / total,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise AlignmentOutcomeError(
+            f"diagnostics.{ratio_key} is inconsistent with "
+            f"diagnostics.{matched_key}/diagnostics.{total_key}"
+        )
+
+
+def _validate_insufficient_valid_touch_pair_diagnostics(
+    value: object,
+) -> dict[str, object]:
+    diagnostics = _validate_exact_skip_diagnostic_keys(
+        value,
+        expected=_INSUFFICIENT_VALID_TOUCH_PAIR_DIAGNOSTIC_KEYS,
+    )
+    result: dict[str, object] = {
+        "total_valid_touch_pair_count": _skip_diagnostic_count(
+            diagnostics["total_valid_touch_pair_count"],
+            name="total_valid_touch_pair_count",
+        ),
+        "minimum_valid_touch_pairs": _skip_diagnostic_positive_count(
+            diagnostics["minimum_valid_touch_pairs"],
+            name="minimum_valid_touch_pairs",
+        ),
+        "matched_event_count": _skip_diagnostic_count(
+            diagnostics["matched_event_count"],
+            name="matched_event_count",
+        ),
+        "total_valid_event_count": _skip_diagnostic_count(
+            diagnostics["total_valid_event_count"],
+            name="total_valid_event_count",
+        ),
+        "event_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["event_coverage_ratio"],
+            name="event_coverage_ratio",
+        ),
+        "minimum_event_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["minimum_event_coverage_ratio"],
+            name="minimum_event_coverage_ratio",
+        ),
+        "failed_confidence_checks": _validate_failed_confidence_checks(
+            diagnostics["failed_confidence_checks"],
+            reason="insufficient_valid_touch_pairs",
+        ),
+    }
+    total_pairs = int(result["total_valid_touch_pair_count"])
+    minimum_pairs = int(result["minimum_valid_touch_pairs"])
+    if not 0 < total_pairs < minimum_pairs:
+        raise AlignmentOutcomeError(
+            "insufficient valid-pair diagnostics must prove "
+            "0 < total_valid_touch_pair_count < minimum_valid_touch_pairs"
+        )
+    _validate_skip_coverage_triplet(
+        result,
+        matched_key="matched_event_count",
+        total_key="total_valid_event_count",
+        ratio_key="event_coverage_ratio",
+    )
+    return result
+
+
+def _validate_insufficient_event_coverage_diagnostics(
+    value: object,
+) -> dict[str, object]:
+    diagnostics = _validate_exact_skip_diagnostic_keys(
+        value,
+        expected=_INSUFFICIENT_EVENT_COVERAGE_DIAGNOSTIC_KEYS,
+    )
+    result: dict[str, object] = {
+        "matched_event_count": _skip_diagnostic_count(
+            diagnostics["matched_event_count"],
+            name="matched_event_count",
+        ),
+        "total_valid_event_count": _skip_diagnostic_count(
+            diagnostics["total_valid_event_count"],
+            name="total_valid_event_count",
+        ),
+        "event_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["event_coverage_ratio"],
+            name="event_coverage_ratio",
+        ),
+        "minimum_event_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["minimum_event_coverage_ratio"],
+            name="minimum_event_coverage_ratio",
+        ),
+        "matched_press_count": _skip_diagnostic_count(
+            diagnostics["matched_press_count"],
+            name="matched_press_count",
+        ),
+        "total_valid_press_count": _skip_diagnostic_count(
+            diagnostics["total_valid_press_count"],
+            name="total_valid_press_count",
+        ),
+        "press_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["press_coverage_ratio"],
+            name="press_coverage_ratio",
+        ),
+        "matched_lift_count": _skip_diagnostic_count(
+            diagnostics["matched_lift_count"],
+            name="matched_lift_count",
+        ),
+        "total_valid_lift_count": _skip_diagnostic_count(
+            diagnostics["total_valid_lift_count"],
+            name="total_valid_lift_count",
+        ),
+        "lift_coverage_ratio": _skip_diagnostic_ratio(
+            diagnostics["lift_coverage_ratio"],
+            name="lift_coverage_ratio",
+        ),
+        "fully_matched_touch_pair_count": _skip_diagnostic_count(
+            diagnostics["fully_matched_touch_pair_count"],
+            name="fully_matched_touch_pair_count",
+        ),
+        "total_valid_touch_pair_count": _skip_diagnostic_count(
+            diagnostics["total_valid_touch_pair_count"],
+            name="total_valid_touch_pair_count",
+        ),
+        "minimum_valid_touch_pairs": _skip_diagnostic_positive_count(
+            diagnostics["minimum_valid_touch_pairs"],
+            name="minimum_valid_touch_pairs",
+        ),
+        "best_offset_us": _skip_diagnostic_finite_number(
+            diagnostics["best_offset_us"],
+            name="best_offset_us",
+        ),
+        "best_vs_second_best_nearly_tied": diagnostics[
+            "best_vs_second_best_nearly_tied"
+        ],
+        "failed_confidence_checks": _validate_failed_confidence_checks(
+            diagnostics["failed_confidence_checks"],
+            reason="insufficient_event_coverage",
+        ),
+    }
+    if not isinstance(result["best_vs_second_best_nearly_tied"], bool):
+        raise AlignmentOutcomeError(
+            "diagnostics.best_vs_second_best_nearly_tied must be a boolean"
+        )
+    total_pairs = int(result["total_valid_touch_pair_count"])
+    minimum_pairs = int(result["minimum_valid_touch_pairs"])
+    if total_pairs < minimum_pairs:
+        raise AlignmentOutcomeError(
+            "insufficient event-coverage diagnostics require at least "
+            "minimum_valid_touch_pairs"
+        )
+    if int(result["fully_matched_touch_pair_count"]) > total_pairs:
+        raise AlignmentOutcomeError(
+            "diagnostics.fully_matched_touch_pair_count cannot exceed "
+            "diagnostics.total_valid_touch_pair_count"
+        )
+    if int(result["total_valid_event_count"]) <= 0:
+        raise AlignmentOutcomeError(
+            "insufficient event-coverage diagnostics require positive "
+            "total_valid_event_count"
+        )
+    if not (
+        float(result["event_coverage_ratio"])
+        < float(result["minimum_event_coverage_ratio"])
+    ):
+        raise AlignmentOutcomeError(
+            "insufficient event-coverage diagnostics require event coverage "
+            "below its minimum"
+        )
+    _validate_skip_coverage_triplet(
+        result,
+        matched_key="matched_event_count",
+        total_key="total_valid_event_count",
+        ratio_key="event_coverage_ratio",
+    )
+    _validate_skip_coverage_triplet(
+        result,
+        matched_key="matched_press_count",
+        total_key="total_valid_press_count",
+        ratio_key="press_coverage_ratio",
+    )
+    _validate_skip_coverage_triplet(
+        result,
+        matched_key="matched_lift_count",
+        total_key="total_valid_lift_count",
+        ratio_key="lift_coverage_ratio",
+    )
     return result
 
 

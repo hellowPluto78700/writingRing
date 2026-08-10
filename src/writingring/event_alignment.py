@@ -2023,6 +2023,23 @@ def _build_alignment_report(
     lift_coverage = matched_lift / total_lift if total_lift else None
     pair_objective_enabled = total_press > 0 and total_lift > 0
     pair_coverage = full_pairs / total_pairs if pair_objective_enabled else None
+    confidence_checks: dict[str, dict[str, object]] = {
+        "minimum_valid_touch_pairs": {
+            "passed": total_pairs >= config.minimum_valid_touch_pairs,
+            "actual": total_pairs,
+            "minimum": config.minimum_valid_touch_pairs,
+        },
+        "minimum_event_coverage_ratio": {
+            "passed": event_coverage >= config.minimum_event_coverage_ratio,
+            "actual": event_coverage,
+            "minimum": config.minimum_event_coverage_ratio,
+        },
+    }
+    failed_confidence_checks = [
+        name
+        for name, check in confidence_checks.items()
+        if not bool(check["passed"])
+    ]
     residual_ms = np.abs(matched["residual_us"].to_numpy(dtype=float)) / 1_000.0
     distances = matched["normalized_peak_distance"].to_numpy(dtype=float)
     shifted = matches["shifted_event_timestamp"].to_numpy(dtype=float)
@@ -2126,6 +2143,8 @@ def _build_alignment_report(
         "pair_aware_dynamic_programming": pair_objective_enabled,
         "structural_success": True,
         "alignment_success": success,
+        "confidence_checks": confidence_checks,
+        "failed_confidence_checks": failed_confidence_checks,
         "best_offset_us": float(best["offset_us"]),
         "work_axis_offset_us": float(best["offset_us"]),
         "second_best_offset_us": (

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import replace
 import json
 import os
@@ -79,6 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("error", "skip"),
         default="error",
         help="handling for T1's exact unusable initial Board interval",
+    )
+    parser.add_argument(
+        "--unalignable-recording-policy",
+        choices=("error", "skip"),
+        default="error",
+        help=(
+            "handling for structured low-confidence alignment results "
+            "(default: error)"
+        ),
     )
     parser.add_argument("--show-smoothed-transient", action="store_true")
     return parser
@@ -228,7 +238,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 detection,
             )
         except InitialIntervalNoUsablePairError as error:
-            if args.initial_interval_policy != "skip":
+            if (
+                args.initial_interval_policy != "skip"
+                and args.unalignable_recording_policy != "skip"
+            ):
                 raise
             skip_artifact = make_alignment_skip_artifact(
                 error,
@@ -384,6 +397,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "timestamp_source_hash_verified": True,
             }
         if not result.success:
+            skip_reason = _classify_failed_confidence_checks(
+                result.report.get("failed_confidence_checks")
+                if isinstance(result.report, Mapping)
+                else None
+            )
+            if (
+                args.unalignable_recording_policy == "skip"
+                and skip_reason is not None
+            ):
+                skip_artifact = _build_confidence_skip_artifact(
+                    alignment_report,
+                    reason=skip_reason,
+                    user=args.user,
+                    action=args.action,
+                    dataset_id=args.dataset_id,
+                    input_provenance=input_provenance,
+                    board_provenance=board_provenance,
+                )
+                if skip_artifact is not None:
+                    publish_alignment_outcome(
+                        outcome_paths,
+                        status=AlignmentOutcomeStatus.SKIPPED,
+                        report=alignment_report,
+                        skip_artifact=skip_artifact,
+                        overwrite_offset=args.overwrite_offset,
+                        overwrite_report=args.overwrite_report,
+                        overwrite_outcome=args.overwrite_outcome,
+                    )
+                    print(f"Alignment skipped: {skip_reason}")
+                    print(f"Skip file: {outcome_paths.skip_json_path}")
+                    print(f"Alignment report: {outcome_paths.report_path}")
+                    return 0
             publish_alignment_outcome(
                 outcome_paths,
                 status=AlignmentOutcomeStatus.FAILED,
@@ -592,6 +637,114 @@ def _temporary_output_path(final_path: Path) -> Path:
     temporary = Path(name)
     temporary.unlink(missing_ok=True)
     return temporary
+
+
+def _classify_failed_confidence_checks(value: object) -> str | None:
+    """Return a permitted skip reason for one structured failure list."""
+
+    if not isinstance(value, list):
+        return None
+    if any(not isinstance(item, str) for item in value):
+        return None
+    if len(set(value)) != len(value):
+        return None
+    known_checks = {
+        "minimum_valid_touch_pairs",
+        "minimum_event_coverage_ratio",
+    }
+    if any(item not in known_checks for item in value):
+        return None
+    if "minimum_valid_touch_pairs" in value:
+        return "insufficient_valid_touch_pairs"
+    if value == ["minimum_event_coverage_ratio"]:
+        return "insufficient_event_coverage"
+    return None
+
+
+def _build_confidence_skip_artifact(
+    report: Mapping[str, object],
+    *,
+    reason: str,
+    user: str,
+    action: str,
+    dataset_id: int,
+    input_provenance: object,
+    board_provenance: object,
+) -> object | None:
+    """Build and validate a T2 confidence skip without using the legacy factory."""
+
+    from writingring.alignment_io import AlignmentOffsetExportError, AlignmentSkipArtifact
+
+    diagnostic_keys = {
+        "insufficient_valid_touch_pairs": (
+            "total_valid_touch_pair_count",
+            "minimum_valid_touch_pairs",
+            "matched_event_count",
+            "total_valid_event_count",
+            "event_coverage_ratio",
+            "minimum_event_coverage_ratio",
+            "failed_confidence_checks",
+        ),
+        "insufficient_event_coverage": (
+            "matched_event_count",
+            "total_valid_event_count",
+            "event_coverage_ratio",
+            "minimum_event_coverage_ratio",
+            "matched_press_count",
+            "total_valid_press_count",
+            "press_coverage_ratio",
+            "matched_lift_count",
+            "total_valid_lift_count",
+            "lift_coverage_ratio",
+            "fully_matched_touch_pair_count",
+            "total_valid_touch_pair_count",
+            "minimum_valid_touch_pairs",
+            "best_offset_us",
+            "best_vs_second_best_nearly_tied",
+            "failed_confidence_checks",
+        ),
+    }
+    keys = diagnostic_keys.get(reason)
+    if keys is None:
+        return None
+    try:
+        confidence_checks = report["confidence_checks"]
+        if not isinstance(confidence_checks, Mapping):
+            return None
+        minimums: dict[str, object] = {}
+        for check_name in (
+            "minimum_valid_touch_pairs",
+            "minimum_event_coverage_ratio",
+        ):
+            check = confidence_checks[check_name]
+            if not isinstance(check, Mapping):
+                return None
+            minimums[check_name] = check["minimum"]
+        diagnostics = {
+            key: minimums[key] if key in minimums else report[key]
+            for key in keys
+        }
+        artifact = AlignmentSkipArtifact(
+            recording={
+                "user": user,
+                "action": action,
+                "dataset_id": dataset_id,
+            },
+            reason=reason,
+            diagnostics=diagnostics,
+            input_provenance=input_provenance,
+            board_provenance=board_provenance,
+        )
+        artifact.to_dict()
+        return artifact
+    except (
+        AlignmentOffsetExportError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        return None
 
 
 if __name__ == "__main__":

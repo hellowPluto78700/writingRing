@@ -109,14 +109,21 @@ unreadable, or non-object summary remains structural invalidity and retains the
 full preprocessing rebuild policy. This is stage-level behavior, never
 per-recording resume, and it does not alter standalone padding's schema.
 
-For aligned-Board mode, alignment explicitly permits the defined initial
-interval skip policy. The alignment stage validates one provenance-current
-Python outcome for every discovered recording: `SUCCESS` proceeds to Board
-segmentation and `SKIPPED` is a completed recording outcome that segmentation
-omits. Missing, stale, malformed, conflicting, or `FAILED` outcomes invalidate
-the whole stage and retain the existing full-rebuild `continue` behavior. Bash
-does not parse alignment TXT or JSON artifacts; it only consumes the validated
-terminal status returned by the Python outcome contract.
+Standalone alignment is strict by default: both the initial-interval and
+unalignable-recording policies default to `error`. For aligned-Board Action0
+runs, `_common.bash` explicitly passes both
+`--initial-interval-policy skip` and
+`--unalignable-recording-policy skip`. This permits only the three validated
+evidence-insufficiency reasons (`initial_interval_no_usable_pair`,
+`insufficient_valid_touch_pairs`, and `insufficient_event_coverage`); malformed,
+stale, conflicting, `FAILED`, and unexpected outcomes remain hard failures.
+
+The alignment stage validates one provenance-current Python outcome for every
+discovered recording: `SUCCESS` proceeds to Board segmentation and `SKIPPED`
+is a completed recording outcome that segmentation omits. QA counts both
+terminal statuses while reconciling only SUCCESS recordings into segmentation
+and padding. Bash does not parse alignment TXT or JSON artifacts; it only
+consumes the validated terminal status returned by the Python outcome contract.
 
 Before reporting success, the shared QA validates every aligned recording
 through the Python outcome contract and reports total, success, skipped, and

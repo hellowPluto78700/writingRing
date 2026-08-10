@@ -652,6 +652,56 @@ def _skip_fixture(tmp_path: Path):
     return paths, input_provenance, board, skip, report
 
 
+def _confidence_skip_fixture(tmp_path: Path, *, reason: str):
+    paths, input_provenance, board, _offset, _source, _report = _outcome_fixture(
+        tmp_path
+    )
+    if reason == "insufficient_valid_touch_pairs":
+        diagnostics = {
+            "total_valid_touch_pair_count": 3,
+            "minimum_valid_touch_pairs": 5,
+            "matched_event_count": 8,
+            "total_valid_event_count": 10,
+            "event_coverage_ratio": 0.8,
+            "minimum_event_coverage_ratio": 0.75,
+            "failed_confidence_checks": ["minimum_valid_touch_pairs"],
+        }
+    elif reason == "insufficient_event_coverage":
+        diagnostics = {
+            "matched_event_count": 3,
+            "total_valid_event_count": 10,
+            "event_coverage_ratio": 0.3,
+            "minimum_event_coverage_ratio": 0.75,
+            "matched_press_count": 2,
+            "total_valid_press_count": 4,
+            "press_coverage_ratio": 0.5,
+            "matched_lift_count": 1,
+            "total_valid_lift_count": 6,
+            "lift_coverage_ratio": 1 / 6,
+            "fully_matched_touch_pair_count": 1,
+            "total_valid_touch_pair_count": 5,
+            "minimum_valid_touch_pairs": 5,
+            "best_offset_us": -238_451.75,
+            "best_vs_second_best_nearly_tied": False,
+            "failed_confidence_checks": ["minimum_event_coverage_ratio"],
+        }
+    else:
+        raise AssertionError(f"unsupported test reason: {reason}")
+    skip = AlignmentSkipArtifact(
+        recording=input_provenance.recording,
+        diagnostics=diagnostics,
+        input_provenance=input_provenance,
+        board_provenance=board,
+        reason=reason,
+    )
+    report = {
+        "recording": input_provenance.recording,
+        "input_provenance": input_provenance.to_dict(),
+        "board_provenance": [chunk.to_dict() for chunk in board],
+    }
+    return paths, input_provenance, board, skip, report
+
+
 def test_alignment_outcome_strict_schema_and_provenance_aliases(
     tmp_path: Path,
 ) -> None:
@@ -712,6 +762,173 @@ def test_alignment_outcome_strict_schema_and_provenance_aliases(
         build_alignment_input_provenance(conflicting)
 
     assert paths.skip_json_path.name == "0_ring_board_skip.json"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["insufficient_valid_touch_pairs", "insufficient_event_coverage"],
+)
+def test_confidence_skip_reasons_validate_and_publish(
+    tmp_path: Path,
+    reason: str,
+) -> None:
+    paths, input_provenance, board, skip, report = _confidence_skip_fixture(
+        tmp_path,
+        reason=reason,
+    )
+
+    payload = skip.to_dict()
+    assert payload["alignment_skip_schema_version"] == ALIGNMENT_SKIP_SCHEMA_VERSION
+    assert payload["reason"] == reason
+    assert AlignmentSkipArtifact.from_dict(payload).to_dict() == payload
+
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report=report,
+    )
+    outcome = validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+    assert outcome.status is AlignmentOutcomeStatus.SKIPPED
+    assert not paths.offset_txt_path.exists()
+    assert not paths.verification_png_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("reason", "field", "value"),
+    [
+        (
+            "insufficient_valid_touch_pairs",
+            "total_valid_touch_pair_count",
+            5,
+        ),
+        (
+            "insufficient_event_coverage",
+            "event_coverage_ratio",
+            0.75,
+        ),
+        (
+            "insufficient_event_coverage",
+            "event_coverage_ratio",
+            0.3001,
+        ),
+        (
+            "insufficient_event_coverage",
+            "press_coverage_ratio",
+            0.51,
+        ),
+        (
+            "insufficient_event_coverage",
+            "lift_coverage_ratio",
+            0.2,
+        ),
+        (
+            "insufficient_event_coverage",
+            "total_valid_touch_pair_count",
+            4,
+        ),
+    ],
+)
+def test_confidence_skip_diagnostics_reject_incoherent_semantics(
+    tmp_path: Path,
+    reason: str,
+    field: str,
+    value: object,
+) -> None:
+    _paths, _input, _board, skip, _report = _confidence_skip_fixture(
+        tmp_path,
+        reason=reason,
+    )
+    payload = skip.to_dict()
+    payload["diagnostics"][field] = value  # type: ignore[index]
+
+    with pytest.raises(AlignmentOutcomeError):
+        AlignmentSkipArtifact.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    ("reason", "diagnostics"),
+    [
+        ("unknown", {}),
+        ("insufficient_valid_touch_pairs", {"total_valid_touch_pair_count": 1}),
+        (
+            "insufficient_event_coverage",
+            {"total_valid_touch_pair_count": 5},
+        ),
+        ("insufficient_event_coverage", []),
+    ],
+)
+def test_confidence_skip_diagnostics_reject_unknown_missing_and_wrong_schema(
+    tmp_path: Path,
+    reason: str,
+    diagnostics: object,
+) -> None:
+    _paths, _input, _board, skip, _report = _confidence_skip_fixture(
+        tmp_path,
+        reason="insufficient_valid_touch_pairs",
+    )
+    payload = skip.to_dict()
+    payload["reason"] = reason
+    payload["diagnostics"] = diagnostics
+
+    with pytest.raises(AlignmentOutcomeError):
+        AlignmentSkipArtifact.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    ("reason", "field", "value"),
+    [
+        (
+            "insufficient_valid_touch_pairs",
+            "total_valid_touch_pair_count",
+            True,
+        ),
+        (
+            "insufficient_valid_touch_pairs",
+            "minimum_valid_touch_pairs",
+            5.0,
+        ),
+        (
+            "insufficient_event_coverage",
+            "event_coverage_ratio",
+            float("nan"),
+        ),
+        (
+            "insufficient_event_coverage",
+            "best_offset_us",
+            "-238451.75",
+        ),
+        (
+            "insufficient_event_coverage",
+            "failed_confidence_checks",
+            ["minimum_event_coverage_ratio", "minimum_event_coverage_ratio"],
+        ),
+        (
+            "insufficient_valid_touch_pairs",
+            "failed_confidence_checks",
+            ["minimum_event_coverage_ratio", "minimum_valid_touch_pairs"],
+        ),
+    ],
+)
+def test_confidence_skip_diagnostics_reject_invalid_numeric_and_check_lists(
+    tmp_path: Path,
+    reason: str,
+    field: str,
+    value: object,
+) -> None:
+    _paths, _input, _board, skip, _report = _confidence_skip_fixture(
+        tmp_path,
+        reason=reason,
+    )
+    payload = skip.to_dict()
+    payload["diagnostics"][field] = value  # type: ignore[index]
+
+    with pytest.raises(AlignmentOutcomeError):
+        AlignmentSkipArtifact.from_dict(payload)
 
 
 @pytest.mark.parametrize("schema_value", [True, 1.0, 1.5, "1"])
