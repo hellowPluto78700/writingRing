@@ -40,7 +40,10 @@ from writingring.segmentation import (
     SegmentationError,
     segment_user_action,
 )
-from writingring.event_alignment import SequenceAlignmentResult
+from writingring.event_alignment import (
+    InitialIntervalNoUsablePairError,
+    SequenceAlignmentResult,
+)
 
 
 def _data_root(tmp_path: Path, *, sample_count: int = 400) -> Path:
@@ -567,7 +570,14 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
     captured: dict[str, np.ndarray] = {}
-    board = SimpleNamespace(frames=pd.DataFrame(), contacts=pd.DataFrame())
+    board_chunk = tmp_path / "0_board_0.gz"
+    board_chunk.write_bytes(b"board provenance")
+    board = SimpleNamespace(
+        frames=pd.DataFrame(),
+        contacts=pd.DataFrame(),
+        chunk_paths=(board_chunk,),
+        chunk_reports=(),
+    )
     monkeypatch.setattr("writingring.board_loader.load_board", lambda _recording: board)
     empty_events = pd.DataFrame()
     interval = SimpleNamespace(events=empty_events, touch_pairs=empty_events)
@@ -692,6 +702,61 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     assert report["alignment_time_axis"]["canonical_timestamps_modified"] is False
     assert report["canonical_offset_projection"]["success"] is True
     assert report["canonical_offset_projection"]["exported_offset_us"] == pytest.approx(0.0)
+
+
+def test_alignment_cli_initial_interval_error_vs_explicit_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = _data_root(tmp_path)
+    board_chunk = tmp_path / "0_board_0.gz"
+    board_chunk.write_bytes(b"real ordered Board chunk")
+    board = SimpleNamespace(
+        frames=pd.DataFrame(),
+        contacts=pd.DataFrame(),
+        chunk_paths=(board_chunk,),
+        chunk_reports=(),
+    )
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=10,
+        next_global_frame_index=11,
+        previous_timestamp_raw=1_000,
+        next_timestamp_raw=900,
+        prefix_boundary_position=11,
+        last_pre_jump_global_frame_index=10,
+        total_global_valid_pair_count=1,
+        usable_prefix_valid_pair_count=0,
+    )
+    empty_events = pd.DataFrame()
+    monkeypatch.setattr("writingring.board_loader.load_board", lambda _recording: board)
+    monkeypatch.setattr(
+        "writingring.event_alignment.detect_board_events",
+        lambda _frames: SimpleNamespace(events=empty_events, touch_pairs=empty_events),
+    )
+    monkeypatch.setattr(
+        "writingring.event_alignment.select_board_interval_from_presses",
+        lambda _frames, _contacts, _detection: (_ for _ in ()).throw(error),
+    )
+    common = [
+        "--data-root", str(data_root),
+        "--user", "writer_a", "--action", "letters", "--dataset-id", "0",
+        "--offset-output-root", str(tmp_path / "offsets"),
+        "--verification-output-root", str(tmp_path / "verification"),
+        "--report-output-root", str(tmp_path / "reports"),
+    ]
+    assert align_ring_board.main([*common, "--initial-interval-policy", "error"]) == 2
+    skip_path = (
+        tmp_path / "offsets" / "writer_a" / "action_letters"
+        / "0_ring_board_skip.json"
+    )
+    assert not skip_path.exists()
+
+    assert align_ring_board.main([*common, "--initial-interval-policy", "skip"]) == 0
+    assert skip_path.is_file()
+    assert (
+        tmp_path / "reports" / "writer_a" / "action_letters"
+        / "0_alignment_report.json"
+    ).is_file()
 
 
 @pytest.mark.skipif(

@@ -86,6 +86,64 @@ class AlignmentFailureError(EventAlignmentError):
     """Raised when no candidate meets minimum alignment confidence."""
 
 
+class InitialIntervalNoUsablePairError(EventAlignmentError):
+    """Raised when a backward jump leaves no valid pair in the initial prefix.
+
+    The initial Board interval is selected by row order, not by timestamp
+    order.  This exception carries the boundary diagnostics needed by callers
+    that may later classify this one precise condition separately from other
+    alignment failures.
+    """
+
+    reason: Final[str] = "initial_interval_no_usable_pair"
+
+    def __init__(
+        self,
+        *,
+        previous_global_frame_index: int,
+        next_global_frame_index: int,
+        previous_timestamp_raw: object,
+        next_timestamp_raw: object,
+        prefix_boundary_position: int,
+        last_pre_jump_global_frame_index: int,
+        total_global_valid_pair_count: int,
+        usable_prefix_valid_pair_count: int,
+    ) -> None:
+        self.previous_global_frame_index = previous_global_frame_index
+        self.next_global_frame_index = next_global_frame_index
+        self.previous_timestamp_raw = previous_timestamp_raw
+        self.next_timestamp_raw = next_timestamp_raw
+        self.prefix_boundary_position = prefix_boundary_position
+        self.last_pre_jump_global_frame_index = last_pre_jump_global_frame_index
+        self.total_global_valid_pair_count = total_global_valid_pair_count
+        self.usable_prefix_valid_pair_count = usable_prefix_valid_pair_count
+
+        # These explicit aliases keep the distinction between the jump's
+        # adjacent frames and the exclusive positional boundary unambiguous.
+        self.previous_frame_timestamp_raw = previous_timestamp_raw
+        self.next_frame_timestamp_raw = next_timestamp_raw
+        self.exclusive_prefix_boundary_position = prefix_boundary_position
+        self.inclusive_last_pre_jump_global_frame_index = (
+            last_pre_jump_global_frame_index
+        )
+        self.diagnostics: dict[str, object] = {
+            "previous_global_frame_index": previous_global_frame_index,
+            "next_global_frame_index": next_global_frame_index,
+            "previous_timestamp_raw": previous_timestamp_raw,
+            "next_timestamp_raw": next_timestamp_raw,
+            "prefix_boundary_position": prefix_boundary_position,
+            "last_pre_jump_global_frame_index": last_pre_jump_global_frame_index,
+            "total_global_valid_pair_count": total_global_valid_pair_count,
+            "usable_prefix_valid_pair_count": usable_prefix_valid_pair_count,
+        }
+        super().__init__(
+            "the initial Board timestamp interval contains no usable valid "
+            f"press/lift pair (boundary position {prefix_boundary_position}, "
+            f"global valid pairs {total_global_valid_pair_count}, "
+            f"usable prefix pairs {usable_prefix_valid_pair_count})"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class BoardEventDetection:
     """All detected Board transitions and their press/lift touch pairs."""
@@ -331,13 +389,28 @@ def select_board_interval_from_presses(
     if not isinstance(detection, BoardEventDetection):
         raise EventAlignmentError("detection must be BoardEventDetection")
 
-    frame_timestamps = frames["frame_timestamp_raw"].to_numpy(dtype=np.float64)
+    frame_global_ids = _validated_global_frame_identities(
+        frames["global_frame_index"],
+        name="Board frame global identities",
+        allow_missing=False,
+        require_unique=True,
+    )
+    frame_identity_set = set(frame_global_ids.tolist())
+    _validate_interval_detection(detection, frame_identity_set)
+
+    try:
+        frame_timestamps = frames["frame_timestamp_raw"].to_numpy(
+            dtype=np.float64
+        )
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError("Board frame timestamps must be numeric") from error
     backward_positions = np.flatnonzero(np.diff(frame_timestamps) < 0.0) + 1
     usable_stop = int(backward_positions[0]) if len(backward_positions) else len(frames)
     usable_frames = frames.iloc[:usable_stop]
     first_available_timestamp = int(usable_frames["frame_timestamp_raw"].iloc[0])
     available_end = int(usable_frames["frame_timestamp_raw"].iloc[-1])
-    maximum_global_frame = int(usable_frames["global_frame_index"].iloc[-1])
+    maximum_global_frame = int(frame_global_ids[usable_stop - 1])
+    prefix_frame_identity_set = set(frame_global_ids[:usable_stop].tolist())
     warnings_output: list[str] = []
     if len(backward_positions):
         warning = (
@@ -347,10 +420,31 @@ def select_board_interval_from_presses(
         )
         warnings_output.append(warning)
 
-    valid_pairs = detection.touch_pairs.loc[
+    globally_valid_pairs = detection.touch_pairs.loc[
         detection.touch_pairs["valid_touch"].astype(bool)
-        & (detection.touch_pairs["press_global_frame_index"] <= maximum_global_frame)
     ].copy()
+    global_valid_pair_count = len(globally_valid_pairs)
+    usable_pair_mask = _pair_endpoint_prefix_mask(
+        globally_valid_pairs,
+        prefix_frame_identity_set,
+    )
+    valid_pairs = globally_valid_pairs.loc[usable_pair_mask].copy()
+    if len(backward_positions) and global_valid_pair_count > 0 and valid_pairs.empty:
+        jump_position = int(backward_positions[0])
+        previous_frame = frames.iloc[jump_position - 1]
+        next_frame = frames.iloc[jump_position]
+        raise InitialIntervalNoUsablePairError(
+            previous_global_frame_index=int(frame_global_ids[jump_position - 1]),
+            next_global_frame_index=int(frame_global_ids[jump_position]),
+            previous_timestamp_raw=_python_scalar(
+                previous_frame["frame_timestamp_raw"]
+            ),
+            next_timestamp_raw=_python_scalar(next_frame["frame_timestamp_raw"]),
+            prefix_boundary_position=jump_position,
+            last_pre_jump_global_frame_index=int(frame_global_ids[jump_position - 1]),
+            total_global_valid_pair_count=global_valid_pair_count,
+            usable_prefix_valid_pair_count=len(valid_pairs),
+        )
     if valid_pairs.empty:
         raise EventAlignmentError(
             "no valid Board press/lift pair is available for interval selection"
@@ -368,27 +462,66 @@ def select_board_interval_from_presses(
     actual_end = min(desired_end, available_end)
     end_was_clamped = actual_end != desired_end
 
-    frame_mask = frames["frame_timestamp_raw"].between(
+    # Select the positional initial interval before any timestamp filtering.
+    # A stale post-jump tail can have timestamps that overlap this window.
+    prefix_frames = frames.iloc[:usable_stop]
+    frame_mask = prefix_frames["frame_timestamp_raw"].between(
         board_start,
         actual_end,
         inclusive="both",
     )
-    contact_mask = board_contacts["frame_timestamp_raw"].between(
+    selected_frames = prefix_frames.loc[frame_mask].copy()
+
+    if "global_frame_index" in board_contacts:
+        contact_global_ids = _validated_global_frame_identities(
+            board_contacts["global_frame_index"],
+            name="Board contact global identities",
+            allow_missing=False,
+            require_unique=False,
+        )
+        if not set(contact_global_ids.astype(np.int64).tolist()).issubset(
+            frame_identity_set
+        ):
+            raise EventAlignmentError(
+                "Board contacts contain global frame identities absent from "
+                "Board frames"
+            )
+        contact_prefix_mask = np.isin(
+            contact_global_ids,
+            np.asarray(tuple(prefix_frame_identity_set), dtype=np.int64),
+        )
+    else:
+        # Small test fixtures historically provide timestamp-only contacts.
+        # Without frame identity there is no safe positional prefix to apply.
+        contact_prefix_mask = np.ones(len(board_contacts), dtype=bool)
+    contact_mask = (
+        pd.Series(contact_prefix_mask, index=board_contacts.index)
+        & board_contacts["frame_timestamp_raw"].between(
+            board_start,
+            actual_end,
+            inclusive="both",
+        )
+    )
+    prefix_events = detection.events.loc[
+        _event_frame_prefix_mask(
+            detection.events,
+            prefix_frame_identity_set,
+        )
+    ]
+    event_mask = prefix_events["frame_timestamp_raw"].between(
         board_start,
         actual_end,
         inclusive="both",
     )
-    event_mask = detection.events["frame_timestamp_raw"].between(
-        board_start,
-        actual_end,
-        inclusive="both",
-    )
-    selected_frames = frames.loc[frame_mask].copy()
     selected_contacts = board_contacts.loc[contact_mask].copy()
-    selected_events = detection.events.loc[event_mask].copy()
+    selected_events = prefix_events.loc[event_mask].copy()
     selected_pair_indices = selected_events["paired_touch_index"].dropna().astype(int)
     selected_pairs = detection.touch_pairs.loc[
         detection.touch_pairs["paired_touch_index"].isin(selected_pair_indices)
+        & _pair_endpoint_prefix_mask(
+            detection.touch_pairs,
+            prefix_frame_identity_set,
+        )
     ].copy()
     if not selected_pairs.empty:
         selected_pairs["press_in_selected_interval"] = selected_pairs[
@@ -1209,6 +1342,315 @@ def plot_alignment_residuals(
     return figure
 
 
+def _validate_interval_detection(
+    detection: BoardEventDetection,
+    frame_identity_set: set[int],
+) -> None:
+    """Validate identity-bearing detection tables used by interval selection."""
+
+    events = detection.events
+    pairs = detection.touch_pairs
+    if not isinstance(events, pd.DataFrame):
+        raise EventAlignmentError("Board events must be a DataFrame")
+    if not isinstance(pairs, pd.DataFrame):
+        raise EventAlignmentError("Board touch pairs must be a DataFrame")
+
+    event_required = {
+        "event_index",
+        "event_type",
+        "global_frame_index",
+        "frame_timestamp_raw",
+        "paired_touch_index",
+        "valid_touch",
+    }
+    missing_events = event_required - set(events.columns)
+    if missing_events:
+        raise EventAlignmentError(
+            "Board events are missing column(s): "
+            + ", ".join(sorted(missing_events))
+        )
+    pair_required = {
+        "paired_touch_index",
+        "press_event_index",
+        "lift_event_index",
+        "press_global_frame_index",
+        "lift_global_frame_index",
+        "press_timestamp_raw",
+        "lift_timestamp_raw",
+        "valid_touch",
+    }
+    missing_pairs = pair_required - set(pairs.columns)
+    if missing_pairs:
+        raise EventAlignmentError(
+            "Board touch pairs are missing column(s): "
+            + ", ".join(sorted(missing_pairs))
+        )
+
+    event_ids = _validated_integer_column(
+        events["event_index"],
+        name="Board event identities",
+        allow_missing=False,
+        require_unique=True,
+    )
+    event_frame_ids = _validated_global_frame_identities(
+        events["global_frame_index"],
+        name="Board event global identities",
+        allow_missing=False,
+        require_unique=True,
+    )
+    if not set(event_frame_ids.tolist()).issubset(frame_identity_set):
+        raise EventAlignmentError(
+            "Board events contain global frame identities absent from Board frames"
+        )
+    if not events["event_type"].isin(("press", "lift")).all():
+        raise EventAlignmentError("Board event types must be press or lift")
+    _validated_finite_column(
+        events["frame_timestamp_raw"],
+        name="Board event timestamps",
+        allow_missing=False,
+    )
+    event_pair_ids = _validated_integer_column(
+        events["paired_touch_index"],
+        name="Board event pair identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+
+    pair_ids = _validated_integer_column(
+        pairs["paired_touch_index"],
+        name="Board touch-pair identities",
+        allow_missing=False,
+        require_unique=True,
+    )
+    press_event_ids = _validated_integer_column(
+        pairs["press_event_index"],
+        name="Board press event identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    lift_event_ids = _validated_integer_column(
+        pairs["lift_event_index"],
+        name="Board lift event identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    press_frame_ids = _validated_global_frame_identities(
+        pairs["press_global_frame_index"],
+        name="Board press global identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    lift_frame_ids = _validated_global_frame_identities(
+        pairs["lift_global_frame_index"],
+        name="Board lift global identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    nonmissing_press_ids = press_frame_ids[~np.isnan(press_frame_ids)]
+    nonmissing_lift_ids = lift_frame_ids[~np.isnan(lift_frame_ids)]
+    if not set(nonmissing_press_ids.astype(np.int64).tolist()).issubset(
+        frame_identity_set
+    ) or not set(nonmissing_lift_ids.astype(np.int64).tolist()).issubset(
+        frame_identity_set
+    ):
+        raise EventAlignmentError(
+            "Board touch pairs contain global frame identities absent from Board frames"
+        )
+    combined_pair_frame_ids = np.concatenate(
+        (nonmissing_press_ids, nonmissing_lift_ids)
+    )
+    if len(combined_pair_frame_ids) != len(np.unique(combined_pair_frame_ids)):
+        raise EventAlignmentError(
+            "Board touch-pair frame identities must be unique"
+        )
+    _validated_finite_column(
+        pairs["press_timestamp_raw"],
+        name="Board press timestamps",
+        allow_missing=False,
+    )
+    _validated_finite_column(
+        pairs["lift_timestamp_raw"],
+        name="Board lift timestamps",
+        allow_missing=True,
+    )
+    try:
+        valid_touch = pairs["valid_touch"].to_numpy(dtype=bool)
+        events["valid_touch"].to_numpy(dtype=bool)
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError("Board valid-touch flags must be boolean") from error
+
+    press_timestamps_missing = pairs["press_timestamp_raw"].isna().to_numpy(
+        dtype=bool
+    )
+    lift_timestamps_missing = pairs["lift_timestamp_raw"].isna().to_numpy(
+        dtype=bool
+    )
+    if np.any(press_timestamps_missing[valid_touch]) or np.any(
+        lift_timestamps_missing[valid_touch]
+    ):
+        raise EventAlignmentError(
+            "valid Board touch pairs must have press and lift timestamps"
+        )
+    event_valid_touch = events["valid_touch"].to_numpy(dtype=bool)
+    if np.any(np.isnan(event_pair_ids[event_valid_touch])):
+        raise EventAlignmentError(
+            "valid Board events must reference touch-pair identities"
+        )
+
+    pair_index_set = set(pair_ids.astype(np.int64).tolist())
+    nonmissing_event_pair_ids = event_pair_ids[~np.isnan(event_pair_ids)]
+    if not set(nonmissing_event_pair_ids.astype(np.int64).tolist()).issubset(
+        pair_index_set
+    ):
+        raise EventAlignmentError(
+            "Board events reference touch-pair identities absent from pairs"
+        )
+    event_index_set = set(event_ids.astype(np.int64).tolist())
+    valid_pair_mask = valid_touch
+    if np.any(np.isnan(press_event_ids[valid_pair_mask])) or np.any(
+        np.isnan(lift_event_ids[valid_pair_mask])
+    ):
+        raise EventAlignmentError(
+            "valid Board touch pairs must reference press and lift events"
+        )
+    if not set(press_event_ids[valid_pair_mask].astype(np.int64).tolist()).issubset(
+        event_index_set
+    ) or not set(lift_event_ids[valid_pair_mask].astype(np.int64).tolist()).issubset(
+        event_index_set
+    ):
+        raise EventAlignmentError(
+            "valid Board touch pairs reference unknown event identities"
+        )
+    if np.any(np.isnan(press_frame_ids[valid_pair_mask])) or np.any(
+        np.isnan(lift_frame_ids[valid_pair_mask])
+    ):
+        raise EventAlignmentError(
+            "valid Board touch pairs must have press and lift frame identities"
+        )
+
+
+def _event_frame_prefix_mask(
+    events: pd.DataFrame,
+    prefix_frame_identity_set: set[int],
+) -> pd.Series:
+    event_ids = _validated_global_frame_identities(
+        events["global_frame_index"],
+        name="Board event global identities",
+        allow_missing=False,
+        require_unique=False,
+    )
+    return pd.Series(
+        np.isin(
+            event_ids,
+            np.asarray(tuple(prefix_frame_identity_set), dtype=np.int64),
+        ),
+        index=events.index,
+    )
+
+
+def _pair_endpoint_prefix_mask(
+    pairs: pd.DataFrame,
+    prefix_frame_identity_set: set[int],
+) -> pd.Series:
+    press_ids = _validated_global_frame_identities(
+        pairs["press_global_frame_index"],
+        name="Board press global identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    lift_ids = _validated_global_frame_identities(
+        pairs["lift_global_frame_index"],
+        name="Board lift global identities",
+        allow_missing=True,
+        require_unique=False,
+    )
+    prefix_ids = np.asarray(tuple(prefix_frame_identity_set), dtype=np.int64)
+    return pd.Series(
+        (~np.isnan(press_ids))
+        & (~np.isnan(lift_ids))
+        & np.isin(press_ids, prefix_ids)
+        & np.isin(lift_ids, prefix_ids),
+        index=pairs.index,
+    )
+
+
+def _validated_global_frame_identities(
+    values: pd.Series,
+    *,
+    name: str,
+    allow_missing: bool,
+    require_unique: bool,
+) -> np.ndarray:
+    return _validated_integer_column(
+        values,
+        name=name,
+        allow_missing=allow_missing,
+        require_unique=require_unique,
+        nonnegative=True,
+    )
+
+
+def _validated_integer_column(
+    values: pd.Series,
+    *,
+    name: str,
+    allow_missing: bool,
+    require_unique: bool,
+    nonnegative: bool = False,
+) -> np.ndarray:
+    if not isinstance(values, pd.Series):
+        raise EventAlignmentError(f"{name} must be a pandas Series")
+    missing = values.isna().to_numpy(dtype=bool)
+    try:
+        numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError(f"{name} must be numeric") from error
+    invalid_numeric = np.isnan(numeric) & ~missing
+    if invalid_numeric.any():
+        raise EventAlignmentError(f"{name} must be numeric")
+    if not np.isfinite(numeric[~missing]).all():
+        raise EventAlignmentError(f"{name} must contain finite values")
+    if not allow_missing and missing.any():
+        raise EventAlignmentError(f"{name} must not contain missing values")
+    present = ~missing
+    if not np.all(np.equal(numeric[present], np.floor(numeric[present]))):
+        raise EventAlignmentError(f"{name} must contain integer values")
+    if nonnegative and np.any(numeric[present] < 0):
+        raise EventAlignmentError(f"{name} must be nonnegative")
+    normalized = np.array(numeric, copy=True)
+    normalized[present] = np.floor(normalized[present])
+    if require_unique and len(normalized[present]) != len(
+        np.unique(normalized[present])
+    ):
+        raise EventAlignmentError(f"{name} must be unique")
+    return normalized
+
+
+def _validated_finite_column(
+    values: pd.Series,
+    *,
+    name: str,
+    allow_missing: bool,
+) -> None:
+    if not isinstance(values, pd.Series):
+        raise EventAlignmentError(f"{name} must be a pandas Series")
+    missing = values.isna().to_numpy(dtype=bool)
+    try:
+        numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError(f"{name} must be numeric") from error
+    if not allow_missing and missing.any():
+        raise EventAlignmentError(f"{name} must not contain missing values")
+    if np.isnan(numeric[~missing]).any() or not np.isfinite(numeric[~missing]).all():
+        raise EventAlignmentError(f"{name} must contain finite values")
+
+
+def _python_scalar(value: object) -> object:
+    """Convert NumPy scalars in diagnostics to ordinary Python scalars."""
+
+    return value.item() if isinstance(value, np.generic) else value
+
+
 def _validated_board_frames(frames: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(frames, pd.DataFrame) or frames.empty:
         raise EventAlignmentError("Board frames must be a nonempty DataFrame")
@@ -1223,8 +1665,18 @@ def _validated_board_frames(frames: pd.DataFrame) -> pd.DataFrame:
         raise EventAlignmentError(
             "Board frames are missing column(s): " + ", ".join(sorted(missing))
         )
-    if not np.isfinite(frames["frame_timestamp_raw"].to_numpy(dtype=float)).all():
+    try:
+        timestamps = frames["frame_timestamp_raw"].to_numpy(dtype=float)
+    except (TypeError, ValueError) as error:
+        raise EventAlignmentError("Board frame timestamps must be numeric") from error
+    if not np.isfinite(timestamps).all():
         raise EventAlignmentError("Board frame timestamps must be finite")
+    _validated_global_frame_identities(
+        frames["global_frame_index"],
+        name="Board frame global identities",
+        allow_missing=False,
+        require_unique=True,
+    )
     return frames
 
 

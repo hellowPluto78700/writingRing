@@ -14,6 +14,7 @@ import pytest
 from writingring.event_alignment import (
     AlignmentConfig,
     EventAlignmentError,
+    InitialIntervalNoUsablePairError,
     PeakDetectionConfig,
     align_events_to_transient_peaks,
     compute_transient_score,
@@ -48,6 +49,16 @@ def _frames(
 
 def _contacts(timestamps: list[int]) -> pd.DataFrame:
     return pd.DataFrame({"frame_timestamp_raw": timestamps, "force": 1.0})
+
+
+def _contacts_with_global_ids(timestamps: list[int]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "global_frame_index": np.arange(len(timestamps)),
+            "frame_timestamp_raw": timestamps,
+            "force": 1.0,
+        }
+    )
 
 
 def test_board_event_detection_pairs_press_and_lift_in_order() -> None:
@@ -260,6 +271,92 @@ def test_dynamic_interval_reports_lift_beyond_exact_end() -> None:
     assert selected.metadata["desired_board_end_timestamp"] == 3_100_000
     assert not selected.metadata["boundary_press_lift_in_interval"]
     assert any("no paired lift" in warning for warning in selected.warnings)
+
+
+def test_dynamic_interval_reports_post_jump_only_pairs_with_structured_error() -> None:
+    timestamps = [
+        0,
+        100_000,
+        200_000,
+        300_000,
+        100_000,
+        200_000,
+        300_000,
+        400_000,
+        500_000,
+    ]
+    frames = _frames(
+        [False, True, True, False, False, True, True, True, False],
+        timestamps=timestamps,
+    )
+    detection = detect_board_events(frames)
+
+    with pytest.raises(InitialIntervalNoUsablePairError) as raised:
+        select_board_interval_from_presses(
+            frames,
+            _contacts_with_global_ids(timestamps),
+            detection,
+        )
+
+    error = raised.value
+    assert error.previous_global_frame_index == 3
+    assert error.next_global_frame_index == 4
+    assert error.previous_timestamp_raw == 300_000
+    assert error.next_timestamp_raw == 100_000
+    assert error.prefix_boundary_position == 4
+    assert error.last_pre_jump_global_frame_index == 3
+    assert error.total_global_valid_pair_count == 1
+    assert error.usable_prefix_valid_pair_count == 0
+    assert error.diagnostics["prefix_boundary_position"] == 4
+
+
+def test_dynamic_interval_rejects_cross_boundary_pair_as_unusable() -> None:
+    timestamps = [0, 100_000, 200_000, 300_000, 100_000, 200_000]
+    frames = _frames(
+        [False, True, True, True, True, False],
+        timestamps=timestamps,
+    )
+    detection = detect_board_events(frames)
+
+    with pytest.raises(InitialIntervalNoUsablePairError):
+        select_board_interval_from_presses(
+            frames,
+            _contacts_with_global_ids(timestamps),
+            detection,
+        )
+
+
+def test_dynamic_interval_prefixes_mixed_pairs_and_identity_contacts() -> None:
+    timestamps = [
+        0,
+        1_000_000,
+        1_100_000,
+        1_200_000,
+        1_300_000,
+        100_000,
+        200_000,
+        300_000,
+        400_000,
+        500_000,
+    ]
+    frames = _frames(
+        [False, True, True, True, False, True, True, True, False, False],
+        timestamps=timestamps,
+    )
+    detection = detect_board_events(frames)
+
+    selected = select_board_interval_from_presses(
+        frames,
+        _contacts_with_global_ids(timestamps),
+        detection,
+        target_valid_press_count=1,
+    )
+
+    assert selected.frames["global_frame_index"].tolist() == [0, 1, 2, 3, 4]
+    assert selected.contacts["global_frame_index"].tolist() == [0, 1, 2, 3, 4]
+    assert selected.events["global_frame_index"].tolist() == [1, 4]
+    assert selected.touch_pairs["paired_touch_index"].tolist() == [0]
+    assert selected.metadata["valid_press_count_available"] == 1
 
 
 def test_peak_detection_returns_ordered_region() -> None:

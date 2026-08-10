@@ -2,41 +2,60 @@
 
 ## Active plan
 
-- **Plan:** `docs/plans/TODO/06_Action0_Notebook_Subset_Experiment_Plan.md`
-- **Task file:** `docs/plans/TODO/06_Action0_Notebook_Subset_Experiment_TASKS.md`
-- **Baseline commit:** `51293739773d6a192ad8cdec18857d6ec4b52319`
-- **Current task:** T002 — Notebook experiment documentation
-- **Status:** DONE
+- **Plan:** `docs/plans/TODO/01_Board_Assist_Alignment_Correction_Plan.md`
+- **Task file:** `docs/plans/TODO/01_Board_Assist_Alignment_Correction_TASKS.md`
+- **Baseline commit:** `a69476c4f3ae713335b6867678cd35c48a04ef3d`
+- **Current task:** T2 — Alignment outcome contract and CLI
+- **Status:** T1 DONE; T2 repair complete and re-verifying
 
 ## Task state
 
 | Task | State | Depends on |
 | --- | --- | --- |
-| T001 | DONE | — |
-| T002 | DONE | T001 |
+| T1 | DONE | — |
+| T2 | VERIFYING | T1 |
+| T3 | DRAFT | T2 |
+| T4 | DRAFT | T2 |
+| T5 | DRAFT | T3, T4 |
 
 ## Focus and next action
 
-- A new Action0 notebook subset-experiment plan is active. It preserves CLI
-  full-label training while completing the user-selected reproducible
-  common-label experiment, explicit figure policy, best-model restoration, and
-  final split evaluation. T001 initial probe returned REVISE: it must select
-  the positive-label intersection, use non-mutating evaluation mode after
-  best-state restoration, fix cwd-relative automatic figure writes, and clear
-  stale notebook evidence. Final re-probe CONFIRMED the exact algorithms,
-  wrapper invariants, eight-metric results, and default-off figure policy.
-  T001 is FROZEN. Worker returned DONE with only the notebook changed:
-  reproducible positive-intersection subset mapping and invariants, strict
-  best-state restoration, non-mutating final split evaluation, eight-metric
-  table/provenance, and default-off repository-anchored figure saving. Both
-  transform roots and invalid size handling were verified; focused tests passed
-  19, full pytest passed 527 with one skip, direct reduced execution passed,
-  and no figures were written by default. Fresh verifier PASS: all frozen
-  selection/wrapper/restored-state/final-evaluation/figure-policy rules hold.
-  T001 is DONE. T002 updated README and Action0 training documentation to
-  distinguish CLI full-label training from the verified notebook subset
-  experiment; no producer/encoding/padding/Bash contract changed. Markdown
-  linkage and `git diff --check` passed. The requested plan is DONE.
+- The 01 Board-Assisted Alignment Correction plan is active. Its companion
+  task file did not exist, so PRIMARY established the T1 → T2 → (T3, T4) →
+  T5 DAG at baseline `a69476c4f3ae713335b6867678cd35c48a04ef3d`. T1's initial
+  probe returned REVISE: current code accepts pairs when only the press is
+  pre-jump and later timestamp filtering can leak post-jump stale rows; also,
+  no-jump recordings with valid pairs are current normal successes, not hard
+  failures. PRIMARY revised T1 to use positional `[0, j)` containment for
+  both pair endpoints and every selected derived table, preserve normal
+  no-jump success, and require structured diagnostics. Outcome artifacts, CLI
+  policy, Action0, and segmentation remain downstream. Next action: focused
+  T1 re-probe CONFIRMED the revised positional boundary, typed diagnostic, and
+  two-file implementation/test scope. T1 is FROZEN against
+  `a69476c4f3ae713335b6867678cd35c48a04ef3d`. Worker returned DONE with only
+  `event_alignment.py` and `test_event_alignment.py` changed: positional
+  prefix enforcement, both-endpoint pair eligibility, identity-aware stale-tail
+  filtering, and `InitialIntervalNoUsablePairError`. Fresh verifier PASS:
+  scope/contract/acceptance checks passed, it reran 51 focused tests and full
+  pytest passed 530 with one skip in `writingring-gpu`; no undocumented change.
+  T1 is DONE. T2 initial probe returned REVISE: the repository has only
+  success TXT/report/PNG artifacts, no Board content provenance, no unified
+  outcome reader, and non-atomic cross-artifact publication. PRIMARY revised
+  T2 with an exact skip sibling JSON, report-as-final-manifest schema,
+  raw/SpikeIMU plus ordered Board-hash provenance, strict completion validator,
+  transition gate, and narrow `--initial-interval-policy`. Fresh re-probe
+  CONFIRMED. PRIMARY froze literal `alignment_skip` schema v1, the eight T1
+  diagnostic keys, report artifact digest entries, validator behavior, and
+  allowed paths. Worker returned DONE with only `alignment_io.py`, the
+  alignment CLI, and package exports changed: validated terminal outcomes,
+  provenance, atomic publication, transition authorization, and explicit skip
+  policy. In `writingring-gpu`, focused tests passed 35/1 skipped and full
+  pytest passed 530/1 skipped; diff check passed. Fresh verifier returned FAIL
+  while keeping the TaskSpec valid: schema versions accept bool/float aliases,
+  conflicting timestamp digest aliases normalize away, completed publication
+  may omit current provenance, pathless Board doubles get fabricated hashes,
+  and frozen T2 regressions were not added. Next action: same worker repairs
+  only the frozen T2 scope, then fresh verification.
 
 ## Prior controller notebook plan archive
 

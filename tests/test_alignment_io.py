@@ -1,28 +1,49 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from writingring.alignment_io import (
+    ALIGNMENT_OUTCOME_SCHEMA_VERSION,
+    ALIGNMENT_SKIP_SCHEMA_VERSION,
+    AlignmentInputProvenance,
+    AlignmentOffset,
     AlignmentOffsetProjection,
     AlignmentOffsetExportError,
+    AlignmentOutcomeError,
+    AlignmentOutcomeStatus,
+    AlignmentSkipArtifact,
     alignment_timestamp_metadata,
     apply_board_to_ring_offset,
+    build_alignment_input_provenance,
     build_alignment_time_axes,
     build_alignment_offset_path,
+    build_alignment_outcome_paths,
+    build_board_chunk_provenance,
     build_alignment_timestamps,
     extract_alignment_offset,
+    make_alignment_skip_artifact,
     project_alignment_offset_to_canonical,
+    publish_alignment_outcome,
+    publish_alignment_skip,
+    publish_alignment_success,
     read_alignment_offset_txt,
+    read_alignment_skip_artifact,
     sha256_array,
+    validate_alignment_outcome,
     write_alignment_offset_txt,
+    write_alignment_skip_artifact,
 )
 from writingring.event_alignment import (
     AlignmentConfig,
+    InitialIntervalNoUsablePairError,
     SequenceAlignmentResult,
     align_events_to_transient_peaks,
     compute_transient_score_array,
@@ -545,3 +566,394 @@ def test_projected_offset_round_trip_preserves_canonical_offset(tmp_path: Path) 
     assert loaded == offset
     assert loaded.offset_us == pytest.approx(-1_127.0)
     assert loaded.work_axis_offset_us == pytest.approx(123.0)
+
+
+def _outcome_fixture(tmp_path: Path) -> tuple[
+    object,
+    ...,
+]:
+    """Create one real ordered Board chunk and a current raw provenance set."""
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"Board chunk provenance")
+    board = build_board_chunk_provenance((board_path,))
+    input_provenance = AlignmentInputProvenance(
+        input_kind="raw-ring",
+        user="user_0",
+        action="0",
+        dataset_id=0,
+        timestamp_sha256="a" * 64,
+        ring_0_sha256="b" * 64,
+    )
+    paths = build_alignment_outcome_paths(
+        tmp_path / "offsets",
+        tmp_path / "verification",
+        tmp_path / "reports",
+        user="user_0",
+        action="0",
+        dataset_id=0,
+    )
+    offset = extract_alignment_offset(
+        _result(), user="user_0", action="0", dataset_id=0
+    )
+    verification_source = tmp_path / "source.png"
+    verification_source.write_bytes(b"PNG verification")
+    report = {
+        "recording": input_provenance.recording,
+        "input_provenance": input_provenance.to_dict(),
+        "board_provenance": [chunk.to_dict() for chunk in board],
+        "canonical_offset_projection_success": False,
+    }
+    return paths, input_provenance, board, offset, verification_source, report
+
+
+def _publish_fixture(tmp_path: Path):
+    paths, input_provenance, board, offset, verification_source, report = (
+        _outcome_fixture(tmp_path)
+    )
+    publish_alignment_success(
+        paths,
+        offset=offset,
+        report=report,
+        verification_path=verification_source,
+    )
+    return paths, input_provenance, board, offset, verification_source, report
+
+
+def _skip_fixture(tmp_path: Path):
+    paths, input_provenance, board, offset, verification_source, _report = (
+        _outcome_fixture(tmp_path)
+    )
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=10,
+        next_global_frame_index=11,
+        previous_timestamp_raw=1_000,
+        next_timestamp_raw=900,
+        prefix_boundary_position=11,
+        last_pre_jump_global_frame_index=10,
+        total_global_valid_pair_count=2,
+        usable_prefix_valid_pair_count=0,
+    )
+    skip = make_alignment_skip_artifact(
+        error,
+        user="user_0",
+        action="0",
+        dataset_id=0,
+        input_provenance=input_provenance,
+        board_provenance=board,
+    )
+    report = {
+        "recording": input_provenance.recording,
+        "input_provenance": input_provenance.to_dict(),
+        "board_provenance": [chunk.to_dict() for chunk in board],
+    }
+    return paths, input_provenance, board, skip, report
+
+
+def test_alignment_outcome_strict_schema_and_provenance_aliases(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, _offset, _source, _report = _outcome_fixture(tmp_path)
+    assert input_provenance.to_dict()["ring_0_sha256"] == "b" * 64
+    assert [item["chunk_index"] for item in (chunk.to_dict() for chunk in board)] == [0]
+    spike_provenance = build_alignment_input_provenance(
+        {
+            "input_kind": "spike-imu",
+            "recording": input_provenance.recording,
+            "feature_schema": "spike_schema_v1",
+            "sampling_rate_hz": 200.0,
+            "feature_values_sha256": "c" * 64,
+            "feature_metadata_sha256": "d" * 64,
+            "canonical_timestamps_sha256": "e" * 64,
+        }
+    )
+    assert spike_provenance.to_dict()["feature_schema"] == "spike_schema_v1"
+    assert spike_provenance.to_dict()["sampling_rate_hz"] == pytest.approx(200.0)
+
+    error = InitialIntervalNoUsablePairError(
+        previous_global_frame_index=0,
+        next_global_frame_index=1,
+        previous_timestamp_raw=10,
+        next_timestamp_raw=9,
+        prefix_boundary_position=1,
+        last_pre_jump_global_frame_index=0,
+        total_global_valid_pair_count=1,
+        usable_prefix_valid_pair_count=0,
+    )
+    artifact = make_alignment_skip_artifact(
+        error,
+        user="user_0",
+        action="0",
+        dataset_id=0,
+        input_provenance=input_provenance,
+        board_provenance=board,
+    )
+    assert artifact.to_dict()["alignment_skip_schema_version"] == 1
+    assert set(artifact.to_dict()["diagnostics"]) == {
+        "previous_global_frame_index",
+        "next_global_frame_index",
+        "previous_timestamp_raw",
+        "next_timestamp_raw",
+        "prefix_boundary_position",
+        "last_pre_jump_global_frame_index",
+        "total_global_valid_pair_count",
+        "usable_prefix_valid_pair_count",
+    }
+    with pytest.raises(AlignmentOutcomeError):
+        replace(artifact, alignment_skip_schema_version=True)
+    with pytest.raises(AlignmentOutcomeError):
+        replace(artifact, alignment_skip_schema_version=1.0)
+
+    conflicting = input_provenance.to_dict()
+    conflicting["canonical_timestamps_sha256"] = "c" * 64
+    with pytest.raises(AlignmentOutcomeError, match="conflicting timestamp"):
+        build_alignment_input_provenance(conflicting)
+
+    assert paths.skip_json_path.name == "0_ring_board_skip.json"
+
+
+@pytest.mark.parametrize("schema_value", [True, 1.0, 1.5, "1"])
+def test_alignment_report_schema_version_requires_literal_integer(
+    tmp_path: Path,
+    schema_value: object,
+) -> None:
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(tmp_path)
+    report = json.loads(paths.report_path.read_text(encoding="utf-8"))
+    report["alignment_outcome_schema_version"] = schema_value
+    paths.report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+
+def test_alignment_outcome_validator_rejects_stale_partial_malformed_and_digest_files(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path / "stale"
+    )
+    paths.verification_png_path.write_bytes(b"changed")
+    with pytest.raises(AlignmentOutcomeError, match="digest"):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path / "missing"
+    )
+    paths.report_path.unlink()
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path / "partial"
+    )
+    paths.verification_png_path.unlink()
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path / "malformed"
+    )
+    paths.report_path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(
+        tmp_path / "board"
+    )
+    board[0].path.write_bytes(b"stale Board bytes")
+    current_board = build_board_chunk_provenance((board[0].path,))
+    with pytest.raises(AlignmentOutcomeError, match="Board provenance"):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=current_board,
+        )
+
+
+def test_alignment_outcome_validator_rejects_status_mismatch_and_conflict(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, _offset, _source, _report = _publish_fixture(tmp_path)
+    report = json.loads(paths.report_path.read_text(encoding="utf-8"))
+    report["alignment_success"] = False
+    paths.report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+    paths, input_provenance, board, skip, report = _skip_fixture(tmp_path / "conflict")
+    write_alignment_skip_artifact(skip, paths.skip_json_path)
+    report["alignment_outcome_schema_version"] = ALIGNMENT_OUTCOME_SCHEMA_VERSION
+    report["alignment_status"] = AlignmentOutcomeStatus.SUCCESS.value
+    report["alignment_success"] = True
+    report["work_axis_alignment_success"] = True
+    report["outcome_artifacts"] = []
+    paths.report_path.parent.mkdir(parents=True, exist_ok=True)
+    paths.report_path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(AlignmentOutcomeError, match="conflicts"):
+        validate_alignment_outcome(
+            paths,
+            expected_recording=input_provenance.recording,
+            expected_input_provenance=input_provenance,
+            expected_board_provenance=board,
+        )
+
+
+def test_alignment_success_without_canonical_projection_is_completed(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, _offset, source, report = _outcome_fixture(tmp_path)
+    offset = AlignmentOffset(
+        user="user_0",
+        action="0",
+        dataset_id=0,
+        ring_stream="ring_0",
+        offset_us=123.0,
+        alignment_model="constant_offset",
+        alignment_success=True,
+        event_coverage_ratio=1.0,
+        matched_event_count=2,
+        total_valid_event_count=2,
+        offset_schema_version=2,
+        offset_domain="alignment_work_axis",
+        canonical_offset_projection_success=False,
+        work_axis_offset_us=123.0,
+    )
+    publish_alignment_success(
+        paths,
+        offset=offset,
+        report=report,
+        verification_path=source,
+    )
+    outcome = validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+    assert outcome.status is AlignmentOutcomeStatus.SUCCESS
+
+
+def test_completed_publication_requires_current_feature_and_board_provenance(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, offset, source, report = _outcome_fixture(tmp_path)
+    with pytest.raises(AlignmentOutcomeError, match="input provenance"):
+        publish_alignment_success(
+            paths,
+            offset=offset,
+            report={"recording": input_provenance.recording},
+            verification_path=source,
+        )
+    with pytest.raises(AlignmentOutcomeError, match="Board provenance"):
+        publish_alignment_success(
+            paths,
+            offset=offset,
+            report={
+                "recording": input_provenance.recording,
+                "input_provenance": input_provenance.to_dict(),
+            },
+            verification_path=source,
+        )
+    skip_paths, _input, _board, skip, skip_report = _skip_fixture(tmp_path / "skip")
+    with pytest.raises(AlignmentOutcomeError, match="input provenance"):
+        publish_alignment_skip(
+            skip_paths,
+            skip_artifact=skip,
+            report={"recording": skip_report["recording"]},
+        )
+
+
+def test_alignment_success_skip_transition_requires_gate_and_cleans_opposite(
+    tmp_path: Path,
+) -> None:
+    paths, input_provenance, board, offset, source, report = _publish_fixture(tmp_path)
+    _skip_paths, _input, _board, skip, skip_report = _skip_fixture(tmp_path / "unused")
+    with pytest.raises(AlignmentOutcomeError, match="transition"):
+        publish_alignment_skip(
+            paths,
+            skip_artifact=skip,
+            report=skip_report,
+        )
+    assert paths.offset_txt_path.is_file()
+    publish_alignment_skip(
+        paths,
+        skip_artifact=skip,
+        report=skip_report,
+        overwrite_outcome=True,
+    )
+    assert not paths.offset_txt_path.exists()
+    assert paths.skip_json_path.is_file()
+    validate_alignment_outcome(
+        paths,
+        expected_recording=input_provenance.recording,
+        expected_input_provenance=input_provenance,
+        expected_board_provenance=board,
+    )
+
+    publish_alignment_success(
+        paths,
+        offset=offset,
+        report=report,
+        verification_path=source,
+        overwrite_outcome=True,
+    )
+    assert paths.offset_txt_path.is_file()
+    assert not paths.skip_json_path.exists()
+
+
+def test_alignment_publication_writes_report_last_and_exports_public_api(
+    tmp_path: Path,
+) -> None:
+    import writingring
+
+    assert "AlignmentOutcome" in writingring.__all__
+    assert "validate_alignment_outcome" in writingring.__all__
+    paths, _input, _board, _offset, source, report = _outcome_fixture(tmp_path)
+    destinations: list[Path] = []
+    import writingring.alignment_io as alignment_io
+
+    original_replace = alignment_io.os.replace
+
+    def record_replace(source_path: str | bytes | Path, destination: str | bytes | Path) -> None:
+        destinations.append(Path(destination))
+        original_replace(source_path, destination)
+
+    with patch.object(alignment_io.os, "replace", side_effect=record_replace):
+        publish_alignment_success(
+            paths,
+            offset=_offset,
+            report=report,
+            verification_path=source,
+        )
+    assert destinations[-1] == paths.report_path

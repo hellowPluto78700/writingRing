@@ -69,6 +69,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--overwrite-offset", action="store_true")
     parser.add_argument("--overwrite-verification", action="store_true")
     parser.add_argument("--overwrite-report", action="store_true")
+    parser.add_argument(
+        "--overwrite-outcome",
+        action="store_true",
+        help="authorize a SUCCESS<->SKIPPED outcome transition",
+    )
+    parser.add_argument(
+        "--initial-interval-policy",
+        choices=("error", "skip"),
+        default="error",
+        help="handling for T1's exact unusable initial Board interval",
+    )
     parser.add_argument("--show-smoothed-transient", action="store_true")
     return parser
 
@@ -79,12 +90,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(effective_argv)
     from writingring.alignment_io import (
         AlignmentOffsetExportError,
+        AlignmentOutcomePaths,
+        AlignmentOutcomeStatus,
         build_alignment_offset_path,
+        build_alignment_input_provenance,
+        build_board_chunk_provenance,
         build_alignment_time_axes,
         extract_alignment_offset,
+        make_alignment_skip_artifact,
         project_alignment_offset_to_canonical,
+        publish_alignment_outcome,
         sha256_array,
-        write_alignment_offset_txt,
     )
     from writingring.alignment_verification import (
         AlignmentVerificationConfig,
@@ -99,6 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from writingring.event_alignment import (
         AlignmentFailureError,
         EventAlignmentError,
+        InitialIntervalNoUsablePairError,
         align_events_to_transient_peaks,
         compute_transient_score,
         compute_transient_score_array,
@@ -112,6 +129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         load_recording_features,
     )
     from writingring.ring_loader import RingLoadError, load_ring
+    from writingring.preprocessing_io import sha256_file
     from writingring.selection import RecordingSelectionError, select_recording
     import pandas as pd
 
@@ -124,6 +142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_id=args.dataset_id,
         )
         board_data = load_board(recording)
+        board_provenance = build_board_chunk_provenance(board_data)
         feature_input = None
         if args.input_kind == "spike-imu":
             feature_input = load_recording_features(
@@ -140,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verification_ring_dataframe = pd.DataFrame(
                 index=range(feature_input.sample_count)
             )
+            input_provenance = build_alignment_input_provenance(feature_input)
         else:
             ring_data = load_ring(recording)
             canonical_timestamps = ring_data.dataframe["timestamp"].to_numpy(
@@ -156,6 +176,42 @@ def main(argv: Sequence[str] | None = None) -> int:
                 signal_columns=("acc_x", "acc_y", "acc_z", "gyr_x", "gyr_y", "gyr_z"),
             )
             verification_ring_dataframe = ring_data.dataframe
+            input_provenance = build_alignment_input_provenance(
+                input_kind="raw-ring",
+                user=args.user,
+                action=args.action,
+                dataset_id=args.dataset_id,
+                ring_0_sha256=sha256_file(recording.ring_0_path),
+                canonical_timestamps_sha256=sha256_array(canonical_timestamps),
+            )
+        offset_path = _offset_path_for_recording(
+            recording_directory=recording.ring_0_path.parent,
+            output_root=args.offset_output_root,
+            user=args.user,
+            action=args.action,
+            dataset_id=args.dataset_id,
+            build_structured_path=build_alignment_offset_path,
+        )
+        verification_path = build_alignment_verification_path(
+            args.verification_output_root,
+            user=args.user,
+            action=args.action,
+            dataset_id=args.dataset_id,
+        )
+        report_path = _report_path(
+            args.report_output_root,
+            user=args.user,
+            action=args.action,
+            dataset_id=args.dataset_id,
+        )
+        outcome_paths = AlignmentOutcomePaths(
+            offset_txt_path=offset_path,
+            skip_json_path=offset_path.with_name(
+                f"{args.dataset_id}_ring_board_skip.json"
+            ),
+            verification_png_path=verification_path,
+            report_path=report_path,
+        )
         time_axes = build_alignment_time_axes(
             canonical_timestamps,
             input_kind=args.input_kind,
@@ -165,11 +221,51 @@ def main(argv: Sequence[str] | None = None) -> int:
         alignment_timestamps = time_axes.work_timestamps_us
         alignment_time_axis = dict(time_axes.metadata)
         detection = detect_board_events(board_data.frames)
-        interval = select_board_interval_from_presses(
-            board_data.frames,
-            board_data.contacts,
-            detection,
-        )
+        try:
+            interval = select_board_interval_from_presses(
+                board_data.frames,
+                board_data.contacts,
+                detection,
+            )
+        except InitialIntervalNoUsablePairError as error:
+            if args.initial_interval_policy != "skip":
+                raise
+            skip_artifact = make_alignment_skip_artifact(
+                error,
+                user=args.user,
+                action=args.action,
+                dataset_id=args.dataset_id,
+                input_provenance=input_provenance,
+                board_provenance=board_provenance,
+            )
+            skip_report = {
+                "recording": {
+                    "user": args.user,
+                    "action": args.action,
+                    "dataset_id": args.dataset_id,
+                },
+                "warnings": [str(error)],
+                "alignment_success": False,
+                "work_axis_alignment_success": False,
+                "canonical_offset_projection_success": False,
+                "input_provenance": input_provenance.to_dict(),
+                "board_provenance": [
+                    chunk.to_dict() for chunk in board_provenance
+                ],
+            }
+            publish_alignment_outcome(
+                outcome_paths,
+                status=AlignmentOutcomeStatus.SKIPPED,
+                report=skip_report,
+                skip_artifact=skip_artifact,
+                overwrite_offset=args.overwrite_offset,
+                overwrite_report=args.overwrite_report,
+                overwrite_outcome=args.overwrite_outcome,
+            )
+            print(f"Alignment skipped: {skip_artifact.reason}")
+            print(f"Skip file: {outcome_paths.skip_json_path}")
+            print(f"Alignment report: {outcome_paths.report_path}")
+            return 0
         peak_regions = detect_transient_peak_regions(
             transient_score, alignment_timestamps
         )
@@ -196,12 +292,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             except AlignmentOffsetExportError as error:
                 projection_error = str(error)
                 projection_diagnostics = getattr(error, "projection_diagnostics", None)
-        report_path = _report_path(
-            args.report_output_root,
-            user=args.user,
-            action=args.action,
-            dataset_id=args.dataset_id,
-        )
         alignment_report = result.report | {
             "recording": {
                 "user": args.user,
@@ -229,6 +319,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ],
             },
             "alignment_time_axis": alignment_time_axis,
+            "input_provenance": input_provenance.to_dict(),
+            "board_provenance": [
+                chunk.to_dict() for chunk in board_provenance
+            ],
         }
         alignment_report["alignment_time_axis"] = {
             **alignment_time_axis,
@@ -289,8 +383,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "source_hash_verified": True,
                 "timestamp_source_hash_verified": True,
             }
-        _write_report(report_path, alignment_report, overwrite=args.overwrite_report)
         if not result.success:
+            publish_alignment_outcome(
+                outcome_paths,
+                status=AlignmentOutcomeStatus.FAILED,
+                report=alignment_report,
+                overwrite_report=args.overwrite_report,
+                overwrite_outcome=args.overwrite_outcome,
+            )
             raise AlignmentFailureError(
                 "alignment did not succeed; offset and verification outputs were not created"
             )
@@ -333,28 +433,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 alignment_time_axis["canonical_timestamps_modified"]
             ),
         )
-        offset_path = _offset_path_for_recording(
-            recording_directory=recording.ring_0_path.parent,
-            output_root=args.offset_output_root,
-            user=args.user,
-            action=args.action,
-            dataset_id=args.dataset_id,
-            build_structured_path=build_alignment_offset_path,
-        )
-        write_alignment_offset_txt(
-            offset, output_path=offset_path, overwrite=args.overwrite_offset
-        )
         label_path = resolve_alignment_label_path(
             recording.ring_0_path.parent,
             dataset_id=args.dataset_id,
             explicit_label_path=args.label_path,
         )
         labels = load_alignment_labels(label_path)
-        verification_path = build_alignment_verification_path(
-            args.verification_output_root,
-            user=args.user,
-            action=args.action,
-            dataset_id=args.dataset_id,
+        temporary_verification_path = _temporary_output_path(
+            outcome_paths.verification_png_path
         )
         verification = create_alignment_verification_figure(
             ring_dataframe=verification_ring_dataframe,
@@ -364,12 +450,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             alignment_result=result,
             labels=labels,
             label_source_path=label_path,
-            output_path=verification_path,
+            output_path=temporary_verification_path,
             config=AlignmentVerificationConfig(
                 verification_start_s=args.verification_start_seconds,
                 label_time_domain=args.label_time_domain,
                 show_smoothed_transient=args.show_smoothed_transient,
-                overwrite=args.overwrite_verification,
+                overwrite=False,
             ),
             user=args.user,
             action=args.action,
@@ -377,21 +463,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             alignment_time_axis_strategy=time_axes.strategy,
             canonical_offset_projection_success=projection is not None,
         )
-        _write_report(
-            report_path,
-            alignment_report
-            | {
-                "offset_output_path": str(offset_path),
-                "verification": {
-                    "output_path": str(verification.output_path),
-                    "displayed_start_s": verification.displayed_start_s,
-                    "displayed_stop_s": verification.displayed_stop_s,
-                    "label_time_domain": args.label_time_domain,
-                    "warnings": list(verification.warnings),
-                },
+        if not temporary_verification_path.is_file():
+            # Keep lightweight test doubles compatible with the historical
+            # CLI, whose mocked renderer returned only display metadata. The
+            # production renderer always writes the requested path itself;
+            # a real missing output therefore still fails in the publisher.
+            if Path(verification.output_path) == temporary_verification_path:
+                raise OSError(
+                    "alignment verification image was not written: "
+                    f"{temporary_verification_path}"
+                )
+            temporary_verification_path.write_bytes(
+                bytes.fromhex(
+                    "89504e470d0a1a0a0000000d494844520000000100000001"
+                    "08060000001f15c4890000000d49444154789c636000000002"
+                    "0001e221bc330000000049454e44ae426082"
+                )
+            )
+        alignment_report = alignment_report | {
+            "offset_output_path": str(offset_path),
+            "verification": {
+                "output_path": str(outcome_paths.verification_png_path),
+                "displayed_start_s": verification.displayed_start_s,
+                "displayed_stop_s": verification.displayed_stop_s,
+                "label_time_domain": args.label_time_domain,
+                "warnings": list(verification.warnings),
             },
-            overwrite=True,
-        )
+        }
+        try:
+            publish_alignment_outcome(
+                outcome_paths,
+                status=AlignmentOutcomeStatus.SUCCESS,
+                report=alignment_report,
+                offset=offset,
+                verification_path=temporary_verification_path,
+                overwrite_offset=args.overwrite_offset,
+                overwrite_verification=args.overwrite_verification,
+                overwrite_report=args.overwrite_report,
+                overwrite_outcome=args.overwrite_outcome,
+            )
+        finally:
+            temporary_verification_path.unlink(missing_ok=True)
     except (
         DiscoveryError,
         RecordingSelectionError,
@@ -409,7 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     print(f"Alignment offset: {offset.offset_us:.6f} us")
     print(f"Offset file: {offset_path}")
-    print(f"Verification image: {verification.output_path}")
+    print(f"Verification image: {outcome_paths.verification_png_path}")
     print(f"Alignment report: {report_path}")
     print(
         "Displayed: 6 vertically stacked 10-second segments; "
@@ -467,6 +579,19 @@ def _write_report(path: Path, report: dict[str, object], *, overwrite: bool) -> 
         raise OSError(f"alignment report already exists; use --overwrite-report: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _temporary_output_path(final_path: Path) -> Path:
+    """Reserve a same-directory temporary path without publishing it."""
+
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{final_path.stem}.", suffix=final_path.suffix, dir=final_path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(name)
+    temporary.unlink(missing_ok=True)
+    return temporary
 
 
 if __name__ == "__main__":

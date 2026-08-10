@@ -8,12 +8,15 @@ between matching, saved offsets, and verification plots.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
 import tempfile
-from typing import Final, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Final, Any
 
 import numpy as np
 
@@ -24,6 +27,9 @@ ALIGNMENT_MODEL: Final[str] = "constant_offset"
 TIMESTAMP_UNIT: Final[str] = "microseconds"
 TIME_MAPPING: Final[str] = "ring_timestamp_us = board_timestamp_us + offset_us"
 ALIGNMENT_OFFSET_SCHEMA_VERSION: Final[int] = 2
+ALIGNMENT_SKIP_SCHEMA_VERSION: Final[int] = 1
+ALIGNMENT_OUTCOME_SCHEMA_VERSION: Final[int] = 1
+ALIGNMENT_SKIP_REASON: Final[str] = "initial_interval_no_usable_pair"
 ALIGNMENT_WORK_AXIS_DOMAIN: Final[str] = "alignment_work_axis"
 CANONICAL_TIMESTAMP_DOMAIN: Final[str] = "canonical_timestamp"
 _OFFSET_DOMAINS: Final[frozenset[str]] = frozenset(
@@ -33,6 +39,23 @@ _OFFSET_DOMAINS: Final[frozenset[str]] = frozenset(
 
 class AlignmentOffsetExportError(ValueError):
     """Raised when a constant offset cannot be safely exported or consumed."""
+
+
+class AlignmentOutcomeStatus(str, Enum):
+    """The two completed alignment states and the non-completed report state."""
+
+    SUCCESS = "success"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+# ``AlignmentStatus`` is a short compatibility spelling for callers that use
+# the status terminology from the outcome contract.
+AlignmentStatus = AlignmentOutcomeStatus
+
+
+class AlignmentOutcomeError(AlignmentOffsetExportError):
+    """Raised when an alignment outcome is absent, stale, or inconsistent."""
 
 
 def sha256_array(values: np.ndarray) -> str:
@@ -1652,3 +1675,1674 @@ def _optional_bool(value: object, *, name: str) -> bool | None:
     if value == "false":
         return False
     raise AlignmentOffsetExportError(f"{name} must be a boolean")
+
+
+# ---------------------------------------------------------------------------
+# Completed alignment outcomes
+# ---------------------------------------------------------------------------
+
+_SKIP_DIAGNOSTIC_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "previous_global_frame_index",
+        "next_global_frame_index",
+        "previous_timestamp_raw",
+        "next_timestamp_raw",
+        "prefix_boundary_position",
+        "last_pre_jump_global_frame_index",
+        "total_global_valid_pair_count",
+        "usable_prefix_valid_pair_count",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentInputProvenance:
+    """The current feature input identity and content hashes for one run."""
+
+    input_kind: str
+    user: str
+    action: str
+    dataset_id: int
+    feature_schema: str | None = None
+    sampling_rate_hz: float | None = None
+    feature_values_sha256: str | None = None
+    feature_metadata_sha256: str | None = None
+    timestamp_sha256: str | None = None
+    ring_0_sha256: str | None = None
+
+    @property
+    def canonical_timestamps_sha256(self) -> str | None:
+        """Return the canonical timestamp-array digest under its long name."""
+
+        return self.timestamp_sha256
+
+    @property
+    def values_sha256(self) -> str | None:
+        """Compatibility alias for the existing feature provenance spelling."""
+
+        return self.feature_values_sha256
+
+    @property
+    def metadata_sha256(self) -> str | None:
+        """Compatibility alias for the existing feature provenance spelling."""
+
+        return self.feature_metadata_sha256
+
+    @property
+    def recording(self) -> dict[str, object]:
+        return {
+            "user": self.user,
+            "action": self.action,
+            "dataset_id": self.dataset_id,
+        }
+
+    def to_dict(self) -> dict[str, object]:
+        """Return the strict JSON representation used by outcome artifacts."""
+
+        _validate_input_provenance(self)
+        payload: dict[str, object] = {
+            "input_kind": self.input_kind,
+            "recording": self.recording,
+        }
+        if self.input_kind == "raw-ring":
+            payload.update(
+                {
+                    "ring_0_sha256": self.ring_0_sha256,
+                    "timestamp_sha256": self.timestamp_sha256,
+                    "canonical_timestamps_sha256": self.timestamp_sha256,
+                }
+            )
+        else:
+            payload.update(
+                {
+                    "feature_schema": self.feature_schema,
+                    "sampling_rate_hz": self.sampling_rate_hz,
+                    "feature_values_sha256": self.feature_values_sha256,
+                    "feature_metadata_sha256": self.feature_metadata_sha256,
+                    "timestamp_sha256": self.timestamp_sha256,
+                    "canonical_timestamps_sha256": self.timestamp_sha256,
+                }
+            )
+        return payload
+
+
+# The longer spelling is useful to downstream callers and keeps the public
+# contract discoverable without making callers depend on the implementation's
+# historical ``feature`` terminology.
+AlignmentFeatureProvenance = AlignmentInputProvenance
+CurrentAlignmentInputProvenance = AlignmentInputProvenance
+
+
+@dataclass(frozen=True, slots=True)
+class BoardChunkProvenance:
+    """Digest and numeric identity of one Board chunk in loader order."""
+
+    chunk_index: int
+    sha256: str
+    path: Path | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        _nonnegative_int(self.chunk_index, name="board chunk_index")
+        digest = _strict_sha256(self.sha256, name="board chunk sha256")
+        return {"chunk_index": self.chunk_index, "sha256": digest}
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentOutcomePaths:
+    """Stable sibling paths for TXT/skip, verification, and final report."""
+
+    offset_txt_path: Path
+    skip_json_path: Path
+    verification_png_path: Path
+    report_path: Path
+
+    @property
+    def offset_path(self) -> Path:
+        return self.offset_txt_path
+
+    @property
+    def skip_path(self) -> Path:
+        return self.skip_json_path
+
+    @property
+    def verification_path(self) -> Path:
+        return self.verification_png_path
+
+    @property
+    def offset_txt(self) -> Path:
+        return self.offset_txt_path
+
+    @property
+    def skip_json(self) -> Path:
+        return self.skip_json_path
+
+    @property
+    def verification_png(self) -> Path:
+        return self.verification_png_path
+
+    @property
+    def report(self) -> Path:
+        return self.report_path
+
+
+AlignmentOutputPaths = AlignmentOutcomePaths
+AlignmentOutcomeValidationError = AlignmentOutcomeError
+AlignmentProvenance = AlignmentInputProvenance
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentSkipArtifact:
+    """Validated representation of the only publishable alignment skip."""
+
+    recording: Mapping[str, object]
+    diagnostics: Mapping[str, object]
+    input_provenance: AlignmentInputProvenance | Mapping[str, object]
+    board_provenance: Sequence[BoardChunkProvenance | Mapping[str, object]]
+    reason: str = ALIGNMENT_SKIP_REASON
+    alignment_skip_schema_version: int = ALIGNMENT_SKIP_SCHEMA_VERSION
+    artifact_kind: str = "alignment_skip"
+
+    def __post_init__(self) -> None:
+        _literal_schema_version(
+            self.alignment_skip_schema_version,
+            name="alignment_skip_schema_version",
+        )
+
+    @property
+    def schema_version(self) -> int:
+        return self.alignment_skip_schema_version
+
+    def to_dict(self) -> dict[str, object]:
+        recording = _validated_recording_mapping(self.recording)
+        diagnostics = _validate_skip_diagnostics(self.diagnostics)
+        input_payload = _coerce_input_provenance(self.input_provenance).to_dict()
+        board_payload = _coerce_board_provenance(self.board_provenance)
+        _literal_schema_version(
+            self.alignment_skip_schema_version,
+            name="alignment_skip_schema_version",
+        )
+        if self.artifact_kind != "alignment_skip":
+            raise AlignmentOutcomeError("alignment skip artifact_kind is invalid")
+        if self.reason != ALIGNMENT_SKIP_REASON:
+            raise AlignmentOutcomeError("alignment skip reason is unsupported")
+        return {
+            "alignment_skip_schema_version": self.alignment_skip_schema_version,
+            "artifact_kind": self.artifact_kind,
+            "recording": recording,
+            "reason": self.reason,
+            "diagnostics": diagnostics,
+            "input_provenance": input_payload,
+            "board_provenance": board_payload,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> "AlignmentSkipArtifact":
+        if not isinstance(payload, Mapping):
+            raise AlignmentOutcomeError("alignment skip artifact must be a JSON object")
+        required = {
+            "alignment_skip_schema_version",
+            "artifact_kind",
+            "recording",
+            "reason",
+            "diagnostics",
+            "input_provenance",
+            "board_provenance",
+        }
+        missing = sorted(required - set(payload))
+        if missing:
+            raise AlignmentOutcomeError(
+                "alignment skip artifact is missing required field(s): "
+                + ", ".join(missing)
+            )
+        return cls(
+            recording=_validated_recording_mapping(payload["recording"]),
+            diagnostics=_validate_skip_diagnostics(payload["diagnostics"]),
+            input_provenance=_coerce_input_provenance(payload["input_provenance"]),
+            board_provenance=_coerce_board_provenance(payload["board_provenance"]),
+            reason=payload["reason"],  # type: ignore[arg-type]
+            alignment_skip_schema_version=_literal_schema_version(
+                payload["alignment_skip_schema_version"],
+                name="alignment_skip_schema_version",
+            ),
+            artifact_kind=payload["artifact_kind"],  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentOutcome:
+    """A completed SUCCESS or SKIPPED artifact set and its final report."""
+
+    status: AlignmentOutcomeStatus
+    recording: Mapping[str, object]
+    paths: AlignmentOutcomePaths
+    report: Mapping[str, object]
+
+    @property
+    def alignment_status(self) -> str:
+        return self.status.value
+
+    @property
+    def status_name(self) -> str:
+        """Return the terminal-state spelling used in task summaries."""
+
+        return self.status.name
+
+    @property
+    def is_success(self) -> bool:
+        return self.status is AlignmentOutcomeStatus.SUCCESS
+
+    @property
+    def is_skipped(self) -> bool:
+        return self.status is AlignmentOutcomeStatus.SKIPPED
+
+
+def build_alignment_input_provenance(
+    feature_input: object | None = None,
+    *,
+    input_kind: str | None = None,
+    user: str | None = None,
+    action: str | None = None,
+    dataset_id: int | None = None,
+    ring_0_sha256: str | None = None,
+    ring_0_path: Path | None = None,
+    canonical_timestamps_sha256: str | None = None,
+    canonical_timestamps_us: np.ndarray | None = None,
+    timestamp_sha256: str | None = None,
+    feature_schema: str | None = None,
+    sampling_rate_hz: float | None = None,
+    feature_values_sha256: str | None = None,
+    feature_metadata_sha256: str | None = None,
+) -> AlignmentInputProvenance:
+    """Build current provenance from a feature input or explicit run values."""
+
+    if feature_input is not None:
+        if isinstance(feature_input, AlignmentInputProvenance):
+            return _coerce_input_provenance(feature_input)
+        if isinstance(feature_input, Mapping):
+            return _coerce_input_provenance(feature_input)
+        required_attrs = (
+            "input_kind",
+            "user",
+            "action",
+            "dataset_id",
+            "feature_schema",
+            "sampling_rate_hz",
+            "values_sha256",
+            "metadata_sha256",
+            "timestamps_sha256",
+        )
+        if not all(hasattr(feature_input, name) for name in required_attrs):
+            raise AlignmentOutcomeError(
+                "feature_input must expose the RecordingFeatureInput provenance fields"
+            )
+        return _coerce_input_provenance(
+            {
+                "input_kind": feature_input.input_kind,
+                "recording": {
+                    "user": feature_input.user,
+                    "action": feature_input.action,
+                    "dataset_id": feature_input.dataset_id,
+                },
+                "feature_schema": feature_input.feature_schema,
+                "sampling_rate_hz": feature_input.sampling_rate_hz,
+                "feature_values_sha256": feature_input.values_sha256,
+                "feature_metadata_sha256": feature_input.metadata_sha256,
+                "timestamp_sha256": feature_input.timestamps_sha256,
+                "ring_0_sha256": (
+                    feature_input.values_sha256
+                    if feature_input.input_kind == "raw-ring"
+                    else None
+                ),
+            }
+        )
+    if input_kind is None or user is None or action is None or dataset_id is None:
+        raise AlignmentOutcomeError(
+            "input_kind, user, action, and dataset_id are required for provenance"
+        )
+    if ring_0_sha256 is None and ring_0_path is not None:
+        ring_0_sha256 = _sha256_regular_file(Path(ring_0_path), name="ring_0")
+    timestamp_digest = timestamp_sha256 or canonical_timestamps_sha256
+    if timestamp_digest is None and canonical_timestamps_us is not None:
+        timestamp_digest = sha256_array(canonical_timestamps_us)
+    if timestamp_digest is None:
+        raise AlignmentOutcomeError(
+            "canonical timestamp SHA-256 is required for input provenance"
+        )
+    return _coerce_input_provenance(
+        {
+            "input_kind": input_kind,
+            "recording": {
+                "user": user,
+                "action": action,
+                "dataset_id": dataset_id,
+            },
+            "feature_schema": feature_schema,
+            "sampling_rate_hz": sampling_rate_hz,
+            "feature_values_sha256": feature_values_sha256,
+            "feature_metadata_sha256": feature_metadata_sha256,
+            "timestamp_sha256": timestamp_digest,
+            "ring_0_sha256": ring_0_sha256,
+        }
+    )
+
+
+current_alignment_input_provenance = build_alignment_input_provenance
+
+
+def build_board_chunk_provenance(
+    source: object,
+) -> tuple[BoardChunkProvenance, ...]:
+    """Hash Board files in their existing numeric chunk order."""
+
+    paths: tuple[Path, ...]
+    reports: Sequence[object] | None = None
+    if hasattr(source, "chunk_paths"):
+        paths = tuple(Path(path) for path in source.chunk_paths)
+        reports = getattr(source, "chunk_reports", None)
+    elif isinstance(source, (str, Path)):
+        paths = (Path(source),)
+    else:
+        try:
+            paths = tuple(Path(path) for path in source)  # type: ignore[arg-type]
+        except TypeError as error:
+            raise AlignmentOutcomeError(
+                "Board provenance source must be BoardData or a path sequence"
+            ) from error
+    if not paths:
+        raise AlignmentOutcomeError("Board provenance must contain at least one chunk")
+    values: list[BoardChunkProvenance] = []
+    for position, path in enumerate(paths):
+        chunk_index: int | None = None
+        if reports is not None and position < len(reports):
+            report = reports[position]
+            candidate = getattr(report, "chunk_index", None)
+            if candidate is not None:
+                chunk_index = _nonnegative_int(candidate, name="board chunk_index")
+        if chunk_index is None:
+            try:
+                from writingring.discovery import parse_recording_filename
+
+                parsed = parse_recording_filename(path.name)
+            except (ImportError, ValueError) as error:
+                raise AlignmentOutcomeError(
+                    f"could not parse Board chunk identity: {path}"
+                ) from error
+            chunk_index = (
+                None if parsed is None else getattr(parsed, "chunk_index", None)
+            )
+            if chunk_index is None:
+                raise AlignmentOutcomeError(
+                    f"Board chunk path has no numeric chunk index: {path}"
+                )
+            chunk_index = _nonnegative_int(chunk_index, name="board chunk_index")
+        digest = _sha256_regular_file(path, name="Board chunk")
+        values.append(BoardChunkProvenance(chunk_index, digest, path))
+    indices = [item.chunk_index for item in values]
+    if any(next_index < index for index, next_index in zip(indices, indices[1:])):
+        raise AlignmentOutcomeError(
+            "Board provenance chunks are not in numeric chunk-index order"
+        )
+    return tuple(values)
+
+
+build_board_provenance = build_board_chunk_provenance
+
+
+def build_alignment_skip_path(
+    offset_root: Path,
+    *,
+    user: str,
+    action: str,
+    dataset_id: int,
+) -> Path:
+    """Return the skip JSON sibling of the success offset TXT."""
+
+    _validate_identity(user=user, action=action, dataset_id=dataset_id)
+    return Path(offset_root) / user / f"action_{action}" / (
+        f"{dataset_id}_ring_board_skip.json"
+    )
+
+
+def build_alignment_outcome_paths(
+    offset_root: Path,
+    verification_root: Path,
+    report_root: Path,
+    *,
+    user: str,
+    action: str,
+    dataset_id: int,
+) -> AlignmentOutcomePaths:
+    """Return the complete sibling artifact namespace for one recording."""
+
+    offset = build_alignment_offset_path(
+        offset_root, user=user, action=action, dataset_id=dataset_id
+    )
+    return AlignmentOutcomePaths(
+        offset_txt_path=offset,
+        skip_json_path=build_alignment_skip_path(
+            offset_root, user=user, action=action, dataset_id=dataset_id
+        ),
+        verification_png_path=(
+            Path(verification_root)
+            / user
+            / f"action_{action}"
+            / f"{dataset_id}_alignment_verification.png"
+        ),
+        report_path=_build_alignment_report_path(
+            report_root, user=user, action=action, dataset_id=dataset_id
+        ),
+    )
+
+
+def _build_alignment_report_path(
+    report_root: Path,
+    *,
+    user: str,
+    action: str,
+    dataset_id: int,
+) -> Path:
+    _validate_identity(user=user, action=action, dataset_id=dataset_id)
+    return Path(report_root) / user / f"action_{action}" / (
+        f"{dataset_id}_alignment_report.json"
+    )
+
+
+def make_alignment_skip_artifact(
+    error: object,
+    *,
+    user: str,
+    action: str,
+    dataset_id: int,
+    input_provenance: object,
+    board_provenance: object,
+) -> AlignmentSkipArtifact:
+    """Convert T1's typed diagnostic into the strict skip artifact model."""
+
+    from writingring.event_alignment import InitialIntervalNoUsablePairError
+
+    if not isinstance(error, InitialIntervalNoUsablePairError):
+        raise AlignmentOutcomeError(
+            "only InitialIntervalNoUsablePairError can create an alignment skip"
+        )
+    _validate_identity(user=user, action=action, dataset_id=dataset_id)
+    return AlignmentSkipArtifact(
+        recording={"user": user, "action": action, "dataset_id": dataset_id},
+        diagnostics=dict(error.diagnostics),
+        input_provenance=_coerce_input_provenance(input_provenance),
+        board_provenance=_coerce_board_provenance(board_provenance),
+    )
+
+
+build_alignment_skip_artifact = make_alignment_skip_artifact
+
+
+def write_alignment_skip_artifact(
+    artifact: AlignmentSkipArtifact | Mapping[str, object],
+    output_path: Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Atomically write one strict, validated skip JSON artifact."""
+
+    value = (
+        artifact
+        if isinstance(artifact, AlignmentSkipArtifact)
+        else AlignmentSkipArtifact.from_dict(artifact)
+    )
+    payload = value.to_dict()
+    path = Path(output_path)
+    _preflight_single_target(path, overwrite=overwrite, label="skip artifact")
+    _atomic_write_json(path, payload)
+    return path
+
+
+write_alignment_skip_json = write_alignment_skip_artifact
+
+
+def read_alignment_skip_artifact(
+    path: Path,
+    *,
+    expected_user: str | None = None,
+    expected_action: str | None = None,
+    expected_dataset_id: int | None = None,
+    expected_input_provenance: object | None = None,
+    expected_board_provenance: object | None = None,
+) -> AlignmentSkipArtifact:
+    """Read the strict skip artifact and optionally verify current provenance."""
+
+    payload = _read_strict_json(Path(path), label="alignment skip artifact")
+    artifact = AlignmentSkipArtifact.from_dict(payload)
+    artifact_payload = artifact.to_dict()
+    identity = _expected_identity(
+        expected_user=expected_user,
+        expected_action=expected_action,
+        expected_dataset_id=expected_dataset_id,
+    )
+    if identity is not None and artifact_payload["recording"] != identity:
+        raise AlignmentOutcomeError(
+            "alignment skip recording identity does not match the requested recording"
+        )
+    if expected_input_provenance is not None:
+        if artifact_payload["input_provenance"] != _coerce_input_provenance(
+            expected_input_provenance
+        ).to_dict():
+            raise AlignmentOutcomeError("alignment skip input provenance is stale")
+    if expected_board_provenance is not None:
+        if artifact_payload["board_provenance"] != _coerce_board_provenance(
+            expected_board_provenance
+        ):
+            raise AlignmentOutcomeError("alignment skip Board provenance is stale")
+    return artifact
+
+
+validate_alignment_skip_artifact = read_alignment_skip_artifact
+
+
+def validate_alignment_outcome(
+    paths_or_offset_root: AlignmentOutcomePaths | Path,
+    verification_root: Path | None = None,
+    report_root: Path | None = None,
+    *,
+    expected_user: str | None = None,
+    expected_action: str | None = None,
+    expected_dataset_id: int | None = None,
+    expected_recording: Mapping[str, object] | None = None,
+    input_provenance: object | None = None,
+    expected_input_provenance: object | None = None,
+    board_provenance: object | None = None,
+    expected_board_provenance: object | None = None,
+) -> AlignmentOutcome:
+    """Validate one complete SUCCESS or SKIPPED outcome.
+
+    The report is authoritative: a TXT/PNG or skip JSON without a matching
+    v1 report manifest is never returned as a completed outcome.
+    """
+
+    paths = _coerce_outcome_paths(
+        paths_or_offset_root,
+        verification_root=verification_root,
+        report_root=report_root,
+        expected_user=expected_user,
+        expected_action=expected_action,
+        expected_dataset_id=expected_dataset_id,
+        expected_recording=expected_recording,
+    )
+    identity = _expected_identity(
+        expected_user=expected_user,
+        expected_action=expected_action,
+        expected_dataset_id=expected_dataset_id,
+        expected_recording=expected_recording,
+    )
+    if identity is None:
+        raise AlignmentOutcomeError(
+            "expected recording identity is required for outcome validation"
+        )
+    current_input = expected_input_provenance or input_provenance
+    current_board = expected_board_provenance or board_provenance
+    if current_input is None or current_board is None:
+        raise AlignmentOutcomeError(
+            "current input and Board provenance are required for outcome validation"
+        )
+    expected_input = _coerce_input_provenance(current_input).to_dict()
+    if expected_input.get("recording") != identity:
+        raise AlignmentOutcomeError(
+            "current input provenance identity does not match expected recording"
+        )
+    expected_board = _coerce_board_provenance(current_board)
+
+    report = _read_strict_json(paths.report_path, label="alignment outcome report")
+    _validate_report_header(report, identity=identity)
+    status = _coerce_status(report["alignment_status"])
+    if status is AlignmentOutcomeStatus.FAILED:
+        raise AlignmentOutcomeError("failed alignment reports are not completed outcomes")
+    if report.get("input_provenance") != expected_input:
+        raise AlignmentOutcomeError("alignment report input provenance is stale")
+    if report.get("board_provenance") != expected_board:
+        raise AlignmentOutcomeError("alignment report Board provenance is stale")
+
+    entries = _validate_manifest(report["outcome_artifacts"])
+    if status is AlignmentOutcomeStatus.SUCCESS:
+        if report.get("alignment_success") is not True:
+            raise AlignmentOutcomeError(
+                "status-success report must declare alignment_success=true"
+            )
+        if report.get("work_axis_alignment_success") is not True:
+            raise AlignmentOutcomeError(
+                "status-success report must declare work_axis_alignment_success=true"
+            )
+        if paths.skip_json_path.exists():
+            raise AlignmentOutcomeError(
+                "success outcome conflicts with an alignment skip artifact"
+            )
+        expected_names = {
+            paths.offset_txt_path.name,
+            paths.verification_png_path.name,
+        }
+        if {entry["filename"] for entry in entries} != expected_names:
+            raise AlignmentOutcomeError(
+                "status-success report must manifest exactly offset TXT and verification PNG"
+            )
+        _validate_manifest_file(
+            paths.offset_txt_path,
+            entries,
+            label="alignment offset TXT",
+        )
+        offset = read_alignment_offset_txt(
+            paths.offset_txt_path,
+            expected_user=identity["user"],
+            expected_action=identity["action"],
+            expected_dataset_id=identity["dataset_id"],
+        )
+        _validate_offset_input_provenance(offset, expected_input)
+        if not paths.verification_png_path.is_file():
+            raise AlignmentOutcomeError(
+                "status-success verification PNG is missing or not a regular file"
+            )
+        if paths.verification_png_path.stat().st_size <= 0:
+            raise AlignmentOutcomeError("status-success verification PNG is empty")
+        _validate_manifest_file(
+            paths.verification_png_path,
+            entries,
+            label="alignment verification PNG",
+        )
+    else:
+        if report.get("alignment_success") is not False:
+            raise AlignmentOutcomeError(
+                "status-skipped report must declare alignment_success=false"
+            )
+        if report.get("work_axis_alignment_success") is not False:
+            raise AlignmentOutcomeError(
+                "status-skipped report must declare work_axis_alignment_success=false"
+            )
+        if paths.offset_txt_path.exists() or paths.verification_png_path.exists():
+            raise AlignmentOutcomeError(
+                "skipped outcome conflicts with success artifacts"
+            )
+        if [entry["filename"] for entry in entries] != [paths.skip_json_path.name]:
+            raise AlignmentOutcomeError(
+                "status-skipped report must manifest exactly one skip JSON"
+            )
+        _validate_manifest_file(
+            paths.skip_json_path,
+            entries,
+            label="alignment skip JSON",
+        )
+        skip = read_alignment_skip_artifact(
+            paths.skip_json_path,
+            expected_user=identity["user"],
+            expected_action=identity["action"],
+            expected_dataset_id=identity["dataset_id"],
+            expected_input_provenance=expected_input,
+            expected_board_provenance=expected_board,
+        )
+        if skip.reason != ALIGNMENT_SKIP_REASON:
+            raise AlignmentOutcomeError("alignment skip reason is unsupported")
+    return AlignmentOutcome(
+        status=status,
+        recording=identity,
+        paths=paths,
+        report=report,
+    )
+
+
+validate_completed_alignment_outcome = validate_alignment_outcome
+validate_completed_alignment = validate_alignment_outcome
+validate_alignment_completion = validate_alignment_outcome
+read_alignment_outcome = validate_alignment_outcome
+
+
+def read_alignment_outcome_report(path: Path) -> dict[str, object]:
+    """Read a v1 report manifest without treating it as completion."""
+
+    return _read_strict_json(Path(path), label="alignment outcome report")
+
+
+def publish_alignment_outcome(
+    paths: AlignmentOutcomePaths,
+    *,
+    status: AlignmentOutcomeStatus | str,
+    report: Mapping[str, object],
+    offset: AlignmentOffset | None = None,
+    skip_artifact: AlignmentSkipArtifact | Mapping[str, object] | None = None,
+    verification_path: Path | None = None,
+    overwrite_offset: bool = False,
+    overwrite_skip: bool | None = None,
+    overwrite_verification: bool = False,
+    overwrite_report: bool = False,
+    overwrite_outcome: bool = False,
+) -> AlignmentOutcome:
+    """Preflight, stage, and atomically publish one alignment outcome.
+
+    Individual artifacts are replaced before the strict report manifest.  A
+    success/skip transition additionally requires ``overwrite_outcome`` and
+    removes obsolete opposite-state files before publishing the new report.
+    """
+
+    if not isinstance(paths, AlignmentOutcomePaths):
+        raise AlignmentOutcomeError("paths must be AlignmentOutcomePaths")
+    outcome_status = _coerce_status(status)
+    if not isinstance(report, Mapping):
+        raise AlignmentOutcomeError("alignment outcome report must be a mapping")
+    if not isinstance(overwrite_outcome, bool):
+        raise AlignmentOutcomeError("overwrite_outcome must be a boolean")
+    if overwrite_skip is not None:
+        if not isinstance(overwrite_skip, bool):
+            raise AlignmentOutcomeError("overwrite_skip must be a boolean")
+        overwrite_offset = overwrite_skip
+    report_base = dict(report)
+    completed = outcome_status in {
+        AlignmentOutcomeStatus.SUCCESS,
+        AlignmentOutcomeStatus.SKIPPED,
+    }
+    if completed and not report_base.get("input_provenance"):
+        raise AlignmentOutcomeError(
+            "completed alignment outcome requires current input provenance"
+        )
+    if "input_provenance" in report_base:
+        report_base["input_provenance"] = _coerce_input_provenance(
+            report_base["input_provenance"]
+        ).to_dict()
+    if completed and not report_base.get("board_provenance"):
+        raise AlignmentOutcomeError(
+            "completed alignment outcome requires current Board provenance"
+        )
+    if "board_provenance" in report_base:
+        report_base["board_provenance"] = _coerce_board_provenance(
+            report_base["board_provenance"]
+        )
+    identity = _report_identity(report_base)
+    if identity is None:
+        if offset is not None:
+            identity = {
+                "user": offset.user,
+                "action": offset.action,
+                "dataset_id": offset.dataset_id,
+            }
+            report_base["recording"] = identity
+        elif skip_artifact is not None:
+            candidate = (
+                skip_artifact
+                if isinstance(skip_artifact, AlignmentSkipArtifact)
+                else AlignmentSkipArtifact.from_dict(skip_artifact)
+            )
+            identity = _validated_recording_mapping(candidate.recording)
+            report_base["recording"] = identity
+        else:
+            raise AlignmentOutcomeError(
+                "outcome report must declare recording identity"
+            )
+    else:
+        identity = _validated_recording_mapping(identity)
+
+    if completed:
+        if report_base["input_provenance"]["recording"] != identity:  # type: ignore[index]
+            raise AlignmentOutcomeError(
+                "completed outcome input provenance identity does not match report"
+            )
+
+    skip_value: AlignmentSkipArtifact | None = None
+    if skip_artifact is not None:
+        skip_value = (
+            skip_artifact
+            if isinstance(skip_artifact, AlignmentSkipArtifact)
+            else AlignmentSkipArtifact.from_dict(skip_artifact)
+        )
+    if outcome_status is AlignmentOutcomeStatus.SUCCESS:
+        if offset is None or not isinstance(offset, AlignmentOffset):
+            raise AlignmentOutcomeError("SUCCESS publication requires an AlignmentOffset")
+        _validate_offset(offset)
+        if (offset.user, offset.action, offset.dataset_id) != (
+            identity["user"],
+            identity["action"],
+            identity["dataset_id"],
+        ):
+            raise AlignmentOutcomeError("offset identity does not match outcome report")
+        if skip_value is not None or verification_path is None:
+            if skip_value is not None:
+                raise AlignmentOutcomeError("SUCCESS cannot include a skip artifact")
+            raise AlignmentOutcomeError("SUCCESS publication requires verification PNG")
+    elif outcome_status is AlignmentOutcomeStatus.SKIPPED:
+        if skip_value is None:
+            raise AlignmentOutcomeError("SKIPPED publication requires a skip artifact")
+        skip_payload = skip_value.to_dict()
+        if skip_payload["recording"] != identity:
+            raise AlignmentOutcomeError("skip artifact identity does not match outcome report")
+        if (
+            skip_payload["input_provenance"] != report_base.get("input_provenance")
+            or skip_payload["board_provenance"] != report_base.get("board_provenance")
+        ):
+            raise AlignmentOutcomeError(
+                "skip artifact provenance does not match the current outcome provenance"
+            )
+        if offset is not None or verification_path is not None:
+            raise AlignmentOutcomeError("SKIPPED cannot include success artifacts")
+    else:
+        if offset is not None or skip_value is not None or verification_path is not None:
+            raise AlignmentOutcomeError("FAILED publication cannot include artifacts")
+
+    old_state = _existing_outcome_state(paths)
+    requested_state = outcome_status
+    transition = old_state is not None and old_state is not requested_state
+    opposite_present = _opposite_artifact_present(paths, requested_state)
+    if (transition or opposite_present) and not overwrite_outcome:
+        raise AlignmentOutcomeError(
+            "success/skip outcome transition requires overwrite_outcome=True"
+        )
+    transition_authorized = bool(overwrite_outcome and (transition or opposite_present))
+    _preflight_outcome_targets(
+        paths,
+        status=outcome_status,
+        overwrite_offset=overwrite_offset,
+        overwrite_verification=overwrite_verification,
+        overwrite_report=overwrite_report,
+        transition_authorized=transition_authorized,
+    )
+
+    staged: list[tuple[Path, Path]] = []
+    try:
+        manifest: list[dict[str, str]] = []
+        if outcome_status is AlignmentOutcomeStatus.SUCCESS:
+            offset_stage = _stage_offset(offset, paths.offset_txt_path.parent)
+            staged.append((offset_stage, paths.offset_txt_path))
+            manifest.append(
+                {
+                    "filename": paths.offset_txt_path.name,
+                    "sha256": _sha256_regular_file(offset_stage, name="offset TXT"),
+                }
+            )
+            verification_source = Path(verification_path or "")
+            if not verification_source.is_file() or verification_source.stat().st_size <= 0:
+                raise AlignmentOutcomeError(
+                    "verification PNG must be a nonempty regular file"
+                )
+            verification_stage = _stage_file(
+                verification_source, paths.verification_png_path.parent
+            )
+            staged.append((verification_stage, paths.verification_png_path))
+            manifest.append(
+                {
+                    "filename": paths.verification_png_path.name,
+                    "sha256": _sha256_regular_file(
+                        verification_stage, name="verification PNG"
+                    ),
+                }
+            )
+            report_base.setdefault("alignment_success", True)
+            report_base.setdefault("work_axis_alignment_success", True)
+        elif outcome_status is AlignmentOutcomeStatus.SKIPPED:
+            skip_stage = _stage_json(skip_value.to_dict(), paths.skip_json_path.parent)
+            staged.append((skip_stage, paths.skip_json_path))
+            manifest.append(
+                {
+                    "filename": paths.skip_json_path.name,
+                    "sha256": _sha256_regular_file(skip_stage, name="skip JSON"),
+                }
+            )
+            report_base.setdefault("alignment_success", False)
+            report_base.setdefault("work_axis_alignment_success", False)
+        else:
+            report_base["alignment_success"] = False
+            report_base["work_axis_alignment_success"] = False
+
+        report_base["alignment_outcome_schema_version"] = ALIGNMENT_OUTCOME_SCHEMA_VERSION
+        report_base["alignment_status"] = outcome_status.value
+        report_base["outcome_artifacts"] = manifest
+        report_payload = _jsonable(report_base)
+        _validate_report_header(report_payload, identity=identity)
+        report_stage = _stage_json(report_payload, paths.report_path.parent)
+        try:
+            for temporary, destination in tuple(staged):
+                os.replace(temporary, destination)
+                staged.remove((temporary, destination))
+            if transition_authorized:
+                _remove_obsolete_artifacts(paths, outcome_status)
+            # The report is intentionally replaced last.  Missing or stale
+            # report/artifact combinations fail the authoritative validator.
+            os.replace(report_stage, paths.report_path)
+            report_stage = None  # type: ignore[assignment]
+        finally:
+            if report_stage is not None and report_stage.exists():
+                report_stage.unlink(missing_ok=True)
+    except (OSError, AlignmentOffsetExportError) as error:
+        raise AlignmentOutcomeError(f"could not publish alignment outcome: {error}") from error
+    finally:
+        for temporary, _destination in staged:
+            temporary.unlink(missing_ok=True)
+
+    return AlignmentOutcome(
+        status=outcome_status,
+        recording=identity,
+        paths=paths,
+        report=report_payload,
+    )
+
+
+def publish_alignment_success(
+    paths: AlignmentOutcomePaths,
+    *,
+    offset: AlignmentOffset,
+    report: Mapping[str, object],
+    verification_path: Path,
+    overwrite_offset: bool = False,
+    overwrite_verification: bool = False,
+    overwrite_report: bool = False,
+    overwrite_outcome: bool = False,
+) -> AlignmentOutcome:
+    return publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.SUCCESS,
+        report=report,
+        offset=offset,
+        verification_path=verification_path,
+        overwrite_offset=overwrite_offset,
+        overwrite_verification=overwrite_verification,
+        overwrite_report=overwrite_report,
+        overwrite_outcome=overwrite_outcome,
+    )
+
+
+def publish_alignment_skip(
+    paths: AlignmentOutcomePaths,
+    *,
+    skip_artifact: AlignmentSkipArtifact,
+    report: Mapping[str, object],
+    overwrite_offset: bool = False,
+    overwrite_skip: bool | None = None,
+    overwrite_report: bool = False,
+    overwrite_outcome: bool = False,
+) -> AlignmentOutcome:
+    return publish_alignment_outcome(
+        paths,
+        status=AlignmentOutcomeStatus.SKIPPED,
+        report=report,
+        skip_artifact=skip_artifact,
+        overwrite_offset=overwrite_offset,
+        overwrite_skip=overwrite_skip,
+        overwrite_report=overwrite_report,
+        overwrite_outcome=overwrite_outcome,
+    )
+
+
+def write_alignment_outcome_report(
+    path: Path,
+    report: Mapping[str, object],
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Write a strict report manifest for callers that stage artifacts first."""
+
+    if not isinstance(report, Mapping):
+        raise AlignmentOutcomeError("alignment outcome report must be a mapping")
+    payload = _jsonable(dict(report))
+    identity = _report_identity(payload)
+    if identity is None:
+        raise AlignmentOutcomeError("alignment outcome report must declare recording identity")
+    _validate_report_header(payload, identity=identity)
+    _preflight_single_target(Path(path), overwrite=overwrite, label="alignment report")
+    _atomic_write_json(Path(path), payload)
+    return Path(path)
+
+
+write_alignment_report = write_alignment_outcome_report
+
+
+def _coerce_status(value: object) -> AlignmentOutcomeStatus:
+    if isinstance(value, AlignmentOutcomeStatus):
+        return value
+    if isinstance(value, str):
+        lowered = value.lower()
+        if lowered in {item.value for item in AlignmentOutcomeStatus}:
+            return AlignmentOutcomeStatus(lowered)
+        if value.upper() in AlignmentOutcomeStatus.__members__:
+            return AlignmentOutcomeStatus[value.upper()]
+    raise AlignmentOutcomeError(
+        "alignment_status must be success, skipped, or failed"
+    )
+
+
+def _coerce_outcome_paths(
+    value: AlignmentOutcomePaths | Path,
+    *,
+    verification_root: Path | None,
+    report_root: Path | None,
+    expected_user: str | None,
+    expected_action: str | None,
+    expected_dataset_id: int | None,
+    expected_recording: Mapping[str, object] | None,
+) -> AlignmentOutcomePaths:
+    if isinstance(value, AlignmentOutcomePaths):
+        return value
+    if not isinstance(value, (str, Path)):
+        raise AlignmentOutcomeError(
+            "outcome roots must be AlignmentOutcomePaths or a path"
+        )
+    identity = _expected_identity(
+        expected_user=expected_user,
+        expected_action=expected_action,
+        expected_dataset_id=expected_dataset_id,
+        expected_recording=expected_recording,
+    )
+    if identity is None or verification_root is None or report_root is None:
+        raise AlignmentOutcomeError(
+            "outcome roots, verification root, report root, and identity are required"
+        )
+    return build_alignment_outcome_paths(
+        Path(value),
+        verification_root,
+        report_root,
+        user=str(identity["user"]),
+        action=str(identity["action"]),
+        dataset_id=int(identity["dataset_id"]),
+    )
+
+
+def _coerce_input_provenance(value: object) -> AlignmentInputProvenance:
+    if isinstance(value, AlignmentInputProvenance):
+        _validate_input_provenance(value)
+        return value
+    if not isinstance(value, Mapping):
+        if all(
+            hasattr(value, name)
+            for name in (
+                "input_kind",
+                "user",
+                "action",
+                "dataset_id",
+                "feature_schema",
+                "sampling_rate_hz",
+                "values_sha256",
+                "metadata_sha256",
+                "timestamps_sha256",
+            )
+        ):
+            return build_alignment_input_provenance(value)
+        raise AlignmentOutcomeError("input provenance must be a mapping or feature input")
+    recording = value.get("recording")
+    if not isinstance(recording, Mapping):
+        recording = value
+    user = recording.get("user")
+    action = recording.get("action")
+    dataset_id = recording.get("dataset_id", recording.get("data_id"))
+    input_kind = value.get("input_kind")
+    if not isinstance(input_kind, str):
+        raise AlignmentOutcomeError("input provenance input_kind is required")
+    timestamp = _coalesce_aliases(
+        value,
+        (
+            "timestamp_sha256",
+            "canonical_timestamps_sha256",
+            "canonical_timestamp_sha256",
+            "timestamp_array_sha256",
+            "timestamps_sha256",
+        ),
+        name="timestamp SHA-256",
+    )
+    feature_values = _coalesce_aliases(
+        value,
+        ("feature_values_sha256", "values_sha256"),
+        name="feature values SHA-256",
+    )
+    feature_metadata = _coalesce_aliases(
+        value,
+        ("feature_metadata_sha256", "metadata_sha256"),
+        name="feature metadata SHA-256",
+    )
+    ring_digest = _coalesce_aliases(
+        value,
+        ("ring_0_sha256", "ring_0_content_sha256"),
+        name="ring_0 SHA-256",
+    )
+    if input_kind == "raw-ring" and ring_digest is None:
+        ring_digest = feature_values
+    result = AlignmentInputProvenance(
+        input_kind=input_kind,
+        user=user,  # type: ignore[arg-type]
+        action=action,  # type: ignore[arg-type]
+        dataset_id=dataset_id,  # type: ignore[arg-type]
+        feature_schema=value.get("feature_schema"),  # type: ignore[arg-type]
+        sampling_rate_hz=value.get(
+            "sampling_rate_hz", value.get("feature_sampling_rate_hz")
+        ),  # type: ignore[arg-type]
+        feature_values_sha256=feature_values,  # type: ignore[arg-type]
+        feature_metadata_sha256=feature_metadata,  # type: ignore[arg-type]
+        timestamp_sha256=timestamp,  # type: ignore[arg-type]
+        ring_0_sha256=ring_digest,  # type: ignore[arg-type]
+    )
+    _validate_input_provenance(result)
+    return result
+
+
+def _validate_input_provenance(value: AlignmentInputProvenance) -> None:
+    if value.input_kind not in {"raw-ring", "spike-imu"}:
+        raise AlignmentOutcomeError("input provenance input_kind is unsupported")
+    _validate_identity(user=value.user, action=value.action, dataset_id=value.dataset_id)
+    _strict_sha256(value.timestamp_sha256, name="timestamp_sha256")
+    if value.input_kind == "raw-ring":
+        _strict_sha256(value.ring_0_sha256, name="ring_0_sha256")
+        if any(
+            field is not None
+            for field in (
+                value.feature_schema,
+                value.feature_values_sha256,
+                value.feature_metadata_sha256,
+            )
+        ) and value.feature_values_sha256 != value.ring_0_sha256:
+            raise AlignmentOutcomeError(
+                "raw-ring feature values hash must identify ring_0 content"
+            )
+    else:
+        if not isinstance(value.feature_schema, str) or not value.feature_schema:
+            raise AlignmentOutcomeError("SpikeIMU feature_schema is required")
+        rate = _finite_float(value.sampling_rate_hz, name="sampling_rate_hz")
+        if rate <= 0.0:
+            raise AlignmentOutcomeError("sampling_rate_hz must be positive")
+        _strict_sha256(value.feature_values_sha256, name="feature_values_sha256")
+        _strict_sha256(value.feature_metadata_sha256, name="feature_metadata_sha256")
+
+
+def _coalesce_aliases(
+    value: Mapping[str, object],
+    names: Sequence[str],
+    *,
+    name: str,
+) -> object | None:
+    present = [value[key] for key in names if key in value]
+    if not present:
+        return None
+    first = present[0]
+    if any(item != first for item in present[1:]):
+        raise AlignmentOutcomeError(f"conflicting {name} aliases")
+    return first
+
+
+def _coerce_board_provenance(value: object) -> list[dict[str, object]]:
+    if isinstance(value, (str, Path)) or hasattr(value, "chunk_paths"):
+        items: Sequence[object] = build_board_chunk_provenance(value)
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if value and all(isinstance(item, (str, Path)) for item in value):
+            items = build_board_chunk_provenance(value)
+        else:
+            items = value
+    else:
+        raise AlignmentOutcomeError("Board provenance must be an ordered sequence")
+    result: list[dict[str, object]] = []
+    for item in items:
+        if isinstance(item, BoardChunkProvenance):
+            result.append(item.to_dict())
+        elif isinstance(item, Mapping):
+            if set(item) - {"chunk_index", "sha256", "path"}:
+                raise AlignmentOutcomeError("Board provenance entry has unknown fields")
+            result.append(
+                {
+                    "chunk_index": _nonnegative_int(
+                        item.get("chunk_index"), name="board chunk_index"
+                    ),
+                    "sha256": _strict_sha256(
+                        item.get("sha256"), name="board chunk sha256"
+                    ),
+                }
+            )
+        else:
+            raise AlignmentOutcomeError("Board provenance entries must be objects")
+    if not result:
+        raise AlignmentOutcomeError("Board provenance must contain at least one chunk")
+    indices = [int(item["chunk_index"]) for item in result]
+    if any(next_index < index for index, next_index in zip(indices, indices[1:])):
+        raise AlignmentOutcomeError(
+            "Board provenance chunks are not in numeric chunk-index order"
+        )
+    return result
+
+
+def _validated_recording_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise AlignmentOutcomeError("recording identity must be an object")
+    dataset_id = value.get("dataset_id", value.get("data_id"))
+    _validate_identity(
+        user=value.get("user"),  # type: ignore[arg-type]
+        action=value.get("action"),  # type: ignore[arg-type]
+        dataset_id=dataset_id,  # type: ignore[arg-type]
+    )
+    return {
+        "user": value["user"],
+        "action": value["action"],
+        "dataset_id": _nonnegative_int(dataset_id, name="dataset_id"),
+    }
+
+
+def _expected_identity(
+    *,
+    expected_user: str | None = None,
+    expected_action: str | None = None,
+    expected_dataset_id: int | None = None,
+    expected_recording: Mapping[str, object] | None = None,
+) -> dict[str, object] | None:
+    supplied = (expected_user, expected_action, expected_dataset_id)
+    if expected_recording is not None:
+        if any(value is not None for value in supplied):
+            raise AlignmentOutcomeError(
+                "expected_recording cannot be combined with individual identity fields"
+            )
+        return _validated_recording_mapping(expected_recording)
+    if all(value is None for value in supplied):
+        return None
+    if any(value is None for value in supplied):
+        raise AlignmentOutcomeError(
+            "expected_user, expected_action, and expected_dataset_id must be supplied together"
+        )
+    return _validated_recording_mapping(
+        {
+            "user": expected_user,
+            "action": expected_action,
+            "dataset_id": expected_dataset_id,
+        }
+    )
+
+
+def _report_identity(report: Mapping[str, object]) -> dict[str, object] | None:
+    value = report.get("recording")
+    if value is None:
+        return None
+    return _validated_recording_mapping(value)
+
+
+def _validate_skip_diagnostics(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise AlignmentOutcomeError("alignment skip diagnostics must be an object")
+    if set(value) != _SKIP_DIAGNOSTIC_KEYS:
+        missing = sorted(_SKIP_DIAGNOSTIC_KEYS - set(value))
+        extra = sorted(set(value) - _SKIP_DIAGNOSTIC_KEYS)
+        details: list[str] = []
+        if missing:
+            details.append("missing " + ", ".join(missing))
+        if extra:
+            details.append("unknown " + ", ".join(extra))
+        raise AlignmentOutcomeError(
+            "alignment skip diagnostics keys are not exact (" + "; ".join(details) + ")"
+        )
+    result: dict[str, object] = {}
+    integer_keys = {
+        "previous_global_frame_index",
+        "next_global_frame_index",
+        "prefix_boundary_position",
+        "last_pre_jump_global_frame_index",
+        "total_global_valid_pair_count",
+        "usable_prefix_valid_pair_count",
+    }
+    for key, item in value.items():
+        if key in integer_keys:
+            result[key] = _nonnegative_int(item, name=f"diagnostics.{key}")
+        else:
+            result[key] = _finite_float(item, name=f"diagnostics.{key}")
+    return result
+
+
+def _validate_report_header(
+    report: Mapping[str, object],
+    *,
+    identity: Mapping[str, object],
+) -> None:
+    if not isinstance(report, Mapping):
+        raise AlignmentOutcomeError("alignment outcome report must be an object")
+    _literal_schema_version(
+        report.get("alignment_outcome_schema_version"),
+        name="alignment_outcome_schema_version",
+    )
+    status = _coerce_status(report.get("alignment_status"))
+    reported_identity = _report_identity(report)
+    if reported_identity != dict(identity):
+        raise AlignmentOutcomeError("alignment outcome report identity is stale")
+    if status is AlignmentOutcomeStatus.SUCCESS:
+        for key in ("alignment_success", "work_axis_alignment_success"):
+            if not isinstance(report.get(key), bool):
+                raise AlignmentOutcomeError(
+                    f"status-success report {key} must be a boolean"
+                )
+            if report.get(key) is not True:
+                raise AlignmentOutcomeError(
+                    f"status-success report {key} must agree with alignment_status"
+                )
+    elif status is AlignmentOutcomeStatus.SKIPPED:
+        for key in ("alignment_success", "work_axis_alignment_success"):
+            if not isinstance(report.get(key), bool):
+                raise AlignmentOutcomeError(
+                    f"status-skipped report {key} must be a boolean"
+                )
+            if report.get(key) is not False:
+                raise AlignmentOutcomeError(
+                    f"status-skipped report {key} must agree with alignment_status"
+                )
+
+
+def _validate_manifest(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        raise AlignmentOutcomeError("outcome_artifacts must be a list")
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {"filename", "sha256"}:
+            raise AlignmentOutcomeError(
+                "each outcome_artifacts entry must contain filename and sha256 only"
+            )
+        filename = item.get("filename")
+        if (
+            not isinstance(filename, str)
+            or not filename
+            or Path(filename).name != filename
+            or filename in {".", ".."}
+        ):
+            raise AlignmentOutcomeError("outcome artifact filename must be a base name")
+        if filename in seen:
+            raise AlignmentOutcomeError("outcome artifact filenames must be unique")
+        digest = item.get("sha256")
+        if not isinstance(digest, str) or digest != digest.lower():
+            raise AlignmentOutcomeError("outcome artifact SHA-256 must be lowercase")
+        _strict_sha256(digest, name="outcome artifact sha256")
+        seen.add(filename)
+        result.append({"filename": filename, "sha256": digest})
+    return result
+
+
+def _validate_manifest_file(
+    path: Path,
+    entries: Sequence[Mapping[str, str]],
+    *,
+    label: str,
+) -> None:
+    if not path.is_file():
+        raise AlignmentOutcomeError(f"{label} is missing or not a regular file")
+    digest = _sha256_regular_file(path, name=label)
+    matches = [entry for entry in entries if entry.get("filename") == path.name]
+    if len(matches) != 1 or matches[0].get("sha256") != digest:
+        raise AlignmentOutcomeError(f"{label} digest does not match the report manifest")
+
+
+def _validate_offset_input_provenance(
+    offset: AlignmentOffset,
+    input_payload: Mapping[str, object],
+) -> None:
+    """Check source-aware offset fields when the success TXT carries them."""
+
+    input_kind = input_payload.get("input_kind")
+    if input_kind != "spike-imu":
+        return
+    # The v1 outcome report is the authoritative provenance carrier. Legacy
+    # success TXT files remain readable and may not carry source-aware fields;
+    # when those fields are present, however, they must agree with the
+    # current SpikeIMU input.
+    if offset.alignment_signal_source is None:
+        return
+    if offset.alignment_signal_source != "spike-imu":
+        raise AlignmentOutcomeError(
+            "SpikeIMU success offset is missing feature provenance"
+        )
+    if offset.feature_schema != input_payload.get("feature_schema"):
+        raise AlignmentOutcomeError("success offset feature schema is stale")
+    if offset.feature_values_sha256 != input_payload.get("feature_values_sha256"):
+        raise AlignmentOutcomeError("success offset feature values hash is stale")
+    if offset.feature_metadata_sha256 != input_payload.get("feature_metadata_sha256"):
+        raise AlignmentOutcomeError("success offset feature metadata hash is stale")
+    if offset.timestamp_sha256 != input_payload.get("timestamp_sha256"):
+        raise AlignmentOutcomeError("success offset timestamp hash is stale")
+    expected_rate = input_payload.get("sampling_rate_hz")
+    if (
+        offset.feature_sampling_rate_hz is not None
+        and not math.isclose(
+            offset.feature_sampling_rate_hz,
+            _finite_float(expected_rate, name="sampling_rate_hz"),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        raise AlignmentOutcomeError("success offset sampling rate is stale")
+
+
+def _existing_outcome_state(
+    paths: AlignmentOutcomePaths,
+) -> AlignmentOutcomeStatus | None:
+    if paths.report_path.is_file():
+        try:
+            payload = _read_strict_json(paths.report_path, label="existing alignment report")
+            return _coerce_status(payload.get("alignment_status"))
+        except AlignmentOffsetExportError:
+            pass
+    if paths.skip_json_path.exists() and not paths.offset_txt_path.exists():
+        return AlignmentOutcomeStatus.SKIPPED
+    if (paths.offset_txt_path.exists() or paths.verification_png_path.exists()) and not paths.skip_json_path.exists():
+        return AlignmentOutcomeStatus.SUCCESS
+    return None
+
+
+def _opposite_artifact_present(
+    paths: AlignmentOutcomePaths,
+    requested: AlignmentOutcomeStatus,
+) -> bool:
+    if requested is AlignmentOutcomeStatus.SUCCESS:
+        return paths.skip_json_path.exists()
+    if requested is AlignmentOutcomeStatus.SKIPPED:
+        return paths.offset_txt_path.exists() or paths.verification_png_path.exists()
+    return (
+        paths.offset_txt_path.exists()
+        or paths.skip_json_path.exists()
+        or paths.verification_png_path.exists()
+    )
+
+
+def _preflight_outcome_targets(
+    paths: AlignmentOutcomePaths,
+    *,
+    status: AlignmentOutcomeStatus,
+    overwrite_offset: bool,
+    overwrite_verification: bool,
+    overwrite_report: bool,
+    transition_authorized: bool,
+) -> None:
+    for path in (
+        paths.offset_txt_path,
+        paths.skip_json_path,
+        paths.verification_png_path,
+        paths.report_path,
+    ):
+        if path.exists() and not path.is_file():
+            raise AlignmentOutcomeError(
+                f"alignment outcome target is not a regular file: {path}"
+            )
+    if status is AlignmentOutcomeStatus.SUCCESS:
+        if paths.offset_txt_path.exists() and not (
+            overwrite_offset or transition_authorized
+        ):
+            raise AlignmentOutcomeError(
+                "offset output already exists; use overwrite_offset=True"
+            )
+        if paths.verification_png_path.exists() and not (
+            overwrite_verification or transition_authorized
+        ):
+            raise AlignmentOutcomeError(
+                "verification output already exists; use overwrite_verification=True"
+            )
+    elif status is AlignmentOutcomeStatus.SKIPPED:
+        if paths.skip_json_path.exists() and not (
+            overwrite_offset or transition_authorized
+        ):
+            raise AlignmentOutcomeError(
+                "skip output already exists; use overwrite_offset=True"
+            )
+    if paths.report_path.exists() and not (overwrite_report or transition_authorized):
+        raise AlignmentOutcomeError(
+            "alignment report already exists; use overwrite_report=True"
+        )
+
+
+def _remove_obsolete_artifacts(
+    paths: AlignmentOutcomePaths,
+    status: AlignmentOutcomeStatus,
+) -> None:
+    obsolete = (
+        (paths.skip_json_path,)
+        if status is AlignmentOutcomeStatus.SUCCESS
+        else (
+            paths.offset_txt_path,
+            paths.verification_png_path,
+        )
+        if status is AlignmentOutcomeStatus.SKIPPED
+        else (
+            paths.offset_txt_path,
+            paths.skip_json_path,
+            paths.verification_png_path,
+        )
+    )
+    for path in obsolete:
+        if path.exists():
+            if not path.is_file():
+                raise AlignmentOutcomeError(
+                    f"obsolete alignment artifact is not a regular file: {path}"
+                )
+            path.unlink()
+
+
+def _preflight_single_target(path: Path, *, overwrite: bool, label: str) -> None:
+    if path.exists():
+        if not path.is_file():
+            raise AlignmentOutcomeError(f"{label} path is not a regular file: {path}")
+        if not overwrite:
+            raise AlignmentOutcomeError(f"{label} already exists; enable overwrite: {path}")
+
+
+def _stage_offset(offset: AlignmentOffset, directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=directory,
+        prefix=".alignment-offset-",
+        suffix=".tmp",
+        delete=False,
+    ) as stream:
+        path = Path(stream.name)
+    try:
+        write_alignment_offset_txt(offset, output_path=path, overwrite=True)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def _stage_file(source: Path, directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb",
+        dir=directory,
+        prefix=".alignment-artifact-",
+        suffix=".tmp",
+        delete=False,
+    ) as stream:
+        destination = Path(stream.name)
+        with Path(source).open("rb") as input_stream:
+            for block in iter(lambda: input_stream.read(1024 * 1024), b""):
+                stream.write(block)
+    return destination
+
+
+def _stage_json(payload: Mapping[str, object], directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    text = _strict_json_text(payload)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=directory,
+        prefix=".alignment-json-",
+        suffix=".tmp",
+        delete=False,
+    ) as stream:
+        stream.write(text)
+        return Path(stream.name)
+
+
+def _atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
+    temporary = _stage_json(payload, path.parent)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _strict_json_text(payload: Mapping[str, object]) -> str:
+    try:
+        return json.dumps(
+            _jsonable(payload),
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+        ) + "\n"
+    except (TypeError, ValueError) as error:
+        raise AlignmentOutcomeError(
+            f"alignment outcome JSON is not strict: {error}"
+        ) from error
+
+
+def _read_strict_json(path: Path, *, label: str) -> dict[str, object]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise AlignmentOutcomeError(f"could not read {label}: {path}: {error}") from error
+    try:
+        payload = json.loads(
+            text,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"non-finite JSON constant {value}")
+            ),
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise AlignmentOutcomeError(f"{label} is not strict JSON: {path}: {error}") from error
+    if not isinstance(payload, dict):
+        raise AlignmentOutcomeError(f"{label} must be a JSON object: {path}")
+    return payload
+
+
+def _jsonable(value: object) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, np.ndarray):
+        return [_jsonable(item) for item in value.tolist()]
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        raise AlignmentOutcomeError("alignment outcome JSON cannot contain non-finite values")
+    return value
+
+
+def _strict_sha256(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or value != value.lower():
+        raise AlignmentOutcomeError(f"{name} must be a lowercase SHA-256 hex digest")
+    if any(character not in "0123456789abcdef" for character in value):
+        raise AlignmentOutcomeError(f"{name} must be a lowercase SHA-256 hex digest")
+    return value
+
+
+def _literal_schema_version(value: object, *, name: str) -> int:
+    """Accept only the literal JSON integer required by the v1 contracts."""
+
+    if type(value) is not int or value != 1:
+        raise AlignmentOutcomeError(f"{name} must be the literal integer 1")
+    return value
+
+
+def _sha256_regular_file(path: Path, *, name: str) -> str:
+    source = Path(path)
+    if not source.is_file():
+        raise AlignmentOutcomeError(f"{name} is not a regular file: {source}")
+    digest = hashlib.sha256()
+    try:
+        with source.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as error:
+        raise AlignmentOutcomeError(f"could not hash {name}: {source}: {error}") from error
+    return digest.hexdigest()
