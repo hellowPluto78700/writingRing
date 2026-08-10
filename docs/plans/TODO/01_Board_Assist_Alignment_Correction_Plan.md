@@ -1,694 +1,199 @@
-## 目标
+# Plan: Board-Assisted Alignment Skippable Outcome Correction
 
-当 Board recording 满足下面这种情况：
+## 1. 目标
+
+当一个 Board recording 同时满足以下条件时：
 
 ```text
-完整 Board 数据中存在 valid press/lift pairs
-+
+完整 Board 数据存在 valid press/lift pair
 Board timestamp 存在 backward jump
-+
-当前策略保留的 initial monotonic interval 中没有 valid pair
+initial monotonic interval 内不存在完整 valid press/lift pair
 ```
 
-不要终止整个 aligned-board pipeline，而是：
+允许该 recording 产生正式的 `SKIPPED` alignment outcome，而不是终止整个 Action0 aligned-board pipeline。
+
+最终 contract：
 
 ```text
-标记该 recording 为 skipped
-→ 继续 alignment 后续 recording
-→ Board segmentation 忽略该 recording
-→ padding / QA 正常继续
+SUCCESS
+    → 正常参与 Board segmentation
+
+SKIPPED
+    → 不参与 Board segmentation，但计为合法完成 outcome
+
+FAILED / MISSING / CONFLICT
+    → hard fail
 ```
 
-其他错误继续 hard fail，包括：
-
-```text
-Board 根本没有有效 touch
-SpikeIMU 缺失
-provenance/hash 不一致
-alignment coverage 不足
-代码异常
-文件损坏
-```
-
-不能使用 `except Exception: skip`。
+除上述精确场景外，现有 alignment、provenance、数据完整性和代码错误继续 hard fail。
 
 ---
 
-## 1. `event_alignment.py`：定义一个精确的可跳过异常
+## 2. Scope
 
-文件：
+### In scope
 
 ```text
 src/writingring/event_alignment.py
-```
-
-当前 `select_board_interval_from_presses()` 遇到第一次 timestamp backward jump 后，只使用它之前的 initial nondecreasing interval。当前这套逻辑正是这次 recording 被截到 global frame 5 的原因。
-
-新增专门异常，例如：
-
-```python
-class UnusableInitialBoardTimestampIntervalError(EventAlignmentError):
-    """Valid Board touches exist, but none lie in the initial monotonic timestamp interval."""
-```
-
-修改 interval selection：
-
-```python
-all_valid_pairs = detection.touch_pairs.loc[
-    detection.touch_pairs["valid_touch"].astype(bool)
-].copy()
-
-usable_valid_pairs = all_valid_pairs.loc[
-    all_valid_pairs["press_global_frame_index"] <= maximum_global_frame
-].copy()
-```
-
-然后区分两种情况。
-
-### 情况 A：完整 Board 本身就没有 valid pair
-
-继续作为普通错误：
-
-```python
-if all_valid_pairs.empty:
-    raise EventAlignmentError(
-        "no valid Board press/lift pair is available for interval selection"
-    )
-```
-
-这种不要自动 skip。
-
-### 情况 B：完整 Board 有 valid pair，但 initial timestamp interval 一个都没有
-
-只有这种抛新的可跳过异常：
-
-```python
-if usable_valid_pairs.empty and len(backward_positions):
-    raise UnusableInitialBoardTimestampIntervalError(
-        "valid Board press/lift pairs exist, but none are available "
-        "before the first Board timestamp backward jump"
-    )
-```
-
-你当前的 `user_3/action_0/dataset_2` 就属于这个分支：总共有 30 个 valid pairs，但 initial usable interval 只有 global frame 0–5，因此 usable pair 为 0。
-
-不要修改 timestamp，不排序 Board chunk，也不要自动选择 backward jump 后的 epoch。
-
----
-
-## 2. `alignment_io.py`：建立正式的 skip artifact
-
-文件：
-
-```text
 src/writingring/alignment_io.py
-```
-
-这里已经集中维护 alignment artifact/domain 相关逻辑，因此 skip artifact 的路径和读取/校验也放这里比较合适。当前 work axis 已经统一为 canonical endpoints 重建，与这次 skip 修复无关，不要改。
-
-新增：
-
-```python
-build_alignment_skip_path(...)
-write_alignment_skip_json(...)
-read_alignment_skip_json(...)
-```
-
-路径建议：
-
-```text
-alignment/offsets/
-└── user_3/
-    └── action_0/
-        └── 2_ring_board_skip.json
-```
-
-schema：
-
-```json
-{
-  "schema_version": 1,
-  "status": "skipped",
-  "user": "user_3",
-  "action": "0",
-  "dataset_id": 2,
-  "reason": "unusable_initial_board_timestamp_interval",
-  "message": "valid Board press/lift pairs exist, but none are available before the first Board timestamp backward jump",
-  "board_timestamp_backward_jump_count": 1,
-  "first_backward_global_frame_index": 6,
-  "total_valid_touch_pair_count": 30,
-  "usable_valid_touch_pair_count": 0
-}
-```
-
-读取 skip marker 时必须校验：
-
-```text
-schema_version
-status == skipped
-user/action/dataset_id
-reason
-```
-
-不能只看文件是否存在。
-
----
-
-## 3. `align_ring_board.py`：增加 skip policy
-
-文件：
-
-```text
+src/writingring/__init__.py
 scripts/align_ring_board.py
-```
-
-当前这个 CLI 把 `EventAlignmentError` 等统一捕获后返回 exit code 2，因此任何 interval-selection error 都会终止 Bash pipeline。
-
-增加参数：
-
-```text
---unusable-board-policy error|skip
-```
-
-默认：
-
-```text
-error
-```
-
-保持 standalone CLI 的严格行为。
-
-Action0 Board pipeline 显式传：
-
-```text
---unusable-board-policy skip
-```
-
-只捕获：
-
-```python
-UnusableInitialBoardTimestampIntervalError
-```
-
-流程：
-
-```text
-select_board_interval_from_presses()
-        │
-        ├── 正常
-        │     ↓
-        │   原 alignment 流程
-        │
-        └── UnusableInitialBoardTimestampIntervalError
-              ↓
-            policy=error → 原样 exit 2
-              ↓
-            policy=skip
-              ↓
-            写 skip.json
-            写 minimal alignment report
-            删除 stale success artifacts
-            print skipped
-            return 0
-```
-
-不要捕获普通 `EventAlignmentError` 做 skip。
-
----
-
-## 4. Skip 时仍然写 alignment report
-
-即使 skip，也应该保留：
-
-```text
-alignment/reports/user_3/action_0/2_alignment_report.json
-```
-
-内容建议：
-
-```json
-{
-  "recording": {
-    "user": "user_3",
-    "action": "0",
-    "dataset_id": 2
-  },
-  "alignment_status": "skipped",
-  "alignment_success": false,
-  "skip_reason": "unusable_initial_board_timestamp_interval",
-  "offset_written": false,
-  "verification_written": false,
-  "board_diagnostics": {
-    "timestamp_backward_jump_count": 1,
-    "first_backward_global_frame_index": 6,
-    "total_valid_touch_pair_count": 30,
-    "usable_valid_touch_pair_count": 0
-  }
-}
-```
-
-这样以后能明确区分：
-
-```text
-alignment 真失败
-vs
-pipeline 主动 skip
-```
-
----
-
-## 5. 明确定义 success / skip artifact contract
-
-一个 recording 只能处于下面两种合法状态之一。
-
-成功：
-
-```text
-offset.txt          exists
-report.json         exists, status=success
-verification.png    exists
-skip.json           不存在
-```
-
-跳过：
-
-```text
-skip.json           exists
-report.json         exists, status=skipped
-offset.txt          不存在
-verification.png    不存在
-```
-
-禁止：
-
-```text
-offset.txt + skip.json 同时存在
-```
-
-因为这会让下游不知道该采用哪个结果。
-
----
-
-## 6. Overwrite 时清除 stale artifact
-
-这个必须处理。
-
-假设 dataset 2 上一次成功，有：
-
-```text
-2_ring_board_offset.txt
-2_alignment_verification.png
-```
-
-这次重新运行发现应该 skip。
-
-写 skip marker 前必须删除旧：
-
-```text
-offset
-verification
-旧 success report
-```
-
-然后写新的 skip report。
-
-反过来，如果之前是 skip，现在重新执行成功：
-
-```text
-删除 skip.json
-写 offset
-写 verification
-写 success report
-```
-
-始终保持：
-
-```text
-success XOR skipped
-```
-
----
-
-## 7. `_common.bash`：Board alignment 开启 skip policy
-
-你本地 `_common.bash` 已经有新的 `continue / overwrite` 逻辑，因此实现时要基于当前 checkout 修改，不要拿 GitHub 旧版覆盖。
-
-Board alignment command 增加：
-
-```bash
---unusable-board-policy skip
-```
-
-即：
-
-```bash
-scripts/align_ring_board.py \
-    ... \
-    --unusable-board-policy skip
-```
-
----
-
-## 8. `_common.bash`：alignment artifact check 改成 outcome check
-
-不能再要求每个 recording 都必须有：
-
-```text
-*_ring_board_offset.txt
-```
-
-改成：
-
-```text
-valid success artifact set
-OR
-valid skip artifact set
-```
-
-伪逻辑：
-
-```bash
-if valid_alignment_success; then
-    completed
-elif valid_alignment_skip; then
-    completed
-else
-    invalid_or_incomplete
-fi
-```
-
-在 `continue` mode：
-
-```text
-valid success → 不重跑
-valid skip    → 不重跑
-无结果        → 从 alignment 继续
-结果冲突/损坏 → validation failure，按现有 continue 策略触发 rebuild
-```
-
-因此这个 dataset 下次运行：
-
-```bash
-PIPELINE_MODE=continue
-```
-
-不会再次尝试 alignment。
-
----
-
-## 9. Board segmentation：遇到 skip recording 直接 `continue`
-
-文件：
-
-```text
+scripts/action0_pipeline/_common.bash
 src/writingring/board_event_segmentation.py
+相关 tests
+相关 docs/notes/**
+README.md（仅在需要同步用户可见 contract 时）
 ```
 
-当前 `_build_aligned_recording_artifacts()` 对每个 recording 强制要求 offset；offset 不存在就直接抛错。
-
-修改为：
+本次需要建立：
 
 ```text
-for recording:
-
-    如果存在合法 skip marker:
-        validate marker identity
-        record skipped metadata
-        continue
-
-    如果存在合法 offset:
-        正常 Board segmentation
-
-    两者都没有:
-        hard fail
-
-    两者同时存在:
-        hard fail
+精确的 Board initial-interval unusable 判定
+结构化 skip diagnostics
+SUCCESS / SKIPPED / FAILED alignment outcome contract
+skip artifact + input provenance
+统一 Python outcome reader / validator
+安全的 success ↔ skip overwrite transition
+Action0 continue / QA outcome validation
+Board segmentation recording-level skip
+recording-level skip summary
+all-recordings-skipped hard failure
 ```
 
-所以最终：
+### Out of scope
 
-```text
-dataset 0 → segment
-dataset 1 → segment
-dataset 2 → skip
-dataset 3 → segment
-```
-
-dataset 2 不进入 aggregate arrays。
-
----
-
-## 10. Segmentation summary 记录 recording-level skip
-
-建议增加：
-
-```json
-{
-  "source_recording_count": 4,
-  "processed_recording_count": 3,
-  "skipped_recording_count": 1,
-  "skipped_recordings": [
-    {
-      "dataset_id": 2,
-      "reason": "unusable_initial_board_timestamp_interval"
-    }
-  ]
-}
-```
-
-不要把这个和现有的：
-
-```text
-label interval skipped
-```
-
-混为一谈。
-
-两者语义不同：
-
-```text
-recording skip
-    = 整个 dataset 不参与 Board segmentation
-
-segment skip
-    = recording 可用，但某个 label interval 没有完整 touch
-```
-
-当前 Board segmentation 已经支持 label-level `missing_event_policy=skip`，这个功能保持不变。
-
----
-
-## 11. 如果一个 user 的所有 recording 都被 skip
-
-不要生成看似正常的空 dataset。
-
-例如：
-
-```text
-user_7:
-dataset 0 skipped
-dataset 1 skipped
-dataset 2 skipped
-```
-
-应该明确 hard fail：
-
-```text
-all aligned-board recordings were skipped for user_7/action_0
-```
-
-避免后面 aggregate 使用空 artifact 集合，也避免 padding 出现没有实际数据但 pipeline 显示成功的情况。
-
----
-
-## 12. `_common.bash` QA 改成 outcome accounting
-
-旧逻辑概念上是：
-
-```text
-alignment_offset_count == ring_recording_count
-```
-
-新逻辑：
-
-```text
-alignment_success_count
-+
-alignment_skip_count
-==
-ring_recording_count
-```
-
-并写入 QA log：
-
-```text
-alignment_successful_recordings=...
-alignment_skipped_recordings=...
-alignment_total_outcomes=...
-```
-
-另外验证：
-
-```text
-每个 recording 恰好只有一个 outcome
-```
-
-不能只比较总文件数量，否则一个 recording 同时有 success/skip，而另一个什么都没有，也可能错误地数量相等。
-
----
-
-## 13. Padding 不需要增加特殊逻辑
-
-Padding 只消费最终 segmentation 输出。
-
-因为 skipped recording 根本不会进入 Board segmentation aggregate：
-
-```text
-alignment skip
-→ segmentation 排除 recording
-→ padding 自然只看到成功 recording 的 segments
-```
-
-因此不应该让 padding 感知 alignment skip。
-
----
-
-## 14. Continue / overwrite 的预期行为
-
-### 默认 continue
-
-第一次：
-
-```text
-dataset 2
-→ 检测异常
-→ skip marker
-→ 继续 dataset 3
-```
-
-第二次运行：
-
-```text
-dataset 2 skip marker 校验通过
-→ alignment completed
-→ 不重新尝试
-```
-
-### overwrite
-
-```bash
-PIPELINE_MODE=overwrite ...
-```
-
-不读取 skip marker 作为完成证据：
-
-```text
-从 preprocess 全部重新执行
-→ dataset 2 alignment 再次实际检查
-→ 如果仍然异常，再重新生成 skip marker
-```
-
-符合当前 overwrite “无条件重新计算”的定义。
-
----
-
-## 15. Tests
-
-至少增加以下 regression tests：
-
-```text
-event_alignment
-- overall valid pairs > 0
-- first backward jump 前 valid pairs = 0
-- 抛 UnusableInitialBoardTimestampIntervalError
-
-event_alignment
-- 整个 recording valid pairs = 0
-- 仍抛普通 EventAlignmentError
-- 不能被 skip policy 吞掉
-
-align CLI
-- policy=error → exit 2
-- policy=skip → exit 0 + skip.json + skipped report
-
-align CLI overwrite
-- old offset → new skip：旧 offset/verification 被删除
-- old skip → new success：旧 skip marker 被删除
-
-board segmentation
-- offset recording 正常进入 aggregate
-- skip recording 不进入 aggregate
-- missing offset + missing skip → hard fail
-- offset + skip 同时存在 → hard fail
-- 所有 recording skipped → hard fail
-
-pipeline continue
-- valid skip marker 被视为 alignment completed
-- 不重复执行该 recording
-
-pipeline overwrite
-- 不因为已有 skip marker而跳过
-
-QA
-- success + skipped == discovered recordings
-```
-
----
-
-## 16. 明确不修改的东西
-
-本次不要修改：
+不修改：
 
 ```text
 alignment work axis
-canonical timestamps
-SpikeIMU
+canonical timestamp 语义
+SpikeIMU feature schema
 peak detection
 alignment coverage threshold
-minimum_duration_frames
-label-based segmentation
-Board label interval missing-event policy
-padding algorithm
+Board chunk ordering规则
+label segmentation 算法
+label-level missing_event_policy
+padding 算法
 ```
 
-当前 work axis 已经采用 representation-invariant endpoint reconstruction，这和此次 Board skip 属于两个独立问题。
+不引入：
+
+```text
+except Exception: skip
+timestamp 排序或修复
+自动选择 backward jump 后的 epoch
+per-recording incremental Action0 resume
+```
 
 ---
 
-## 最终目标行为
+## 3. Task DAG
 
-针对当前：
-
-```text
-user_3/action_0/dataset_2
-```
-
-运行结果应该类似：
+所有 implementation task 均按：
 
 ```text
-Alignment skipped:
-user_3/action_0/dataset_2
-reason=unusable_initial_board_timestamp_interval
-valid_pairs=30
-usable_pairs_before_backward_jump=0
-
-Skip marker:
-.../2_ring_board_skip.json
-
-Alignment report:
-.../2_alignment_report.json
-
-Continuing with next recording...
+PROBE
+→ FROZEN TaskSpec
+→ WORKER
+→ VERIFIER
+→ DOCUMENT
+→ DONE
 ```
 
-然后 pipeline 不退出，继续处理后面的 dataset。
-
-最终 QA 能明确显示：
+执行。
 
 ```text
-successful alignment recordings: N
-skipped alignment recordings: 1
+T1 Board interval semantics
+        ↓
+T2 Alignment outcome contract + CLI
+        ↓
+   ┌────┴────┐
+   ↓         ↓
+T3 Action0   T4 Board segmentation
+outcome QA   outcome consumer
+   └────┬────┘
+        ↓
+T5 End-to-end contract verification
 ```
 
-而不是把这个 recording 当成成功 alignment，也不是把它静默丢掉。
+---
+
+## 4. Tasks
+
+### T1 — Board interval semantics
+
+**目标：** 精确定义并实现“完整 Board 有 valid pairs，但 initial monotonic interval 内没有完整 valid pair”的唯一可 skip 条件。
+
+**验收标准：**
+
+* usable pair 要求 `press` 和 `lift` 都完整位于第一次 backward jump 之前。
+* jump 后 frame 不得通过 timestamp overlap 泄漏回 initial interval。
+* 可 skip 异常携带 backward-jump、frame boundary、total/usable pair count 等结构化 diagnostics。
+* Board 全局无 valid pair、无 backward jump 等情况继续使用现有 hard-failure semantics。
+* targeted regression tests PASS。
+
+---
+
+### T2 — Alignment outcome contract + CLI
+
+**目标：** 建立统一、可验证、带 provenance 的 `SUCCESS / SKIPPED / FAILED` alignment outcome，并让 alignment CLI 只对 T1 定义的异常支持显式 skip policy。
+
+**验收标准：**
+
+* `alignment_io.py` 成为 offset、skip、report outcome validation 的唯一 Python contract 层。
+* `SKIPPED` artifact 包含 recording identity、稳定 reason、结构化 diagnostics 和当前 SpikeIMU/Board input provenance。
+* 每个 completed recording 必须严格满足 `SUCCESS XOR SKIPPED`；FAILED report 不计 completed outcome。
+* report 使用统一的 `alignment_status = success|failed|skipped`。
+* standalone CLI 默认仍为 `error`；仅显式 `skip` policy 可以产生 SKIPPED。
+* success ↔ skip transition 清理 stale artifacts，并遵守 overwrite authorization。
+* completion artifact 发布不会把明显的 partial write 当成合法完成状态。
+* public API 如有新增同步更新 package exports。
+* targeted IO / CLI / overwrite tests PASS。
+
+---
+
+### T3 — Action0 outcome validation and QA
+
+**目标：** 让 Action0 pipeline 按 authoritative recording list 验证 alignment outcome，而不是继续依赖 offset 文件数量或 Bash 自行解析 artifact。
+
+**验收标准：**
+
+* `_common.bash` 不自行解析 offset/skip schema，而是调用统一 Python validator。
+* Action0 alignment 显式启用新的 skip policy。
+* 每个 recording 必须对应且只对应一个 provenance-valid `SUCCESS` 或 `SKIPPED` outcome。
+* missing、malformed、stale provenance、success+skip conflict 均判定为 invalid stage。
+* `continue` 保持现有 stage-level semantics：完整 stage 复用，partial/invalid stage 走现有 rebuild path，不新增 per-recording resume。
+* QA 输出 success、skipped、total outcome accounting，并验证 recording identity，而非仅比较文件数量。
+* targeted continue / overwrite / QA tests PASS。
+
+---
+
+### T4 — Board segmentation outcome consumer
+
+**目标：** 让 aligned-board segmentation 正确消费 alignment outcome：SUCCESS 正常处理，SKIPPED 验证后排除，其他状态 hard fail。
+
+**验收标准：**
+
+* SKIPPED recording 在进入 segmentation 前验证 identity、reason 和当前 input provenance。
+* SUCCESS recording 保持现有 offset/provenance/segmentation contract。
+* skipped recording 不进入 segment arrays 或 aggregate artifacts。
+* aggregate consistency checks 只针对实际 processed recordings。
+* summary 明确区分 source、processed、recording-level skipped 和现有 segment-level skipped。
+* 所有 recordings 都被 skip 时，在 aggregate/padding 前明确 hard fail。
+* targeted mixed-success/skip、stale skip、conflict、all-skipped tests PASS。
+
+---
+
+### T5 — End-to-end contract verification
+
+**目标：** 验证新的 alignment outcome contract 在 alignment → Action0 continue/overwrite → Board segmentation → QA 全链路一致，并同步 durable documentation。
+
+**验收标准：**
+
+* mixed SUCCESS/SKIPPED Action0 pipeline 可以完成 alignment 和 segmentation，padding 无需感知 recording-level skip。
+* 非允许 skip 场景仍然 hard fail。
+* stale provenance、artifact conflict、partial outcome 均无法通过 continue/QA。
+* relevant pytest suite 在项目规定的 Python 3.11 环境 PASS。
+* `ALIGNMENT_OUTPUTS.md`、Board segmentation、Action0 Bash/QA 等受影响的 `docs/notes/**` 与最终实现一致。
+* README 仅在用户可见 workflow/contract 改变时更新。
+* fresh verifier 对最终 DAG contract 给出 PASS。

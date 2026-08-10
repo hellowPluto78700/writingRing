@@ -26,8 +26,9 @@ T005 End-to-end verification and documentation
 | --- | --- | --- | --- | --- |
 | T001 | Create the notebook foundation and load the existing Action0 padded datasets. | — | luna_worker after freeze | DRAFT |
 | T002 | Add label-distribution and unpadded 15-channel segment visualizations. | T001 | luna_worker after freeze | DRAFT |
-| T003 | Integrate the existing SynNet training loop and epoch-history capture. | T002 | luna_worker after freeze | DRAFT |
-| T004 | Plot training history, restore the selected model, and present final split metrics. | T003 | luna_worker after freeze | DRAFT |
+| T003 | Integrate the existing SynNet training loop and epoch-history capture. | T002 | luna_worker after freeze | DONE |
+| T003A | Select the pre-published signed or AbsRectify Action0 representation consistently for visualization and training. | T003 | luna_worker after freeze | DONE |
+| T004 | Plot training history, restore the selected model, and present final split metrics. | T003A | luna_worker after freeze | DRAFT |
 | T005 | Execute the complete notebook, verify preserved SNN contracts, and document verified results. | T004 | PRIMARY (validation/documentation only) | DRAFT |
 
 ## T001 — Draft TaskSpec
@@ -312,6 +313,158 @@ layers check; and convert only the named eight returned metrics to Python
   execution; `git diff --check` records known unrelated whitespace separately.
 - **Replan triggers:** any API drift, need for checkpoint persistence, altered
   loss/prediction/metric behavior, or write outside scope.
+
+### T003 — FROZEN cwd-independent data-root amendment
+
+- **Goal:** Make the notebook's Action0 producer root independent of the
+  Jupyter kernel working directory, so it resolves the existing padded package
+  from this editable repository rather than an arbitrary launch directory.
+- **Source/dependencies:** user-reported `FileNotFoundError`; T002 (DONE);
+  `probe_path_fix_final` CONFIRMED against
+  `51293739773d6a192ad8cdec18857d6ec4b52319`.
+- **Required behavior:** add an explicit `import snn` in the notebook import
+  cell. In the single configuration cell replace the cwd-relative
+  `Path("outputs/action0_pipeline")` with
+  `Path(snn.__file__).resolve().parent.parent / "outputs" / "action0_pipeline"`.
+  Keep `DATASET_VARIANT="lowpass"` and all existing resolver calls unchanged.
+- **Contracts to preserve:** editable local installation; default producer
+  layout `<repo>/outputs/action0_pipeline/<variant>/label/segmentation_padded`;
+  the metadata/class-map/split validation order; padded 21-channel schema;
+  model-facing channels `0:15`; all current model, loss, metric, and training
+  behavior. Do not add a new producer invocation, fallback root search, or
+  output-directory creation.
+- **Allowed writes:** `notebooks/action0_snn_training.ipynb` only. The worker
+  may clear only the stale `FileNotFoundError` and consequent `NameError`
+  outputs created by the failed user run; it must preserve notebook source
+  outside this repair and must not modify any filesystem producer artifact.
+- **Forbidden writes:** every other path, including `outputs/**`, SNN source,
+  tests, scripts, configuration, README, docs/notes, sample data, vendor, and
+  environments.
+- **Acceptance/validation:** from a non-repository working directory, import
+  `snn`, derive the configured root, and load the producer metadata successfully;
+  the resolved root is this repository's existing `segmentation_padded` root;
+  the notebook remains valid JSON and no source-level relative pipeline root
+  remains. Run focused Action0 dataset/smoke tests and the required full pytest
+  suite in `writingring-gpu` (falling back only if absent), plus `git diff
+  --check`.
+- **Replan triggers:** the selected kernel does not use this repository's
+  editable `snn` package, producer output is intentionally external to the
+  repository, an import/path change touches another file, or any preserved
+  training/data contract changes.
+
+### T003 amendment execution, verification, and documentation
+
+The worker changed only `notebooks/action0_snn_training.ipynb`: it explicitly
+imports `snn`, derives `PIPELINE_ROOT` from its editable local package path,
+and clears only the stale failed-run errors. A first verifier requested repair
+of unrelated notebook metadata and an empty cell; the worker restored them to
+baseline. A fresh verifier then returned **PASS**: from `/tmp` the notebook
+resolved the repository's padded low-pass root, loaded metadata declaring 21
+channels, target length 1,024, 200 Hz, and right padding, and constructed
+splits of 1,751/349/300 segments with 52 global classes. The focused Action0
+tests passed 19; the full suite passed 527 with one known skip; and `git diff
+--check` passed. No README or technical-note update is needed because the
+editable-install requirement and producer layout were already documented.
+
+## T003A — Draft TaskSpec: selectable post-encode representation
+
+- **Goal:** Add one notebook configuration, `POST_ENCODE_TRANSFORM`, that
+  selects the pre-published signed (`"None"`) or rectified (`"AbsRectify"`)
+  Action0 SpikeIMU representation for both the 15-channel view and all
+  train/validation/test datasets.
+- **Dependencies:** T003 (DONE). **Source:** user request; initial probe
+  returned REVISE because transform selection needs an explicit root map and
+  normalization contract.
+- **Required design:** expose only the user-facing strings `"None"` and
+  `"AbsRectify"`; normalize `"None"` to Python `None`. Resolve the existing
+  editable repository root as T003 does, then choose one observed producer
+  base: `outputs/action0_pipeline` for `None`, or
+  `outputs/action0_rectified` for `AbsRectify`, before any dataset-root,
+  metadata, class-map, dataset, visual, or training construction.
+- **Validation/behavior:** reject any other value with a clear `ValueError`;
+  fail if the selected padded root is absent; do not silently select another
+  representation or apply `np.abs` in the plotting cell. The existing direct
+  plot of `train_dataset[0]` must remain the source of the view so it depicts
+  the selected dataset exactly. Display the selected transform and resolved
+  producer root. State that changing this configuration requires rerunning
+  from the data-loading cell onward.
+- **Contracts to preserve:** all T003 data-root, metadata/class-map/split,
+  padding, mask, 21-channel, 15-channel model, loss, prediction, and training
+  behavior. No producer execution, data mutation, automatic rectification, or
+  source/test/script changes.
+- **Allowed writes:** `notebooks/action0_snn_training.ipynb` only. **Forbidden
+  writes:** all other paths, including outputs, SNN source, tests, scripts,
+  configs, README/docs, sample data, vendor, and environments.
+- **Acceptance:** exercise both choices from a non-repository cwd; each must
+  load its matching padded data and preserve shape/rate/mask/split contracts;
+  demonstrate direct valid-frame view values agree with the selected dataset;
+  invalid config fails before data construction; focused/full tests, notebook
+  JSON audit, and `git diff --check` pass.
+- **Replan triggers:** the desired producer roots are custom rather than the
+  frozen observed pair, transform provenance must be audited from padded
+  summaries, a user expects plot-only transformation while training stays
+  signed, or any required change exceeds the notebook-only boundary.
+
+## T003A — FROZEN TaskSpec: selectable post-encode representation
+
+- **Goal:** Add a centralized, strict `POST_ENCODE_TRANSFORM` notebook
+  setting that chooses one existing Action0 producer representation for data
+  inspection, the valid-frame view, and training.
+- **Source/dependencies:** user request; T003 (DONE); final T003A probe
+  CONFIRMED against `51293739773d6a192ad8cdec18857d6ec4b52319`.
+- **Required behavior:** in the existing configuration cell define
+  `POST_ENCODE_TRANSFORM = "None"`, a two-entry mapping from exactly
+  `"None"` to `<repo>/outputs/action0_pipeline` and `"AbsRectify"` to
+  `<repo>/outputs/action0_rectified`, and select `PIPELINE_ROOT` from that
+  mapping. Reject every other config value with `ValueError` before resolving
+  the dataset root; normalize `"None"` to Python `None` only for display and
+  documented metadata semantics. Keep the package-derived repository root
+  from T003.
+- **Required data flow:** before `load_padding_dataset_metadata`, check that
+  the selected `segmentation_padded` directory exists and otherwise raise
+  `FileNotFoundError` naming the selected transform and expected root. Then
+  retain the exact T003 resolver/metadata/rate/class-map/dataset/split-length
+  order. In the existing dataset summary display the selected transform and
+  selected pipeline/padded roots, and state that users must rerun from the
+  data-loading cell after changing the config.
+- **View/training contract:** preserve the existing direct plot of valid
+  `train_dataset[0]` event channels 0–14. Do not apply `np.abs`, a second
+  transform, or a plot-only transform. Since all datasets/loaders are built
+  after root selection, the view and training must consume the same selected
+  representation.
+- **Contracts to preserve:** existing editable repo-root resolution; lowpass
+  variant; model-facing channels 0:15; padded 21-channel/right-mask schema;
+  all metadata, rate, class-map, split, model, loss, prediction, and metric
+  behavior. No transform inference from padded summaries; no producer run,
+  fallback selection, output creation, or producer/data mutation.
+- **Allowed writes:** `notebooks/action0_snn_training.ipynb` only.
+  **Forbidden writes:** all other paths, including outputs, SNN source, tests,
+  scripts, configuration, README/docs, sample data, vendor, and environments.
+- **Acceptance/validation:** for both allowed choices from `/tmp`, resolve the
+  expected existing padded root and load metadata/datasets; observe 21-channel,
+  1,024-frame, 200 Hz right-padded packages; verify the direct view source
+  remains selected `train_dataset[0]`; invalid value fails before construction;
+  focused/full pytest, notebook JSON audit, and `git diff --check` pass.
+- **Replan triggers:** a custom root is required, padded-summary transform
+  provenance must be newly validated, plot-only rectification is requested, or
+  implementation needs a non-notebook write.
+
+### T003A execution, verification, and documentation
+
+The worker changed only `notebooks/action0_snn_training.ipynb`, adding the
+strict transform selection/root mapping and selected-root checks while keeping
+the existing direct dataset view. A fresh verifier returned **PASS**: from
+`/tmp`, both choices loaded their expected padded roots and produced 1,751 /
+349 / 300 split lengths; signed data retained negative event values and
+`AbsRectify` was nonnegative. Invalid values failed before data construction,
+and absent roots produced a transform-specific error. Focused tests passed 19;
+the full suite passed 527 with one known skip; the notebook JSON/AST audit and
+`git diff --check` passed. `nbconvert` is unavailable in `writingring-gpu`, so
+direct harness execution is the recorded notebook evidence. The existing
+notebook output cells predate the new selection display; users must rerun from
+the data-loading cell after changing the configuration. No README or technical
+note update is needed before the notebook's complete user-facing workflow is
+finished.
 
 ## T004 — Draft TaskSpec
 

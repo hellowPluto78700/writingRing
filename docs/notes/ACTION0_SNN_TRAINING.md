@@ -67,6 +67,37 @@ The train, validation, and test user lists are required and must be disjoint.
 One global label-to-index mapping is discovered from the selected variant and
 then shared by all three splits.
 
+## Notebook common-label subset experiment
+
+`notebooks/action0_snn_training.ipynb` is a separate interactive experiment;
+it does not change the `python -m snn.train_action0` CLI baseline above. The
+CLI always uses the full variant mapping. The notebook first builds the same
+three full, user-disjoint datasets, then forms the sorted intersection of
+labels with positive counts in train, validation, and test. It selects
+`NUM_SELECTED_LABELS` labels without replacement using
+`LABEL_SELECTION_SEED`, sorts them, and builds a contiguous mapping only for
+that selected subset. The selected labels, mapping, seed, count, and split
+counts are experiment provenance; model outputs and all notebook metrics refer
+only to that mapping.
+
+The notebook's `POST_ENCODE_TRANSFORM` setting selects a pre-published
+representation before it constructs datasets: user-facing `"None"` selects
+the signed root `outputs/action0_pipeline`, while `"AbsRectify"` selects
+`outputs/action0_rectified`. It does not apply `abs` while plotting or train a
+different representation from the displayed one. Both choices still require
+the normal padded 21-channel producer validation; absent roots fail rather
+than falling back or re-encoding data.
+
+After training, the notebook restores the strict-best validation-balanced-
+accuracy state and evaluates train, validation, and test without optimizer
+steps. Its final table reports the existing eight metrics—loss, accuracy,
+balanced accuracy, macro/weighted F1, mean output/total spikes, and zero-
+output-spike fraction—plus best-epoch and representation/selection
+provenance. Figures are always displayed; `SAVE_FIGURES` defaults to `False`.
+When enabled, figures are saved under `notebooks/figures` relative to the
+editable repository root. Change any transform or selection setting only
+before rerunning from the data-loading cell onward.
+
 ## Network and masking behavior
 
 The default SynNet architecture is `[24, 24, 24]`, with `shift_syn=2` and

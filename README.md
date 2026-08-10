@@ -28,6 +28,8 @@ Ring recording (`*_ring_0.bin`)
   → label or aligned-Board-event segmentation
   → variable-length segment analysis and right-padding
   → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
+       ├── CLI baseline with the full variant label mapping
+       └── notebook common-label subset experiment
 ```
 
 The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
@@ -72,6 +74,7 @@ scripts/analyze_segment_lengths.py
 scripts/pad_segmented_imu.py
 scripts/action0_pipeline/*.sh
 python -m snn.train_action0
+notebooks/action0_snn_training.ipynb
 ```
 
 Use `--help` on an entry point for its required inputs and output controls.
@@ -84,7 +87,7 @@ Use `--help` on an entry point for its required inputs and output controls.
 - [Ring–Board alignment](docs/notes/ALIGNMENT_OUTPUTS.md)
 - [Label segmentation](docs/notes/IMU_SEGMENTATION.md) and [Board-event segmentation](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
 - [Segment padding](docs/notes/SEGMENT_PADDING.md)
-- [Action-0 training](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
+- [Action-0 training and notebook subset experiment](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
 
 `vendor/WritingRing/` contains historical/upstream acquisition and plotting
 utilities. The repository's current implementation and entry points are the
