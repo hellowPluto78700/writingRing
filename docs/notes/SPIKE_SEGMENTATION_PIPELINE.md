@@ -80,6 +80,11 @@ lengths remain the authoritative variable-length boundaries. The manifest and
 summary carry input kind, schema, units, timestamp provenance, and feature
 hashes.
 
+An optional downstream reconstruction can derive a separate `(N, 3)`
+acceleration array from the first 15 event channels. It consumes this completed
+variable-length package and must use the offsets rather than convolving across
+the aggregate array. See [SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md](SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md).
+
 Gravity-removal flags are rejected in SpikeIMU mode. An explicit sampling rate
 is a per-recording metadata consistency check, followed by the action-level
 common-rate check above. `spike-imu + aligned-board-events` requires the

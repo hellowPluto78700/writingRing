@@ -26,6 +26,7 @@ Ring recording (`*_ring_0.bin`)
        └── 21-channel SpikeIMU artifact
   → optional Ring–Board alignment
   → label or aligned-Board-event segmentation
+  → optional segment-wise acceleration reconstruction from SpikeIMU events
   → variable-length segment analysis and right-padding
   → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
        ├── CLI baseline with the full variant label mapping
@@ -70,6 +71,7 @@ scripts/preprocess_ring_imu.py
 scripts/encode_spikes.py
 scripts/align_ring_board.py
 scripts/segment_ring_imu.py
+scripts/reconstruct_segmented_spike_accel.py
 scripts/analyze_segment_lengths.py
 scripts/pad_segmented_imu.py
 scripts/action0_pipeline/*.sh
@@ -86,6 +88,7 @@ Use `--help` on an entry point for its required inputs and output controls.
 - [Spike encoding](docs/notes/SPIKE_ENCODING.md)
 - [Ring–Board alignment](docs/notes/ALIGNMENT_OUTPUTS.md)
 - [Label segmentation](docs/notes/IMU_SEGMENTATION.md) and [Board-event segmentation](docs/notes/BOARD_EVENT_GUIDED_SEGMENTATION.md)
+- [Segment-wise SpikeIMU acceleration reconstruction](docs/notes/SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md)
 - [Segment padding](docs/notes/SEGMENT_PADDING.md)
 - [Action-0 training and notebook subset experiment](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
 
