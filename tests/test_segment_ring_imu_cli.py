@@ -135,6 +135,7 @@ def test_cli_routes_explicit_aligned_mode_with_only_aligned_options(
             "--gravity-removal-method", "raw",
             "--pre-press-context-seconds", "0.3",
             "--post-lift-context-seconds", "0.4",
+            "--recording-error-policy", "skip",
             "--verification-panel-seconds", "7",
             "--verification-dpi", "123",
         ]
@@ -144,6 +145,7 @@ def test_cli_routes_explicit_aligned_mode_with_only_aligned_options(
     verification = captured["verification_config"]
     assert config.pre_press_context_us == 300_000.0
     assert config.post_lift_context_us == 400_000.0
+    assert config.recording_error_policy == "skip"
     assert captured["gravity_config"].gravity_removal_method == "raw"
     assert verification.panel_duration_s == 7.0
     assert verification.output_dpi == 123

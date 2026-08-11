@@ -65,6 +65,7 @@ from writingring.recording_features import (
 from writingring.preprocessing_io import sha256_file
 from writingring.segmentation import (
     SegmentLabel,
+    SegmentLabelParseError,
     SegmentationConfig,
     label_start_skip_reasons,
     load_timestamp_labels,
@@ -132,6 +133,7 @@ class BoardEventSegmentationConfig:
     require_successful_alignment: bool = True
     label_time_domain: str = "ring"
     minimum_duration_frames: int = 3
+    recording_error_policy: str = "error"
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +253,17 @@ class BoardEventUserActionSegmentationResult:
     board_events: pd.DataFrame
     summary: dict[str, object]
     output_paths: BoardEventSegmentationOutputPaths
+    recording_error_report_path: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BoardEventUserActionSegmentationErrorResult:
+    """A completed report-only user/action with no exportable segment package."""
+
+    user: str
+    action: str
+    summary: dict[str, object]
+    recording_error_report_path: Path
 
 
 @dataclass(slots=True)
@@ -657,7 +670,10 @@ def segment_user_action_by_aligned_board_events(
     spike_root: Path | None = None,
     expected_sampling_rate_hz: float | None = None,
     overwrite: bool = False,
-) -> BoardEventUserActionSegmentationResult:
+) -> (
+    BoardEventUserActionSegmentationResult
+    | BoardEventUserActionSegmentationErrorResult
+):
     """Load, align, verify, aggregate, and transactionally publish one action."""
 
     _validated_config(config)
@@ -774,6 +790,36 @@ def segment_user_action_by_aligned_board_events(
             create_verification_figure=create_segmentation_verification_figure,
             verification_error=SegmentationVerificationError,
         )
+        if (
+            not recording_artifacts.processed
+            and recording_artifacts.segmentation_errors
+        ):
+            _remove_existing_aligned_output(
+                paths.output_directory, overwrite=overwrite
+            )
+            error_report_path = _write_recording_error_report(
+                output_root=Path(output_root),
+                user=user,
+                action=action,
+                report=_recording_error_report(
+                    recording_artifacts,
+                    input_kind=input_kind,
+                    terminal_state="all_recordings_error",
+                ),
+            )
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            return BoardEventUserActionSegmentationErrorResult(
+                user=user,
+                action=action,
+                summary=_terminal_recording_error_summary(
+                    recording_artifacts,
+                    input_kind=input_kind,
+                    alignment_offset_root=Path(alignment_offset_root),
+                    config=config,
+                ),
+                recording_error_report_path=error_report_path,
+            )
         result = _aggregate_and_write_aligned_outputs(
             recording_artifacts,
             user=user,
@@ -794,7 +840,19 @@ def segment_user_action_by_aligned_board_events(
             action=action,
             input_kind=input_kind,
         )
-        return replace(result, output_paths=published_paths)
+        error_report_path = _update_recording_error_report(
+            output_root=Path(output_root),
+            user=user,
+            action=action,
+            recording_artifacts=recording_artifacts,
+            input_kind=input_kind,
+            terminal_state="completed_with_recording_errors",
+        )
+        return replace(
+            result,
+            output_paths=published_paths,
+            recording_error_report_path=error_report_path,
+        )
     except Exception:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -836,13 +894,114 @@ class _SkippedRecordingArtifacts:
 
 
 @dataclass(frozen=True, slots=True)
+class _SegmentationErrorRecordingArtifacts:
+    """A validated alignment success that failed an allowed local segment step."""
+
+    recording: Recording
+    stage: str
+    error_type: str
+    message: str
+    outcome: AlignmentOutcome
+
+
+@dataclass(frozen=True, slots=True)
 class _AlignedRecordingArtifacts:
     """All selected recordings partitioned by validated alignment outcome."""
 
     processed: tuple[_RecordingArtifacts, ...]
     skipped: tuple[_SkippedRecordingArtifacts, ...]
+    segmentation_errors: tuple[_SegmentationErrorRecordingArtifacts, ...]
     source_recordings: tuple[Recording, ...]
     source_recording_count: int
+
+
+class _RecordingLocalSegmentationFailure(Exception):
+    """Wrap one explicitly permitted recording-local segmentation failure."""
+
+    def __init__(self, *, stage: str, cause: Exception) -> None:
+        super().__init__(str(cause))
+        self.stage = stage
+        self.cause = cause
+
+
+def _prepare_success_recording_segmentation(
+    *,
+    recording: Recording,
+    feature_values: np.ndarray,
+    timestamps_us: np.ndarray,
+    boundary_timestamps_us: np.ndarray,
+    offset: AlignmentOffset,
+    board_frames: pd.DataFrame,
+    board_contacts: pd.DataFrame,
+    config: BoardEventSegmentationConfig,
+) -> tuple[tuple[SegmentLabel, ...], BoardEventSegmentationResult, tuple[str | None, ...]]:
+    """Run the narrowly quarantineable portion of a SUCCESS recording."""
+
+    if recording.timestamp_path is None:
+        raise _RecordingLocalSegmentationFailure(
+            stage="timestamp_labels",
+            cause=BoardEventSegmentationError(
+                f"dataset {recording.dataset_id} is missing its timestamp label file"
+            ),
+        )
+    try:
+        source_labels = load_timestamp_labels(recording.timestamp_path)
+        boundary_labels = _labels_in_boundary_domain(
+            source_labels,
+            canonical_timestamps_us=timestamps_us,
+            boundary_timestamps_us=boundary_timestamps_us,
+            offset_us=offset.boundary_offset_us,
+            label_time_domain=config.label_time_domain,
+        )
+    except (SegmentLabelParseError, BoardEventSegmentationError) as error:
+        raise _RecordingLocalSegmentationFailure(
+            stage="timestamp_labels", cause=error
+        ) from error
+    try:
+        prepared = prepare_complete_board_events(
+            board_frames,
+            board_contacts,
+            minimum_duration_frames=config.minimum_duration_frames,
+        )
+    except BoardEventSegmentationError as error:
+        raise _RecordingLocalSegmentationFailure(
+            stage="board_event_preparation", cause=error
+        ) from error
+    try:
+        events, pairs = align_board_event_tables(
+            prepared.events, prepared.touch_pairs, offset=offset
+        )
+    except BoardEventSegmentationError as error:
+        raise _RecordingLocalSegmentationFailure(
+            stage="board_event_alignment", cause=error
+        ) from error
+    try:
+        recording_result = segment_recording_by_aligned_board_events(
+            feature_values=feature_values,
+            timestamps_us=timestamps_us,
+            labels=boundary_labels,
+            aligned_board_events=events,
+            aligned_touch_pairs=pairs,
+            config=config,
+            boundary_timestamps_us=boundary_timestamps_us,
+        )
+        reasons = _combined_label_skip_reasons(source_labels, recording_result)
+    except BoardEventSegmentationError as error:
+        raise _RecordingLocalSegmentationFailure(
+            stage="board_event_segmentation", cause=error
+        ) from error
+    return source_labels, recording_result, reasons
+
+
+def _is_quarantinable_recording_failure(error: Exception) -> bool:
+    """Reject filesystem and alignment-artifact failures hidden by wrappers."""
+
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, (OSError, AlignmentOffsetExportError, AlignmentOutcomeError)):
+            return False
+        current = current.__cause__
+    return isinstance(error, (SegmentLabelParseError, BoardEventSegmentationError))
 
 
 def _build_aligned_recording_artifacts(
@@ -875,6 +1034,7 @@ def _build_aligned_recording_artifacts(
     )
     artifacts: list[_RecordingArtifacts] = []
     skipped_recordings: list[_SkippedRecordingArtifacts] = []
+    segmentation_errors: list[_SegmentationErrorRecordingArtifacts] = []
     report_root = Path(alignment_offset_root).parent / "reports"
     verification_root = Path(alignment_offset_root).parent / "verification"
     for recording in ordered_recordings:
@@ -985,36 +1145,38 @@ def _build_aligned_recording_artifacts(
                 f"could not build alignment boundary axis for dataset "
                 f"{recording.dataset_id}: {error}"
             ) from error
-        if recording.timestamp_path is None:
-            raise BoardEventSegmentationError(
-                f"dataset {recording.dataset_id} is missing its timestamp label file"
+        try:
+            source_labels, recording_result, reasons = (
+                _prepare_success_recording_segmentation(
+                    recording=recording,
+                    feature_values=ring_imu,
+                    timestamps_us=timestamps,
+                    boundary_timestamps_us=boundary_timestamps,
+                    offset=offset,
+                    board_frames=board.frames,
+                    board_contacts=board.contacts,
+                    config=config,
+                )
             )
-        source_labels = load_timestamp_labels(recording.timestamp_path)
-        boundary_labels = _labels_in_boundary_domain(
-            source_labels,
-            canonical_timestamps_us=timestamps,
-            boundary_timestamps_us=boundary_timestamps,
-            offset_us=offset.boundary_offset_us,
-            label_time_domain=config.label_time_domain,
-        )
-        prepared = prepare_complete_board_events(
-            board.frames,
-            board.contacts,
-            minimum_duration_frames=config.minimum_duration_frames,
-        )
-        events, pairs = align_board_event_tables(
-            prepared.events, prepared.touch_pairs, offset=offset
-        )
-        recording_result = segment_recording_by_aligned_board_events(
-            feature_values=ring_imu,
-            timestamps_us=timestamps,
-            labels=boundary_labels,
-            aligned_board_events=events,
-            aligned_touch_pairs=pairs,
-            config=config,
-            boundary_timestamps_us=boundary_timestamps,
-        )
-        reasons = _combined_label_skip_reasons(source_labels, recording_result)
+        except _RecordingLocalSegmentationFailure as failure:
+            if (
+                config.recording_error_policy != "skip"
+                or not _is_quarantinable_recording_failure(failure.cause)
+            ):
+                raise BoardEventSegmentationError(
+                    "Board-event segmentation failed for dataset "
+                    f"{recording.dataset_id} at {failure.stage}: {failure.cause}"
+                ) from failure.cause
+            segmentation_errors.append(
+                _SegmentationErrorRecordingArtifacts(
+                    recording=recording,
+                    stage=failure.stage,
+                    error_type=type(failure.cause).__name__,
+                    message=str(failure.cause),
+                    outcome=outcome,
+                )
+            )
+            continue
         verification_path = build_verification_path(
             staging_directory,
             dataset_id=recording.dataset_id,
@@ -1076,9 +1238,242 @@ def _build_aligned_recording_artifacts(
     return _AlignedRecordingArtifacts(
         processed=tuple(artifacts),
         skipped=tuple(skipped_recordings),
+        segmentation_errors=tuple(segmentation_errors),
         source_recordings=ordered_recordings,
         source_recording_count=len(ordered_recordings),
     )
+
+
+def build_recording_error_report_path(
+    output_root: Path,
+    *,
+    user: str,
+    action: str,
+) -> Path:
+    """Return the report-only state path without making a segment package."""
+
+    _validate_identity(user=user, action=action)
+    stem = f"{user}_action_{action}"
+    return (
+        Path(output_root)
+        / "recording_errors"
+        / user
+        / f"action_{action}"
+        / f"{stem}_segmentation_recording_errors.json"
+    )
+
+
+def _recording_identity(recording: Recording) -> dict[str, object]:
+    return {
+        "user": recording.user,
+        "action": recording.action,
+        "dataset_id": recording.dataset_id,
+    }
+
+
+def _segmentation_error_entries(
+    artifacts: _AlignedRecordingArtifacts,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "identity": _recording_identity(error.recording),
+            "alignment_status": "SUCCESS",
+            "stage": error.stage,
+            "error_type": error.error_type,
+            "message": error.message,
+        }
+        for error in artifacts.segmentation_errors
+    ]
+
+
+def _alignment_outcome_dependency(
+    artifacts: _AlignedRecordingArtifacts,
+) -> dict[str, object]:
+    successful = sorted(
+        [
+            (artifact.recording, artifact.outcome)
+            for artifact in artifacts.processed
+        ]
+        + [
+            (error.recording, error.outcome)
+            for error in artifacts.segmentation_errors
+        ],
+        key=lambda item: item[0].dataset_id,
+    )
+    return {
+        "source_recording_ids": [
+            _recording_identity(recording)
+            for recording in artifacts.source_recordings
+        ],
+        "outcomes_by_status": {
+            "SUCCESS": [
+                {
+                    "identity": _recording_identity(recording),
+                    "report_sha256": sha256_file(outcome.paths.report_path),
+                }
+                for recording, outcome in successful
+            ],
+            "SKIPPED": [
+                {
+                    "identity": _recording_identity(skipped.recording),
+                    "reason": skipped.reason,
+                    "report_sha256": sha256_file(
+                        skipped.outcome.paths.report_path
+                    ),
+                }
+                for skipped in artifacts.skipped
+            ],
+        },
+    }
+
+
+def _recording_error_report(
+    artifacts: _AlignedRecordingArtifacts,
+    *,
+    input_kind: str,
+    terminal_state: str,
+) -> dict[str, object]:
+    if terminal_state not in {
+        "completed_with_recording_errors",
+        "all_recordings_error",
+    }:
+        raise BoardEventSegmentationError("invalid recording-error terminal state")
+    if not artifacts.segmentation_errors:
+        raise BoardEventSegmentationError(
+            "recording-error report requires at least one segmentation error"
+        )
+    if terminal_state == "all_recordings_error" and artifacts.processed:
+        raise BoardEventSegmentationError(
+            "all_recordings_error cannot include processed recordings"
+        )
+    return {
+        "schema_version": 1,
+        "terminal_state": terminal_state,
+        "input_kind": input_kind,
+        "boundary_mode": "aligned_board_events",
+        "source_recording_count": artifacts.source_recording_count,
+        "processed_recording_count": len(artifacts.processed),
+        "skipped_recording_count": len(artifacts.skipped),
+        "alignment_skipped_recording_count": len(artifacts.skipped),
+        "segmentation_error_recording_count": len(artifacts.segmentation_errors),
+        "segmentation_errors": _segmentation_error_entries(artifacts),
+        "alignment_outcome_dependency": _alignment_outcome_dependency(artifacts),
+    }
+
+
+def _terminal_recording_error_summary(
+    artifacts: _AlignedRecordingArtifacts,
+    *,
+    input_kind: str,
+    alignment_offset_root: Path,
+    config: BoardEventSegmentationConfig,
+) -> dict[str, object]:
+    report = _recording_error_report(
+        artifacts,
+        input_kind=input_kind,
+        terminal_state="all_recordings_error",
+    )
+    return {
+        **report,
+        "alignment_required": config.require_successful_alignment,
+        "alignment_offset_root": str(alignment_offset_root),
+        "recording_error_policy": config.recording_error_policy,
+        "recording_error_policy": config.recording_error_policy,
+        "published_segment_package": False,
+    }
+
+
+def _write_recording_error_report(
+    *,
+    output_root: Path,
+    user: str,
+    action: str,
+    report: Mapping[str, object],
+) -> Path:
+    path = build_recording_error_report_path(output_root, user=user, action=action)
+    temporary: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
+        )
+        temporary = Path(temporary_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(report, stream, indent=2, ensure_ascii=False)
+            stream.write("\n")
+        os.replace(temporary, path)
+    except OSError as error:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise BoardEventSegmentationError(
+            f"could not publish recording-error report: {path}: {error}"
+        ) from error
+    return path
+
+
+def _clear_recording_error_report(
+    output_root: Path,
+    *,
+    user: str,
+    action: str,
+) -> None:
+    path = build_recording_error_report_path(output_root, user=user, action=action)
+    if not path.exists():
+        return
+    if not path.is_file():
+        raise BoardEventSegmentationError(
+            f"recording-error report is not a regular file: {path}"
+        )
+    try:
+        path.unlink()
+    except OSError as error:
+        raise BoardEventSegmentationError(
+            f"could not remove stale recording-error report: {path}: {error}"
+        ) from error
+
+
+def _update_recording_error_report(
+    *,
+    output_root: Path,
+    user: str,
+    action: str,
+    recording_artifacts: _AlignedRecordingArtifacts,
+    input_kind: str,
+    terminal_state: str,
+) -> Path | None:
+    if not recording_artifacts.segmentation_errors:
+        _clear_recording_error_report(output_root, user=user, action=action)
+        return None
+    return _write_recording_error_report(
+        output_root=output_root,
+        user=user,
+        action=action,
+        report=_recording_error_report(
+            recording_artifacts,
+            input_kind=input_kind,
+            terminal_state=terminal_state,
+        ),
+    )
+
+
+def _remove_existing_aligned_output(directory: Path, *, overwrite: bool) -> None:
+    if not directory.exists():
+        return
+    if not overwrite:
+        raise BoardEventSegmentationError(
+            "aligned-board-events output already exists; use overwrite=True: "
+            + str(directory)
+        )
+    if not directory.is_dir():
+        raise BoardEventSegmentationError(
+            f"aligned-board-events output is not a directory: {directory}"
+        )
+    try:
+        shutil.rmtree(directory)
+    except OSError as error:
+        raise BoardEventSegmentationError(
+            f"could not remove replaced aligned-board-events output: {directory}: {error}"
+        ) from error
 
 
 def _aggregate_and_write_aligned_outputs(
@@ -1639,45 +2034,9 @@ def _aligned_summary(
         }
         for artifact in artifacts
     ]
-    alignment_outcome_dependency = {
-        "source_recording_ids": [
-            {
-                "user": recording.user,
-                "action": recording.action,
-                "dataset_id": recording.dataset_id,
-            }
-            for recording in recording_artifacts.source_recordings
-        ],
-        "outcomes_by_status": {
-            "SUCCESS": [
-                {
-                    "identity": {
-                        "user": artifact.recording.user,
-                        "action": artifact.recording.action,
-                        "dataset_id": artifact.recording.dataset_id,
-                    },
-                    "report_sha256": sha256_file(
-                        artifact.outcome.paths.report_path
-                    ),
-                }
-                for artifact in artifacts
-            ],
-            "SKIPPED": [
-                {
-                    "identity": {
-                        "user": artifact.recording.user,
-                        "action": artifact.recording.action,
-                        "dataset_id": artifact.recording.dataset_id,
-                    },
-                    "reason": artifact.reason,
-                    "report_sha256": sha256_file(
-                        artifact.outcome.paths.report_path
-                    ),
-                }
-                for artifact in recording_artifacts.skipped
-            ],
-        },
-    }
+    alignment_outcome_dependency = _alignment_outcome_dependency(
+        recording_artifacts
+    )
     return {
         "input_kind": input_kind,
         "boundary_mode": "aligned_board_events",
@@ -1725,6 +2084,11 @@ def _aligned_summary(
         "source_recording_count": recording_artifacts.source_recording_count,
         "processed_recording_count": len(artifacts),
         "skipped_recording_count": len(recording_artifacts.skipped),
+        "alignment_skipped_recording_count": len(recording_artifacts.skipped),
+        "segmentation_error_recording_count": len(
+            recording_artifacts.segmentation_errors
+        ),
+        "segmentation_errors": _segmentation_error_entries(recording_artifacts),
         "recording_skips": [
             {
                 "identity": {
@@ -1745,7 +2109,7 @@ def _aligned_summary(
             if not artifact.verification_path.is_file() or artifact.verification_path.stat().st_size == 0
         ],
         "output_dtype": output_dtype.name,
-        "output_schema_version": 3,
+        "output_schema_version": 4,
         "feature_schema": first_feature.feature_schema,
         "channel_count": first_feature.channel_count,
         "channel_names": list(first_feature.channel_names),
@@ -2317,6 +2681,10 @@ def _validated_config(config: BoardEventSegmentationConfig) -> np.dtype:
         raise BoardEventSegmentationError("require_successful_alignment must be a boolean")
     if not isinstance(config.minimum_duration_frames, int) or config.minimum_duration_frames < 1:
         raise BoardEventSegmentationError("minimum_duration_frames must be a positive integer")
+    if config.recording_error_policy not in {"error", "skip"}:
+        raise BoardEventSegmentationError(
+            "recording_error_policy must be 'error' or 'skip'"
+        )
     return np.dtype(config.output_dtype)
 
 

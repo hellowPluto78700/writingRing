@@ -550,6 +550,8 @@ def test_downstream_segment_stage_overwrites_only_segment_and_padding_publishers
             "OVERWRITE=0",
             "pipeline_run_logged() { printf '%s\\n' \"$*\" >>\"$CALLS\"; }",
             "pipeline_require_file() { :; }",
+            "pipeline_write_segmentation_error_report() { :; }",
+            "pipeline_successful_segmentation_user_count() { printf '1\\n'; }",
             "pipeline_prepare_downstream_overwrite",
             "pipeline_execute_from_stage segment",
         ]
@@ -570,6 +572,107 @@ def test_downstream_segment_stage_overwrites_only_segment_and_padding_publishers
     assert all("--overwrite" in call for call in calls)
 
 
+def test_report_only_segmentation_state_is_resume_valid_and_excluded_from_padding(
+    tmp_path: Path,
+) -> None:
+    segment_root = tmp_path / "segmentation"
+    report_path = (
+        segment_root
+        / "recording_errors"
+        / "user"
+        / "action_0"
+        / "user_action_0_segmentation_recording_errors.json"
+    )
+    report_path.parent.mkdir(parents=True)
+    identity = {"user": "user", "action": "0", "dataset_id": 1}
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "terminal_state": "all_recordings_error",
+                "input_kind": "spike-imu",
+                "boundary_mode": "aligned_board_events",
+                "source_recording_count": 1,
+                "processed_recording_count": 0,
+                "skipped_recording_count": 0,
+                "alignment_skipped_recording_count": 0,
+                "segmentation_error_recording_count": 1,
+                "segmentation_errors": [
+                    {
+                        "identity": identity,
+                        "alignment_status": "SUCCESS",
+                        "stage": "board_event_segmentation",
+                        "error_type": "BoardEventSegmentationError",
+                        "message": "fixture local error",
+                    }
+                ],
+                "alignment_outcome_dependency": {
+                    "source_recording_ids": [identity],
+                    "outcomes_by_status": {
+                        "SUCCESS": [{"identity": identity, "report_sha256": "a" * 64}],
+                        "SKIPPED": [],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    script = "\n".join(
+        [
+            f"source {shlex.quote(str(COMMON_PATH))}",
+            f"QA_LOG={shlex.quote(str(tmp_path / 'qa.log'))}",
+            f"SEGMENT_ROOT={shlex.quote(str(segment_root))}",
+            f"PADDING_ANALYSIS_DIR={shlex.quote(str(tmp_path / 'analysis'))}",
+            f"PADDING_OUTPUT_ROOT={shlex.quote(str(tmp_path / 'padded'))}",
+            f"PYTHON_CMD=({shlex.quote(sys.executable)})",
+            "PIPELINE_USERS=(user)",
+            "ACTION=0",
+            "BOUNDARY_MODE=aligned-board-events",
+            "pipeline_validate_user_segmentation_state user 0",
+            'printf "state=%s errors=%s\\n" "$PIPELINE_LAST_SEGMENTATION_STATE" "$PIPELINE_LAST_SEGMENTATION_ERROR_COUNT"',
+            "pipeline_segment_outputs_valid",
+                "pipeline_padding_outputs_valid",
+                "pipeline_write_segmentation_error_report",
+                "pipeline_preprocess_has_any_output() { return 0; }",
+                "pipeline_encode_has_any_output() { return 0; }",
+                "pipeline_alignment_has_any_output() { return 0; }",
+                "pipeline_preprocess_outputs_valid() { return 0; }",
+                "pipeline_encode_outputs_valid() { return 0; }",
+                "pipeline_alignment_outputs_valid() { return 0; }",
+                "pipeline_alignment_outcome_dependencies_valid() { return 0; }",
+                "pipeline_plan_continue",
+                'printf "resume=%s force=%s\\n" "$PIPELINE_RESUME_STAGE" "$PIPELINE_FORCE_REBUILD"',
+        ]
+    )
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "state=ALL_RECORDINGS_ERROR errors=1" in completed.stdout
+    assert "resume=complete force=0" in completed.stdout
+    root_report = json.loads(
+        (segment_root / "segmentation_recording_error_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert root_report["recording_errors"] == [
+        {
+            "user": "user",
+            "action": "0",
+            "dataset_id": 1,
+            "stage": "board_event_segmentation",
+            "error_type": "BoardEventSegmentationError",
+            "message": "fixture local error",
+        }
+    ]
+    assert (segment_root / "segmentation_recording_error_report.csv").is_file()
+    assert not (segment_root / "user").exists()
+
+
 def test_aligned_board_cli_requests_skip_and_authorized_outcome_overwrite() -> None:
     common = COMMON_PATH.read_text(encoding="utf-8")
     align_start = common.index("pipeline_align()")
@@ -577,6 +680,7 @@ def test_aligned_board_cli_requests_skip_and_authorized_outcome_overwrite() -> N
     align_block = common[align_start:align_end]
     assert "--initial-interval-policy skip" in align_block
     assert "--unalignable-recording-policy skip" in align_block
+    assert "--recording-error-policy skip" in common
     assert "pipeline_validate_alignment_outcome" in align_block
     assert "pipeline_require_file" not in align_block
 
@@ -889,6 +993,8 @@ def test_qa_continues_after_mixed_success_and_skipped_alignment_outcomes(
             "  esac",
             "}",
             "pipeline_alignment_outcome_dependencies_valid() { return 0; }",
+            "pipeline_validate_user_segmentation_state() { PIPELINE_LAST_SEGMENTATION_STATE=PACKAGE_NO_ERRORS; PIPELINE_LAST_SEGMENTATION_ERROR_COUNT=0; return 0; }",
+            "pipeline_write_segmentation_error_report() { :; }",
             "pipeline_qa",
         ]
     )
@@ -901,7 +1007,7 @@ def test_qa_continues_after_mixed_success_and_skipped_alignment_outcomes(
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "Alignment outcomes: total=2 success=1 skipped=1 invalid=0" in completed.stdout
-    assert "QA passed for 2 ring_0 recording(s), 1 user(s)." in completed.stdout
+    assert "QA passed for 2 ring_0 recording(s), 1 user(s), 1 successful packages, and 0 segmentation recording error(s)." in completed.stdout
     log = qa_log.read_text(encoding="utf-8")
     assert "alignment_outcomes_total=2" in log
     assert "alignment_outcomes_success=1" in log

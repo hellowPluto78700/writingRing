@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATA_ROOT="data"
 ACTION=0
-POST_ENCODE_TRANSFORM="AbsRectify"  #None, AbsRectify
+POST_ENCODE_TRANSFORM="none"  #none, AbsRectify
 OUTPUT_BASE="outputs/action0_rectified"
 #PIPELINE_MODE = "continue"  # "continue" or "overwrite"
 

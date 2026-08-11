@@ -118,6 +118,28 @@ evidence-insufficiency reasons (`initial_interval_no_usable_pair`,
 `insufficient_valid_touch_pairs`, and `insufficient_event_coverage`); malformed,
 stale, conflicting, `FAILED`, and unexpected outcomes remain hard failures.
 
+Aligned Action0 segmentation also explicitly passes
+`--recording-error-policy skip`. This is separate from alignment
+`SUCCESS`/`SKIPPED`: a recording with validated alignment `SUCCESS` that then
+fails a permitted local Board-segmentation validation is listed as a
+segmentation error and never rewritten as alignment `SKIPPED`.
+
+After every aligned segmentation pass, the wrapper writes
+`segmentation/segmentation_recording_error_report.json` and its CSV sibling.
+The JSON has one terminal state per discovered user/action; the CSV has one
+row per segmentation error with `user`, `action`, `dataset_id`, `stage`,
+`error_type`, and `message`. A mixed user still has its normal segment package
+plus a per-user error sidecar. An all-recordings-error user has only that
+sidecar and no empty segment package. The affected recording cannot reach
+length analysis, padding, or training input.
+
+Continue-mode validates report-only terminal users rather than treating their
+absent package as partial preprocessing. QA reconciles source, processed,
+alignment-skipped, and segmentation-error recordings, then expects padding
+packages only for user/actions with a completed segmentation package. If no
+user/action has a successful package, Action0 records the terminal reports and
+skips length analysis and padding; stale padding output remains an error.
+
 The alignment stage validates one provenance-current Python outcome for every
 discovered recording: `SUCCESS` proceeds to Board segmentation and `SKIPPED`
 is a completed recording outcome that segmentation omits. QA counts both

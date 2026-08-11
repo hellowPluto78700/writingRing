@@ -112,6 +112,7 @@ The optional aligned-only controls are:
 ```text
 --missing-event-policy skip
 --crossing-touch-policy accept_until_next_press
+--recording-error-policy error|skip
 --verification-panel-seconds 10
 --verification-dpi 200
 ```
@@ -119,6 +120,18 @@ The optional aligned-only controls are:
 `skip` remains available as an explicit compatibility policy and rejects all
 crossing touches. `clip-at-label` is not implemented; this prevents a silent
 mixture of boundary definitions.
+
+`--recording-error-policy` is independent of the alignment outcome. Its
+default, `error`, preserves standalone strict behavior. With explicit `skip`,
+a provenance-valid alignment `SUCCESS` recording that fails a known
+recording-local label/event-preparation or Board-boundary segmentation check
+is recorded and omitted while later recordings continue. This does not turn
+the alignment outcome into `SKIPPED`.
+
+Stale or malformed provenance/outcomes or success artifacts, source-feature
+loading and rate validation, verification rendering/PNG output, aggregate
+validation/publication, filesystem failures, and unexpected exceptions remain
+hard errors even with this policy.
 
 ## Outputs
 
@@ -194,3 +207,32 @@ separate from both the audit-oriented `recording_skips` and label-policy
 `skipped_segment_count`; it is absent from label-mode summaries.  Consumers
 must treat a missing or unequal dependency as stale, rather than infer outcome
 state from offset files or artifact counts.
+
+When recording-error skip mode omits an alignment-`SUCCESS` recording, the
+normal user/action summary additionally contains
+`alignment_skipped_recording_count`, `segmentation_error_recording_count`, and
+`segmentation_errors`. Each error has recording identity, `stage`,
+`error_type`, and message, and the count invariant is:
+
+```text
+source_recording_count
+  = processed_recording_count
+  + alignment_skipped_recording_count
+  + segmentation_error_recording_count
+```
+
+`alignment_outcome_dependency.outcomes_by_status.SUCCESS` still includes an
+omitted recording: it describes alignment only, not segmentation usability.
+For a user with at least one processed recording, a matching sidecar is also
+published under:
+
+```text
+<output-root>/recording_errors/<user>/action_<action>/
+  <user>_action_<action>_segmentation_recording_errors.json
+```
+
+If every alignment-`SUCCESS` recording reaches that permitted terminal error,
+there is no empty IMU/target/manifest package under
+`<output-root>/<user>/action_<action>/`; only that report-only terminal state
+is published. A user containing only alignment `SKIPPED` outcomes retains the
+existing strict error before aggregation.

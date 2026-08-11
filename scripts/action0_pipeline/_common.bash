@@ -434,6 +434,275 @@ pipeline_align() {
     done
 }
 
+pipeline_recording_error_report_path() {
+    local record_user="$1"
+    local record_action="$2"
+    printf '%s/recording_errors/%s/action_%s/%s_action_%s_segmentation_recording_errors.json\n' \
+        "$SEGMENT_ROOT" "$record_user" "$record_action" "$record_user" "$record_action"
+}
+
+pipeline_validate_user_segmentation_state() {
+    local record_user="$1"
+    local record_action="$2"
+    local segment_directory="$SEGMENT_ROOT/$record_user/action_$record_action"
+    local summary_path="$segment_directory/${record_user}_action_${record_action}_segmentation_summary.json"
+    local error_report_path
+    local validation_log="${QA_LOG:-/dev/null}"
+    local status=""
+    error_report_path="$(pipeline_recording_error_report_path "$record_user" "$record_action")"
+
+    local -a command_args=(
+        "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import sys
+
+summary_path = Path(sys.argv[1])
+error_path = Path(sys.argv[2])
+user = sys.argv[3]
+action = sys.argv[4]
+
+def load(path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"could not read {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise SystemExit(f"{path} is not a JSON object")
+    return value
+
+def nonnegative(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SystemExit(f"{name} must be a nonnegative integer")
+    return value
+
+def validate_dependency(value):
+    if not isinstance(value, dict):
+        raise SystemExit("alignment_outcome_dependency must be an object")
+    source = value.get("source_recording_ids")
+    outcomes = value.get("outcomes_by_status")
+    if not isinstance(source, list) or not isinstance(outcomes, dict):
+        raise SystemExit("alignment outcome dependency is malformed")
+    success = outcomes.get("SUCCESS")
+    skipped = outcomes.get("SKIPPED")
+    if not isinstance(success, list) or not isinstance(skipped, list):
+        raise SystemExit("alignment outcome dependency statuses are malformed")
+    def key(value):
+        if not isinstance(value, dict):
+            raise SystemExit("alignment dependency identity is malformed")
+        identity = value.get("identity", value)
+        if not isinstance(identity, dict):
+            raise SystemExit("alignment dependency identity is malformed")
+        return (identity.get("user"), identity.get("action"), identity.get("dataset_id"))
+    source_keys = [key(value) for value in source]
+    outcome_keys = [key(value) for value in success + skipped]
+    if (
+        len(set(source_keys)) != len(source_keys)
+        or len(set(outcome_keys)) != len(outcome_keys)
+        or source_keys != sorted(source_keys, key=lambda item: item[2])
+        or set(source_keys) != set(outcome_keys)
+    ):
+        raise SystemExit("alignment outcome dependency does not reconcile")
+    return {entry[2] for entry in (key(value) for value in success)}
+
+def validate(payload):
+    if payload.get("input_kind") != "spike-imu":
+        raise SystemExit("segmentation state is not SpikeIMU")
+    if payload.get("boundary_mode") != "aligned_board_events":
+        raise SystemExit("segmentation state is not aligned Board mode")
+    source = nonnegative(payload.get("source_recording_count"), "source_recording_count")
+    processed = nonnegative(payload.get("processed_recording_count"), "processed_recording_count")
+    skipped = nonnegative(payload.get("skipped_recording_count"), "skipped_recording_count")
+    errors = nonnegative(payload.get("segmentation_error_recording_count"), "segmentation_error_recording_count")
+    entries = payload.get("segmentation_errors")
+    if not isinstance(entries, list) or len(entries) != errors:
+        raise SystemExit("segmentation error entries do not reconcile")
+    if source != processed + skipped + errors:
+        raise SystemExit("source recording counts do not reconcile")
+    success_ids = validate_dependency(payload.get("alignment_outcome_dependency"))
+    error_ids = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SystemExit("segmentation error entry is malformed")
+        identity = entry.get("identity")
+        if not isinstance(identity, dict):
+            raise SystemExit("segmentation error identity is malformed")
+        dataset_id = identity.get("dataset_id")
+        if (
+            identity.get("user") != user
+            or identity.get("action") != action
+            or isinstance(dataset_id, bool)
+            or not isinstance(dataset_id, int)
+            or dataset_id < 0
+            or not isinstance(entry.get("stage"), str)
+            or not entry["stage"]
+            or not isinstance(entry.get("error_type"), str)
+            or not entry["error_type"]
+            or not isinstance(entry.get("message"), str)
+        ):
+            raise SystemExit("segmentation error fields are malformed")
+        error_ids.add(dataset_id)
+    if len(error_ids) != errors or not error_ids <= success_ids:
+        raise SystemExit("segmentation errors must retain alignment SUCCESS")
+    return source, processed, skipped, errors
+
+summary_exists = summary_path.is_file()
+error_exists = error_path.is_file()
+if summary_exists:
+    summary = load(summary_path)
+    _, processed, _, errors = validate(summary)
+    if processed <= 0:
+        raise SystemExit("segmentation summary has no processed recording")
+    if errors == 0:
+        if error_exists:
+            raise SystemExit("stale recording-error report accompanies a clean package")
+        print("PACKAGE_NO_ERRORS 0")
+    else:
+        if not error_exists:
+            raise SystemExit("segmentation errors are missing their report")
+        report = load(error_path)
+        if report.get("terminal_state") != "completed_with_recording_errors":
+            raise SystemExit("mixed segmentation error report has wrong terminal state")
+        report_counts = validate(report)
+        summary_counts = validate(summary)
+        if report_counts != summary_counts:
+            raise SystemExit("segmentation error report counts differ from package summary")
+        if report.get("segmentation_errors") != summary.get("segmentation_errors") or report.get("alignment_outcome_dependency") != summary.get("alignment_outcome_dependency"):
+            raise SystemExit("segmentation error report differs from package summary")
+        print(f"PACKAGE_WITH_ERRORS {errors}")
+elif error_exists:
+    report = load(error_path)
+    if report.get("terminal_state") != "all_recordings_error":
+        raise SystemExit("report-only segmentation state has wrong terminal state")
+    _, processed, _, errors = validate(report)
+    if processed != 0 or errors == 0:
+        raise SystemExit("report-only segmentation state does not describe all-recording errors")
+    print(f"ALL_RECORDINGS_ERROR {errors}")
+else:
+    raise SystemExit("missing both segmentation package summary and recording-error report")
+' \
+            "$summary_path" "$error_report_path" "$record_user" "$record_action"
+    )
+    pipeline_log_command "$validation_log" "${command_args[@]}"
+    if ! status="$("${command_args[@]}" 2>>"$validation_log")"; then
+        PIPELINE_LAST_SEGMENTATION_STATE="INVALID"
+        PIPELINE_LAST_SEGMENTATION_ERROR_COUNT=0
+        return 1
+    fi
+    read -r PIPELINE_LAST_SEGMENTATION_STATE PIPELINE_LAST_SEGMENTATION_ERROR_COUNT <<<"$status"
+    case "$PIPELINE_LAST_SEGMENTATION_STATE" in
+        PACKAGE_NO_ERRORS|PACKAGE_WITH_ERRORS|ALL_RECORDINGS_ERROR)
+            return 0
+            ;;
+        *)
+            PIPELINE_LAST_SEGMENTATION_STATE="INVALID"
+            PIPELINE_LAST_SEGMENTATION_ERROR_COUNT=0
+            return 1
+            ;;
+    esac
+}
+
+pipeline_successful_segmentation_user_count() {
+    local record_user count=0
+    if [[ "$BOUNDARY_MODE" != "aligned-board-events" ]]; then
+        printf '%s\n' "${#PIPELINE_USERS[@]}"
+        return 0
+    fi
+    for record_user in "${PIPELINE_USERS[@]}"; do
+        pipeline_validate_user_segmentation_state "$record_user" "$ACTION" || return 1
+        case "$PIPELINE_LAST_SEGMENTATION_STATE" in
+            PACKAGE_NO_ERRORS|PACKAGE_WITH_ERRORS) count=$((count + 1)) ;;
+            ALL_RECORDINGS_ERROR) ;;
+            *) return 1 ;;
+        esac
+    done
+    printf '%s\n' "$count"
+}
+
+pipeline_write_segmentation_error_report() {
+    local -a command_args=(
+        "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import csv
+import json
+import os
+import sys
+import tempfile
+
+root = Path(sys.argv[1])
+action = sys.argv[2]
+users = list(sys.argv[3:])
+states = []
+errors = []
+for user in users:
+    stem = f"{user}_action_{action}"
+    summary_path = root / user / f"action_{action}" / f"{stem}_segmentation_summary.json"
+    error_path = root / "recording_errors" / user / f"action_{action}" / f"{stem}_segmentation_recording_errors.json"
+    if summary_path.is_file():
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        state = "completed_with_recording_errors" if payload.get("segmentation_error_recording_count", 0) else "completed"
+    elif error_path.is_file():
+        payload = json.loads(error_path.read_text(encoding="utf-8"))
+        state = payload.get("terminal_state")
+    else:
+        raise SystemExit(f"missing terminal segmentation state for {user}/{action}")
+    entry = {
+        "user": user,
+        "action": action,
+        "terminal_state": state,
+        "source_recording_count": payload.get("source_recording_count"),
+        "processed_recording_count": payload.get("processed_recording_count"),
+        "alignment_skipped_recording_count": payload.get("alignment_skipped_recording_count", payload.get("skipped_recording_count")),
+        "segmentation_error_recording_count": payload.get("segmentation_error_recording_count"),
+    }
+    states.append(entry)
+    for error in payload.get("segmentation_errors", []):
+        identity = error.get("identity", {}) if isinstance(error, dict) else {}
+        errors.append({
+            "user": identity.get("user"),
+            "action": identity.get("action"),
+            "dataset_id": identity.get("dataset_id"),
+            "stage": error.get("stage") if isinstance(error, dict) else None,
+            "error_type": error.get("error_type") if isinstance(error, dict) else None,
+            "message": error.get("message") if isinstance(error, dict) else None,
+        })
+payload = {
+    "schema_version": 1,
+    "action": action,
+    "user_action_states": states,
+    "recording_error_count": len(errors),
+    "recording_errors": errors,
+}
+root.mkdir(parents=True, exist_ok=True)
+json_path = root / "segmentation_recording_error_report.json"
+csv_path = root / "segmentation_recording_error_report.csv"
+def atomic_text(path, text):
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            stream.write(text)
+        os.replace(temporary, path)
+    except Exception:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+atomic_text(json_path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+descriptor, temporary = tempfile.mkstemp(prefix=f".{csv_path.name}.", dir=csv_path.parent, text=True)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=["user", "action", "dataset_id", "stage", "error_type", "message"])
+        writer.writeheader()
+        writer.writerows(errors)
+    os.replace(temporary, csv_path)
+except Exception:
+    Path(temporary).unlink(missing_ok=True)
+    raise
+print(f"published segmentation recording-error report: {json_path}")
+' \
+            "$SEGMENT_ROOT" "$ACTION" "${PIPELINE_USERS[@]}"
+    )
+    pipeline_run_logged "${QA_LOG:-/dev/null}" "${command_args[@]}"
+}
+
 pipeline_segment() {
     local index record_user record_action log_path
     local -a command_args=()
@@ -458,6 +727,7 @@ pipeline_segment() {
                 --post-lift-context-seconds 0.2
                 --missing-event-policy skip
                 --crossing-touch-policy accept_until_next_press
+                --recording-error-policy skip
                 --verification-panel-seconds 10
                 --verification-dpi 200
                 "${SEGMENT_OVERWRITE_ARGS[@]}"
@@ -471,10 +741,24 @@ pipeline_segment() {
         fi
         pipeline_run_logged "$log_path" "${command_args[@]}"
     done
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        pipeline_write_segmentation_error_report
+    fi
 }
 
 pipeline_padding() {
     local analysis_report="$PADDING_ANALYSIS_DIR/segment_length_analysis.json"
+    local successful_user_action_count
+    if ! successful_user_action_count="$(pipeline_successful_segmentation_user_count)"; then
+        pipeline_die "could not validate segmentation states before padding"
+    fi
+    if [[ "$successful_user_action_count" -eq 0 ]]; then
+        if pipeline_padding_has_any_output; then
+            pipeline_die "no successful segmentation package is available, but padding outputs exist"
+        fi
+        pipeline_note "no successful segmentation package; skipping length analysis and padding"
+        return 0
+    fi
     local -a analysis_args=(
         "${PYTHON_CMD[@]}" scripts/analyze_segment_lengths.py
         --input-root "$SEGMENT_ROOT"
@@ -940,10 +1224,15 @@ pipeline_alignment_outcome_dependency_matches() {
     local record_action="$2"
     local segment_directory="$SEGMENT_ROOT/$record_user/action_$record_action"
     local summary_path="$segment_directory/${record_user}_action_${record_action}_segmentation_summary.json"
+    local error_report_path=""
     local current_dependency=""
     local comparison_log="${QA_LOG:-/dev/null}"
     local -a comparison_args=()
 
+    error_report_path="$(pipeline_recording_error_report_path "$record_user" "$record_action")"
+    if [[ ! -f "$summary_path" && -f "$error_report_path" ]]; then
+        summary_path="$error_report_path"
+    fi
     if ! current_dependency="$(
         pipeline_compute_alignment_outcome_dependency \
             "$record_user" "$record_action"
@@ -1020,7 +1309,9 @@ pipeline_segment_has_any_output() {
         \( -name '*_spikeIMU.npy' -o -name '*_labels.npy' -o -name '*_segment_offsets.npy' \
            -o -name '*_segment_lengths.npy' -o -name '*_segmentation_summary.json' \
            -o -name '*_segments.csv' -o -name '*_board_event_targets.npy' \
-           -o -name '*_board_events.csv' \) -print -quit 2>/dev/null || true)"
+           -o -name '*_board_events.csv' -o -name '*_segmentation_recording_errors.json' \
+           -o -name 'segmentation_recording_error_report.json' \
+           -o -name 'segmentation_recording_error_report.csv' \) -print -quit 2>/dev/null || true)"
     [[ -n "$first" ]]
 }
 
@@ -1086,6 +1377,22 @@ pipeline_segment_outputs_valid() {
     fi
     for record_user in "${PIPELINE_USERS[@]}"; do
         segment_directory="$SEGMENT_ROOT/$record_user/action_$ACTION"
+        if [[ "$board_mode" == "1" ]]; then
+            pipeline_validate_user_segmentation_state "$record_user" "$ACTION" || return 1
+            case "$PIPELINE_LAST_SEGMENTATION_STATE" in
+                ALL_RECORDINGS_ERROR)
+                    if [[ -d "$segment_directory" ]] && find "$segment_directory" -type f -print -quit | grep -q .; then
+                        return 1
+                    fi
+                    continue
+                    ;;
+                PACKAGE_NO_ERRORS|PACKAGE_WITH_ERRORS)
+                    ;;
+                *)
+                    return 1
+                    ;;
+            esac
+        fi
         [[ -s "$segment_directory/${record_user}_action_${ACTION}_spikeIMU.npy" ]] || return 1
         [[ -s "$segment_directory/${record_user}_action_${ACTION}_labels.npy" ]] || return 1
         [[ -s "$segment_directory/${record_user}_action_${ACTION}_segment_offsets.npy" ]] || return 1
@@ -1105,10 +1412,18 @@ pipeline_padding_outputs_valid() {
     local analysis_report="$PADDING_ANALYSIS_DIR/segment_length_analysis.json"
     local summary_path="$PADDING_OUTPUT_ROOT/padding_dataset_summary.json"
     local manifest_path="$PADDING_OUTPUT_ROOT/padding_dataset_manifest.csv"
+    local expected_user_action_count
+    if ! expected_user_action_count="$(pipeline_successful_segmentation_user_count)"; then
+        return 1
+    fi
+    if [[ "$expected_user_action_count" -eq 0 ]]; then
+        ! pipeline_padding_has_any_output
+        return
+    fi
     [[ -s "$analysis_report" ]] || return 1
     [[ -s "$summary_path" ]] || return 1
     [[ -s "$manifest_path" ]] || return 1
-    pipeline_validate_padding_artifact "$summary_path" "${#PIPELINE_USERS[@]}" || return 1
+    pipeline_validate_padding_artifact "$summary_path" "$expected_user_action_count" || return 1
 }
 
 pipeline_force_full_rebuild() {
@@ -1218,6 +1533,23 @@ pipeline_plan_continue() {
         esac
     fi
 
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        local successful_user_action_count
+        if ! successful_user_action_count="$(pipeline_successful_segmentation_user_count)"; then
+            pipeline_force_full_rebuild "segmentation terminal states are partial or invalid"
+            return 0
+        fi
+        if [[ "$successful_user_action_count" -eq 0 ]]; then
+            if [[ "$padding_any" == "1" ]]; then
+                pipeline_force_full_rebuild "padding outputs exist without a successful segmentation package"
+            else
+                PIPELINE_RESUME_STAGE="complete"
+                pipeline_note "all segmentation users reached terminal recording errors; no padding output is expected"
+            fi
+            return 0
+        fi
+    fi
+
     if [[ "$padding_any" == "0" ]]; then
         PIPELINE_RESUME_STAGE="padding"
         pipeline_note "padding outputs not found; resuming from padding"
@@ -1278,6 +1610,11 @@ pipeline_execute_from_stage() {
 pipeline_qa() {
     local ring_count="${#RING_FILES[@]}"
     local preprocessing_count spike_count summary_count padded_summary_count
+    local successful_user_action_count="${#PIPELINE_USERS[@]}"
+    local segmentation_error_count=0
+    local all_error_user_count=0
+    local record_user
+    local segment_directory
     preprocessing_count="$(pipeline_count_files "$PREPROCESS_ROOT" '*_preprocessing.json')"
     spike_count="$(pipeline_count_files "$SPIKE_ROOT" 'spikeIMU.npy')"
     summary_count="$(pipeline_count_files "$SEGMENT_ROOT" '*_segmentation_summary.json')"
@@ -1295,18 +1632,11 @@ pipeline_qa() {
     if [[ "$spike_count" -ne "$ring_count" ]]; then
         pipeline_die "SpikeIMU count ${spike_count} != ring_0 count ${ring_count}"
     fi
-    if [[ "$summary_count" -ne "${#PIPELINE_USERS[@]}" ]]; then
-        pipeline_die "segmentation summary count ${summary_count} != user count ${#PIPELINE_USERS[@]}"
-    fi
-    if [[ "$padded_summary_count" -ne 1 ]]; then
-        pipeline_die "padded dataset summary count ${padded_summary_count} != 1"
-    fi
-
     local alignment_total_count=0
     local alignment_success_count=0
     local alignment_skipped_count=0
     local alignment_invalid_count=0
-    local index record_user record_action dataset_id
+    local index record_action dataset_id
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
         alignment_total_count="${#RECORD_USERS[@]}"
         for index in "${!RECORD_USERS[@]}"; do
@@ -1354,6 +1684,40 @@ pipeline_qa() {
         esac
     fi
 
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        successful_user_action_count=0
+        for record_user in "${PIPELINE_USERS[@]}"; do
+            pipeline_validate_user_segmentation_state "$record_user" "$ACTION" || \
+                pipeline_die "segmentation terminal state is invalid for ${record_user}/${ACTION}"
+            segmentation_error_count=$((segmentation_error_count + PIPELINE_LAST_SEGMENTATION_ERROR_COUNT))
+            case "$PIPELINE_LAST_SEGMENTATION_STATE" in
+                PACKAGE_NO_ERRORS|PACKAGE_WITH_ERRORS)
+                    successful_user_action_count=$((successful_user_action_count + 1))
+                    ;;
+                ALL_RECORDINGS_ERROR)
+                    all_error_user_count=$((all_error_user_count + 1))
+                    ;;
+                *)
+                    pipeline_die "unknown segmentation terminal state for ${record_user}/${ACTION}"
+                    ;;
+            esac
+        done
+        pipeline_write_segmentation_error_report
+    fi
+    if [[ "$summary_count" -ne "$successful_user_action_count" ]]; then
+        pipeline_die "segmentation summary count ${summary_count} != successful user/action count ${successful_user_action_count}"
+    fi
+    if [[ "$successful_user_action_count" -eq 0 ]]; then
+        if [[ "$padded_summary_count" -ne 0 ]]; then
+            pipeline_die "padded dataset summary count ${padded_summary_count} != 0 without successful segmentation packages"
+        fi
+    elif [[ "$padded_summary_count" -ne 1 ]]; then
+        pipeline_die "padded dataset summary count ${padded_summary_count} != 1"
+    fi
+    printf 'segmentation_successful_user_actions=%s\n' "$successful_user_action_count" >>"$QA_LOG"
+    printf 'segmentation_recording_errors=%s\n' "$segmentation_error_count" >>"$QA_LOG"
+    printf 'segmentation_all_error_users=%s\n' "$all_error_user_count" >>"$QA_LOG"
+
     for index in "${!RECORD_USERS[@]}"; do
         record_user="${RECORD_USERS[$index]}"
         record_action="${RECORD_ACTIONS[$index]}"
@@ -1373,6 +1737,13 @@ pipeline_qa() {
 
     for record_user in "${PIPELINE_USERS[@]}"; do
         segment_directory="$SEGMENT_ROOT/$record_user/action_$ACTION"
+        if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+            pipeline_validate_user_segmentation_state "$record_user" "$ACTION" || \
+                pipeline_die "segmentation terminal state is invalid for ${record_user}/${ACTION}"
+            if [[ "$PIPELINE_LAST_SEGMENTATION_STATE" == "ALL_RECORDINGS_ERROR" ]]; then
+                continue
+            fi
+        fi
         pipeline_require_file \
             "$segment_directory/${record_user}_action_${ACTION}_spikeIMU.npy" \
             "segmented SpikeIMU matrix"
@@ -1409,11 +1780,14 @@ pipeline_qa() {
         fi
     done
 
-    pipeline_validate_padding_artifact \
-        "$PADDING_OUTPUT_ROOT/padding_dataset_summary.json" \
-        "${#PIPELINE_USERS[@]}"
+    if [[ "$successful_user_action_count" -gt 0 ]]; then
+        pipeline_validate_padding_artifact \
+            "$PADDING_OUTPUT_ROOT/padding_dataset_summary.json" \
+            "$successful_user_action_count"
+    fi
 
-    printf 'QA passed for %s ring_0 recording(s), %s user(s).\n' "$ring_count" "${#PIPELINE_USERS[@]}"
+    printf 'QA passed for %s ring_0 recording(s), %s user(s), %s successful packages, and %s segmentation recording error(s).\n' \
+        "$ring_count" "${#PIPELINE_USERS[@]}" "$successful_user_action_count" "$segmentation_error_count"
     printf 'Output root: %s\n' "$COMBINATION_ROOT"
     printf 'Padded output root: %s\n' "$PADDING_OUTPUT_ROOT"
     printf 'Logs: %s\n' "$LOG_ROOT"

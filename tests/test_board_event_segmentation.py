@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ from writingring.board_event_segmentation import (
     ALIGNED_TOUCH_PAIR_COLUMNS,
     BoardEventSegmentationConfig,
     BoardEventSegmentationError,
+    BoardEventUserActionSegmentationErrorResult,
     align_board_event_tables,
     prepare_complete_board_events,
     read_recording_alignment_offset,
@@ -806,6 +808,175 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
     assert result.output_paths.raw_imu_path.is_file()
 
 
+def test_user_action_quarantines_one_successful_alignment_recording_and_retains_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+    rows = np.column_stack(
+        (
+            np.zeros((len(timestamps), 2)),
+            np.full(len(timestamps), 9.8),
+            np.zeros((len(timestamps), 3)),
+            timestamps,
+        )
+    )
+    board_paths = {dataset_id: tmp_path / f"{dataset_id}_board_0.gz" for dataset_id in range(3)}
+    offset_root = tmp_path / "offsets"
+    for dataset_id, board_path in board_paths.items():
+        rows.astype(np.float64).tofile(action_dir / f"{dataset_id}_ring_0.bin")
+        board_path.write_bytes(b"board provenance")
+        _publish_raw_success_outcome(
+            data_root, offset_root, board_path, dataset_id=dataset_id
+        )
+    for dataset_id in range(3):
+        (action_dir / f"{dataset_id}_timestamp.txt").write_text(
+            "1000000 a\n3000000 b\n", encoding="utf-8"
+        )
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(10),
+            "frame_timestamp_raw": [
+                1_000_000, 1_500_000, 1_600_000, 1_700_000, 1_800_000,
+                1_900_000, 2_000_000, 2_100_000, 2_200_000, 2_300_000,
+            ],
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
+                "chunk_paths": (board_paths[recording.dataset_id],),
+            },
+        )(),
+    )
+    original = board_event_segmentation.segment_recording_by_aligned_board_events
+    calls = 0
+
+    def fail_only_second_recording(**kwargs: object):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise BoardEventSegmentationError("simulated local boundary failure")
+        return original(**kwargs)
+
+    monkeypatch.setattr(
+        board_event_segmentation,
+        "segment_recording_by_aligned_board_events",
+        fail_only_second_recording,
+    )
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="user_0",
+        action="0",
+        output_root=tmp_path / "outputs",
+        alignment_offset_root=offset_root,
+        config=BoardEventSegmentationConfig(recording_error_policy="skip"),
+    )
+
+    assert not isinstance(result, BoardEventUserActionSegmentationErrorResult)
+    assert result.summary["source_recording_count"] == 3
+    assert result.summary["processed_recording_count"] == 2
+    assert result.summary["skipped_recording_count"] == 0
+    assert result.summary["segmentation_error_recording_count"] == 1
+    assert result.summary["segmentation_errors"] == [
+        {
+            "identity": {"user": "user_0", "action": "0", "dataset_id": 1},
+            "alignment_status": "SUCCESS",
+            "stage": "board_event_segmentation",
+            "error_type": "BoardEventSegmentationError",
+            "message": "simulated local boundary failure",
+        }
+    ]
+    assert sorted(result.manifest["dataset_id"].unique().tolist()) == [0, 2]
+    dependency = result.summary["alignment_outcome_dependency"]
+    assert [entry["identity"]["dataset_id"] for entry in dependency["outcomes_by_status"]["SUCCESS"]] == [0, 1, 2]
+    assert dependency["outcomes_by_status"]["SKIPPED"] == []
+    assert result.recording_error_report_path is not None
+    report = json.loads(result.recording_error_report_path.read_text(encoding="utf-8"))
+    assert report["terminal_state"] == "completed_with_recording_errors"
+    assert report["segmentation_errors"] == result.summary["segmentation_errors"]
+
+
+def test_user_action_all_local_segmentation_errors_publish_report_without_empty_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "data"
+    action_dir = data_root / "user_0" / "0"
+    action_dir.mkdir(parents=True)
+    timestamps = 1_000_000.0 + np.arange(700) * 10_000.0
+    rows = np.column_stack(
+        (
+            np.zeros((len(timestamps), 2)),
+            np.full(len(timestamps), 9.8),
+            np.zeros((len(timestamps), 3)),
+            timestamps,
+        )
+    )
+    rows.astype(np.float64).tofile(action_dir / "0_ring_0.bin")
+    (action_dir / "0_timestamp.txt").write_text(
+        "1000000 a\n3000000 b\n", encoding="utf-8"
+    )
+    offset_root = tmp_path / "offsets"
+    board_path = tmp_path / "0_board_0.gz"
+    board_path.write_bytes(b"board provenance")
+    _publish_raw_success_outcome(data_root, offset_root, board_path)
+    frames = pd.DataFrame(
+        {
+            "global_frame_index": np.arange(10),
+            "frame_timestamp_raw": np.arange(10, dtype=float),
+            "chunk_index": 0,
+            "contact_count": [0, 1, 1, 1, 0, 1, 1, 1, 0, 0],
+        }
+    )
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.load_board",
+        lambda _recording: type(
+            "Board",
+            (),
+            {
+                "frames": frames,
+                "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
+                "chunk_paths": (board_path,),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        board_event_segmentation,
+        "segment_recording_by_aligned_board_events",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            BoardEventSegmentationError("simulated local boundary failure")
+        ),
+    )
+
+    result = segment_user_action_by_aligned_board_events(
+        data_root=data_root,
+        user="user_0",
+        action="0",
+        output_root=tmp_path / "outputs",
+        alignment_offset_root=offset_root,
+        config=BoardEventSegmentationConfig(recording_error_policy="skip"),
+    )
+
+    assert isinstance(result, BoardEventUserActionSegmentationErrorResult)
+    assert result.summary["terminal_state"] == "all_recordings_error"
+    assert result.summary["processed_recording_count"] == 0
+    assert result.summary["segmentation_error_recording_count"] == 1
+    assert not (tmp_path / "outputs" / "user_0" / "action_0").exists()
+    assert result.recording_error_report_path.is_file()
+
+
 def test_user_action_mixed_success_and_skipped_excludes_recording_skip_from_outputs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1288,6 +1459,7 @@ def test_user_action_missing_board_preserves_existing_aligned_output(tmp_path: P
             action="0",
             output_root=tmp_path / "outputs",
             alignment_offset_root=offset_root,
+            config=BoardEventSegmentationConfig(recording_error_policy="skip"),
             overwrite=True,
         )
     assert sentinel.read_text(encoding="utf-8") == "preserve"
@@ -1356,6 +1528,7 @@ def test_verification_failure_preserves_existing_aligned_output(
             action="0",
             output_root=tmp_path / "outputs",
             alignment_offset_root=offset_root,
+            config=BoardEventSegmentationConfig(recording_error_policy="skip"),
             overwrite=True,
         )
     assert sentinel.read_text(encoding="utf-8") == "preserve"

@@ -111,6 +111,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--recording-error-policy",
+        choices=("error", "skip"),
+        help=(
+            "handling for an alignment-SUCCESS recording that fails a permitted "
+            "Board-segmentation step (aligned mode only; default: error)"
+        ),
+    )
+    parser.add_argument(
         "--verification-panel-seconds",
         type=float,
         help="full-recording verification panel duration (aligned mode; default: 10)",
@@ -238,6 +246,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from writingring.board_event_segmentation import (
         BoardEventSegmentationConfig,
+        BoardEventUserActionSegmentationErrorResult,
         segment_user_action_by_aligned_board_events,
     )
     from writingring.segmentation_verification import SegmentationVerificationConfig
@@ -258,6 +267,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 crossing_touch_policy=(
                     args.crossing_touch_policy or "accept_until_next_press"
                 ),
+                recording_error_policy=args.recording_error_policy or "error",
             ),
             verification_config=SegmentationVerificationConfig(
                 panel_duration_s=(
@@ -279,6 +289,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+
+    if isinstance(result, BoardEventUserActionSegmentationErrorResult):
+        print(
+            "No Board-guided segmentation package was published; all eligible "
+            "recordings reached a terminal segmentation error."
+        )
+        print(f"Recording-error report: {result.recording_error_report_path}")
+        return 0
 
     print(
         "Exported "
@@ -320,6 +338,7 @@ def _validate_mode_arguments(args: argparse.Namespace) -> None:
         args.post_lift_context_seconds,
         args.missing_event_policy,
         args.crossing_touch_policy,
+        args.recording_error_policy,
     )
     if args.boundary_mode == "label":
         if any(value is not None for value in aligned_values):
