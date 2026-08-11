@@ -42,9 +42,17 @@ conda run --no-capture-output -n writingring-viz \
 
 Padding 固定在右侧，超过 target 的 segment 不会截断或重采样，而是明确跳过且不会修改输入。所有包先完成验证，再写入临时根目录并一次性发布；失败不会留下部分输出。
 
+完成 padding 后，可运行 `scripts/reconstruct_padded_spike_accel.py` 生成与
+`*_paddedSpikeIMU.npy` 同形的 `(segment_count, target_length, 3)` 重建加速度。
+它不对 padded event matrix 做 convolution，而是按原始 offsets 独立重建每个
+保留的 source segment，再严格复用 padding manifest、`valid_lengths` 和
+`valid_mask` 进行右侧零填充；因长度超限而 `exported=false` 的 source segment
+不会出现在该派生产物中。见
+[SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md](SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md)。
+
 ## 在 Action-0 Bash pipeline 中自动执行
 
-`scripts/action0_pipeline/` 下的 8 个入口都通过共享的 `_common.bash`
+`scripts/Bash_Script/action0_pipeline/` 下的 8 个入口都通过共享的 `_common.bash`
 自动执行以下顺序：完成 variable-length segmentation，扫描整棵
 segmentation root，写出分析报告，再根据报告发布固定长度 padding 输出。
 默认配置为满足至少 99% segment coverage 的最小候选长度：
@@ -52,7 +60,7 @@ segmentation root，写出分析报告，再根据报告发布固定长度 paddi
 ```bash
 PADDING_COVERAGE=0.99 \
 PADDING_RECOMMENDATION=balanced \
-scripts/action0_pipeline/03_lowpass_label.sh
+scripts/Bash_Script/action0_pipeline/03_lowpass_label.sh
 ```
 
 可在 Bash 环境中覆盖：

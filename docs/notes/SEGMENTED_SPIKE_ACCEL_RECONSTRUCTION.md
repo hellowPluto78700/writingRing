@@ -1,15 +1,23 @@
-# Segment-wise SpikeIMU acceleration reconstruction
+# Variable-length and padded SpikeIMU acceleration reconstruction
 
-`scripts/reconstruct_segmented_spike_accel.py` derives a separate acceleration
-artifact from a completed, variable-length SpikeIMU segmentation package. It
-does not load raw Ring or Board data, alter the segmentation boundaries, or
-modify, overwrite, or append channels to `*_spikeIMU.npy`.
+Two scripts derive acceleration from completed SpikeIMU segmentation outputs:
 
-The script accepts either a dataset root containing `segmentation/` or the
-`segmentation/` directory itself. It discovers each requested user's existing
-`action_*` packages beneath that root.
+- `scripts/reconstruct_segmented_spike_accel.py` reconstructs every selected
+  variable-length package into a row-aligned `(N, 3)` array.
+- `scripts/reconstruct_padded_spike_accel.py` reconstructs the original
+  variable-length segments and then applies the existing padded package's
+  right-padding layout, producing `(S, T_pad, 3)`.
 
-## Run it
+Neither script loads raw Ring or Board data, alters segmentation boundaries, or
+modifies, overwrites, or appends channels to `*_spikeIMU.npy`.
+
+## Variable-length reconstruction
+
+`reconstruct_segmented_spike_accel.py` accepts either a dataset root containing
+`segmentation/` or the `segmentation/` directory itself. It discovers each
+requested user's existing `action_*` packages beneath that root.
+
+### Run it
 
 For selected users:
 
@@ -39,7 +47,7 @@ python scripts/reconstruct_segmented_spike_accel.py \
 reported and skipped when at least one requested user exists. For every
 selected user, all complete matching `action_*` packages are considered.
 
-## Required input package
+### Required input package
 
 Each package must contain the following files, where `<prefix>` is
 `<user>_action_<action>`:
@@ -65,7 +73,7 @@ The reconstruction frequencies require an integer number of samples per band:
 frequency. `--sampling-rate-hz` changes that reconstruction rate only after
 this check; it does not resample the source artifact.
 
-## Reconstruction semantics
+### Reconstruction semantics
 
 Only `spikeIMU[:, 0:15]` is used. Those event channels are interpreted as
 three axes with five frequency bands per axis, in axis-major,
@@ -101,7 +109,7 @@ recovered by this script. The reconstruction implementation was compared
 value-for-value with the notebook method on the supplied test data
 (`max_abs_diff = 0.0`).
 
-## Outputs and provenance
+### Outputs and provenance
 
 The script publishes three derived files beside the input package:
 
@@ -147,3 +155,83 @@ fails, the script removes its reconstruction files instead of retaining a
 partial set. A package-level error is reported while the script continues with
 other discovered packages; the final exit status is nonzero if any package
 failed.
+
+## Padded reconstruction
+
+`reconstruct_padded_spike_accel.py` accepts the dataset combination root, not
+an individual user or `segmentation/` directory. It automatically scans every
+complete `user_*/action_*` variable-length package under:
+
+```text
+<dataset-root>/segmentation/
+```
+
+and requires its corresponding package under:
+
+```text
+<dataset-root>/segmentation_padded/
+```
+
+Run it after the repository padding pipeline has completed:
+
+```bash
+python scripts/reconstruct_padded_spike_accel.py \
+  outputs/action0_rectified/low-pass/aligned-board-events
+```
+
+`--sampling-rate-hz` and `--output-dtype float32|float64` have the same
+meaning as for variable-length reconstruction. The padded script has no user
+filter: every discoverable complete source package is attempted. It continues
+after a package-level error, then returns a nonzero status if any package
+failed.
+
+The convenience wrapper
+`scripts/Bash_Script/Encoder_Evaluation_related/reconstruct_spike_sequence.bash`
+runs the same command for
+`outputs/action0_rectified/low-pass/aligned-board-events` with `--overwrite`.
+It therefore replaces every existing padded reconstruction in that root.
+
+### Matching and boundary contract
+
+For each user/action, the script requires the variable-length SpikeIMU,
+labels, offsets, lengths, and segmentation summary, plus the matching padded
+SpikeIMU, labels, valid lengths, valid mask, padding manifest, and padding
+summary. It validates that the padded package is canonical right padding with
+`overflow_policy=skip`.
+
+The reconstruction itself always reads the original unpadded
+`spikeIMU[start:stop, 0:15]` selected by the authoritative source offsets. The
+padding manifest maps the source `segment_index` to each retained
+`output_segment_index`; `valid_lengths`, labels, and the boolean `valid_mask`
+must agree with that mapping. The output has the same segment and time axes as
+`*_paddedSpikeIMU.npy`:
+
+```text
+reconstructed[output_segment_index, :original_length, :] = segment reconstruction
+reconstructed[output_segment_index, original_length:, :] = 0.0
+```
+
+Consequently, convolution neither crosses a segment boundary nor sees padded
+samples. Source segments omitted by the padding manifest, including overlong
+segments under its skip policy, remain absent from the padded reconstruction.
+
+### Outputs and provenance
+
+The script writes these files next to the matching padded SpikeIMU package:
+
+```text
+<prefix>_padded_reconstructed_accel_m_s2.npy
+<prefix>_padded_reconstructed_accel_metadata.json
+```
+
+The array has shape `(S, T_pad, 3)`, where its three channels are reconstructed
+x/y/z acceleration in m/s². Its padded region is exactly zero and its segment
+axis, labels, valid lengths, and valid mask align with
+`*_paddedSpikeIMU.npy`; it is a separate artifact, not extra SpikeIMU
+channels.
+
+Metadata records the Custom Wavelet settings, source and padded package
+SHA-256 digests, target length, right-padding semantics, zero padding value,
+and the fact that reconstruction occurs before padding. If either padded
+reconstruction output already exists, the script fails unless `--overwrite` is
+given; unlike the variable-length tool, it does not reuse existing output.

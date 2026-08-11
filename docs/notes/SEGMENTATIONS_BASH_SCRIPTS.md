@@ -1,7 +1,7 @@
 # Action-0 segmentation Bash pipelines
 
 `docs/plans/Segmentations_Bash_Scripts_Plan.md` is implemented by the eight
-entry points under `scripts/action0_pipeline/`; `_common.bash` is their shared
+entry points under `scripts/Bash_Script/action0_pipeline/`; `_common.bash` is their shared
 orchestration helper:
 
 | Script | Gravity method | Boundary mode |
