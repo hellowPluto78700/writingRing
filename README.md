@@ -29,10 +29,14 @@ Ring recording (`*_ring_0.bin`)
        ├── optional row-aligned acceleration reconstruction `(N, 3)`
        └── segment-length analysis and right-padding
              └── optional padded acceleration reconstruction `(S, T_pad, 3)`
-             ├── optional Experiment A: raw-acceleration CNN representation
-             │   evaluation (SpikeIMU channels `15:18`)
-             └── optional Experiment B: reconstructed acceleration through the
-                 frozen Experiment A CNN
+             └── optional acceleration-CNN representation evaluation
+                 ├── Experiment A: raw-acceleration baseline
+                 │   (SpikeIMU channels `15:18`)
+                 ├── Experiment B: reconstructed acceleration through the
+                 │   frozen raw-trained CNN
+                 ├── Experiment C: CNN trained and tested on reconstruction
+                 └── Experiment D2: mixed raw/reconstruction training with
+                     separate raw and reconstruction test evaluations
   → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
        ├── CLI baseline with the full variant label mapping
        └── notebook common-label subset experiment
@@ -41,6 +45,14 @@ Ring recording (`*_ring_0.bin`)
 The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
 `python -m snn.train_action0` is a separate optional training entry point that
 consumes those padded packages.
+
+The reusable `snn/accel_reconstruction_eval/` modules provide the shared
+configuration, padded-dataset validation and loading, user-disjoint splits,
+normalization, CNN training, embedding extraction, representation metrics,
+paired raw/reconstruction analysis, and checkpoint/result serialization used
+by the acceleration experiments. Notebooks and scripts should compose these
+modules and focus on experiment configuration, presentation, and
+interpretation.
 
 ## Setup
 
@@ -52,7 +64,12 @@ python -m pip install -e ".[test]"
 ```
 
 The optional Action-0 training dependencies are available through the project
-extras documented in `pyproject.toml`.
+extras documented in `pyproject.toml`. For the acceleration-CNN helpers and
+notebooks, install the relevant optional dependencies as needed:
+
+```bash
+python -m pip install -e ".[snn,notebook]"
+```
 
 ## Entry points
 
@@ -90,6 +107,30 @@ notebooks/experiment_B_reconstruction_frozen_cnn.ipynb
 
 Use `--help` on an entry point for its required inputs and output controls.
 
+The reusable acceleration-CNN package is imported by notebooks or scripts, for
+example:
+
+```python
+from snn.accel_reconstruction_eval.config import experiment_c_config
+
+config = experiment_c_config(output_dir="outputs/experiments/C_reconstruction")
+config.validate()
+```
+
+The helper package defines the following common protocols:
+
+| Experiment | Train / reference | Validation | Test query | Normalization |
+| --- | --- | --- | --- | --- |
+| A | raw | raw | raw | raw train |
+| B | frozen raw-trained model | raw reference | reconstruction | baseline checkpoint |
+| C | reconstruction | reconstruction | reconstruction | reconstruction train |
+| D2 | mixed raw + reconstruction | mixed | raw and reconstruction separately | mixed train |
+
+For B, the raw-trained checkpoint, its user split, class mapping, and
+normalization are authoritative. The same metric and artifact conventions are
+used across the protocols; D2 reuses one trained checkpoint for both test
+domains.
+
 ## Documentation
 
 - [Source format and terminology](docs/notes/DATA_FORMAT.md)
@@ -102,6 +143,7 @@ Use `--help` on an entry point for its required inputs and output controls.
 - [Action-0 training and notebook subset experiment](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
 - [Experiment A: raw-acceleration CNN representation evaluation](docs/notes/ACCELERATION_CNN_REPRESENTATION_EVALUATION.md)
 - [Experiment B: reconstructed acceleration with the frozen Experiment A CNN](docs/notes/RECONSTRUCTION_FROZEN_CNN_EVALUATION.md)
+- [Reusable acceleration-reconstruction evaluation helper modules](docs/notes/acceleration_reconstruction_helper_modules_guide.md)
 
 `vendor/WritingRing/` contains historical/upstream acquisition and plotting
 utilities. The repository's current implementation and entry points are the
