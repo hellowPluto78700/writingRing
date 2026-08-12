@@ -7,11 +7,12 @@ DATA_ROOT="data"
 ACTION=0
 POST_ENCODE_TRANSFORM="none"  #none, AbsRectify
 OUTPUT_BASE="outputs/action0_rectified"
-#PIPELINE_MODE = "continue"  # "continue" or "overwrite"
+PIPELINE_MODE="overwrite"  # "continue" or "overwrite"
 
 export DATA_ROOT
 export ACTION
 export POST_ENCODE_TRANSFORM
+export PIPELINE_MODE
 
 # shellcheck source=_common.bash
 source "$SCRIPT_DIR/_common.bash"

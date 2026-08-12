@@ -46,6 +46,17 @@ The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
 `python -m snn.train_action0` is a separate optional training entry point that
 consumes those padded packages.
 
+The wrappers under `scripts/Bash_Script/action0_pipeline/` resolve their
+relative data, configuration, and output paths from the repository root, so
+the Action-0 commands can be launched using their repository path. The
+low-pass aligned-Board wrapper currently uses `data` as its data root, action
+`0`, `outputs/action0_rectified` as its output root, and
+`PIPELINE_MODE=overwrite` (a full rebuild). Change the assignments in
+`04_lowpass_aligned_board.sh` to use another data/output root or
+`PIPELINE_MODE=continue` for resume behavior. The input layout must contain
+primary recordings below `data/user_*/0/*_ring_0.bin`; aligned-Board mode also
+requires matching Board chunks for each recording.
+
 The reusable `snn/accel_reconstruction_eval/` modules provide the shared
 configuration, padded-dataset validation and loading, user-disjoint splits,
 normalization, CNN training, embedding extraction, representation metrics,
@@ -98,6 +109,10 @@ scripts/reconstruct_padded_spike_accel.py
 scripts/analyze_segment_lengths.py
 scripts/pad_segmented_imu.py
 scripts/Bash_Script/action0_pipeline/*.sh
+scripts/plot_board_segment_trajectories.py
+scripts/plot_board_trajectory_window.py
+scripts/Bash_Script/branch_board_trajectory_plot.bash
+scripts/Bash_Script/single_board_trajectory_plot.bash
 scripts/Bash_Script/Encoder_Evaluation_related/reconstruct_spike_sequence.bash
 python -m snn.train_action0
 notebooks/action0_snn_training.ipynb
@@ -106,6 +121,40 @@ notebooks/experiment_B_reconstruction_frozen_cnn.ipynb
 ```
 
 Use `--help` on an entry point for its required inputs and output controls.
+
+For example, run the current low-pass aligned-Board pipeline from the
+repository root with:
+
+```bash
+bash scripts/Bash_Script/action0_pipeline/04_lowpass_aligned_board.sh
+```
+
+Board trajectory visualization is available at two levels. To plot one PNG
+for every exported Board-assisted segment, use the published segmentation
+manifest (the script does not re-segment the recording):
+
+```bash
+python scripts/plot_board_segment_trajectories.py \
+  --data-root data --user user_0 --recording 0 --overwrite
+```
+
+Omit `--recording` to process every discovered recording for the selected
+user/action. By default, these images are written under
+`outputs/plotting_verification/<user>/recording_<id>/` and the script reads
+the low-pass aligned-Board segmentation under
+`outputs/action0_rectified/low-pass/aligned-board-events/segmentation`.
+
+To inspect a selected Board trajectory window directly:
+
+```bash
+python scripts/plot_board_trajectory_window.py \
+  --data-root data --user user_0 --recording 2 \
+  --start-s 7 --end-s 9 \
+  --output outputs/plotting_verification/user0_record2_7_9s.png
+```
+
+The window is `[start, end)` seconds from the Ring start by default. Use
+`--time-origin board` to measure from the first loaded Board frame instead.
 
 The reusable acceleration-CNN package is imported by notebooks or scripts, for
 example:

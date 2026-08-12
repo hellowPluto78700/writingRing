@@ -18,7 +18,10 @@
 set -Eeuo pipefail
 
 _PIPELINE_COMMON_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PIPELINE_PROJECT_ROOT="$(cd -- "${_PIPELINE_COMMON_DIR}/../.." && pwd)"
+# This repository keeps the wrappers under scripts/Bash_Script/action0_pipeline.
+# The common helper therefore has to walk three levels up to reach the project
+# root (not two, which would resolve relative paths under scripts/).
+PIPELINE_PROJECT_ROOT="$(cd -- "${_PIPELINE_COMMON_DIR}/../../.." && pwd)"
 
 declare -a RING_FILES=()
 declare -a RECORD_USERS=()
