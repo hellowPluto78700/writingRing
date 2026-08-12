@@ -1,10 +1,11 @@
-# Acceleration-CNN representation evaluation
+# Experiment A: raw-acceleration CNN representation evaluation
 
-`scripts/acceleration_cnn_representation_evaluation.ipynb` is an independent
-interactive experiment for acceleration-only classification and representation
-evaluation. It reads completed padded SpikeIMU packages, trains a 1-D CNN on
-the producer's three acceleration channels, and evaluates the learned
-256-dimensional representation with held-out users.
+`notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb` is
+an independent interactive experiment for raw-acceleration-only classification
+and representation evaluation. It reads completed padded SpikeIMU packages,
+trains a 1-D CNN on the producer's three acceleration channels, and evaluates
+the learned 256-dimensional representation with held-out users. This is the
+baseline checkpoint producer for Experiment B.
 
 It is not part of the Action-0 SynNet CLI baseline and does not change that
 training pipeline. It supports every complete `user_*/action_*` package found
@@ -40,6 +41,12 @@ acceleration, whereas this experiment uses the acceleration already present in
 the final six SpikeIMU channels. Comparing those two representations requires
 a separately configured experiment; neither is silently substituted for the
 other.
+
+Experiment B is that separate experiment: it loads this notebook's saved
+checkpoint and evaluates reconstructed held-out test inputs without retraining
+the CNN or re-estimating its normalization. Its complete protocol is documented
+in [Experiment B: reconstructed acceleration with the frozen Experiment A
+CNN](RECONSTRUCTION_FROZEN_CNN_EVALUATION.md).
 
 ## Padded-package contract
 
@@ -131,7 +138,12 @@ the output directory first. Preserve or redirect `OUTPUT_DIR` before running
 experiments that need separate provenance, and remove obsolete optional files
 yourself if a clean artifact directory is required.
 
-## Relationship to Action-0 SynNet training
+## Relationship to Experiment B and Action-0 SynNet training
+
+Experiment B consumes the `best_acceleration_cnn.pt` produced here, along with
+the checkpoint's class mapping, user split, and raw-train normalization. Run
+this notebook with `SAVE_ARTIFACTS=True` before Experiment B. Experiment B does
+not replace this raw-input baseline or train a CNN on reconstructed data.
 
 `python -m snn.train_action0` and `notebooks/action0_snn_training.ipynb` are
 SynNet experiments over SpikeIMU event channels `0:15`; their producer and

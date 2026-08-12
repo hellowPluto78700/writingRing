@@ -7,11 +7,17 @@ HAR dataset/transforms, Board-event targets, Rockpool deployment model, or a
 random segment split.
 
 The separate
-[`acceleration_cnn_representation_evaluation.ipynb`](../../scripts/acceleration_cnn_representation_evaluation.ipynb)
-notebook is not a SynNet variant: it uses the producer acceleration channels
-`15:18` and evaluates a CNN representation across all discovered padded
-packages. Its contract and outputs are documented in
-[Acceleration-CNN representation evaluation](ACCELERATION_CNN_REPRESENTATION_EVALUATION.md).
+[`experiment_A_acceleration_cnn_representation_evaluation.ipynb`](../../notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb)
+notebook is not a SynNet variant: it uses the producer's raw acceleration
+channels `15:18` and evaluates a CNN representation across all discovered
+padded packages. Its contract and outputs are documented in [Experiment A:
+raw-acceleration CNN representation evaluation](ACCELERATION_CNN_REPRESENTATION_EVALUATION.md).
+The separate
+[`experiment_B_reconstruction_frozen_cnn.ipynb`](../../notebooks/experiment_B_reconstruction_frozen_cnn.ipynb)
+evaluates padded reconstructed acceleration with the frozen Experiment A CNN;
+it is likewise independent of SynNet. See [Experiment B: reconstructed
+acceleration with the frozen Experiment A
+CNN](RECONSTRUCTION_FROZEN_CNN_EVALUATION.md).
 
 ## Producer contract
 

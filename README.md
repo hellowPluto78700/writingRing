@@ -29,8 +29,10 @@ Ring recording (`*_ring_0.bin`)
        ├── optional row-aligned acceleration reconstruction `(N, 3)`
        └── segment-length analysis and right-padding
              └── optional padded acceleration reconstruction `(S, T_pad, 3)`
-             └── optional acceleration-CNN representation evaluation
-                 (SpikeIMU channels `15:18`)
+             ├── optional Experiment A: raw-acceleration CNN representation
+             │   evaluation (SpikeIMU channels `15:18`)
+             └── optional Experiment B: reconstructed acceleration through the
+                 frozen Experiment A CNN
   → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
        ├── CLI baseline with the full variant label mapping
        └── notebook common-label subset experiment
@@ -82,7 +84,8 @@ scripts/Bash_Script/action0_pipeline/*.sh
 scripts/Bash_Script/Encoder_Evaluation_related/reconstruct_spike_sequence.bash
 python -m snn.train_action0
 notebooks/action0_snn_training.ipynb
-scripts/acceleration_cnn_representation_evaluation.ipynb
+notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb
+notebooks/experiment_B_reconstruction_frozen_cnn.ipynb
 ```
 
 Use `--help` on an entry point for its required inputs and output controls.
@@ -97,7 +100,8 @@ Use `--help` on an entry point for its required inputs and output controls.
 - [Variable-length and padded SpikeIMU acceleration reconstruction](docs/notes/SEGMENTED_SPIKE_ACCEL_RECONSTRUCTION.md)
 - [Segment padding](docs/notes/SEGMENT_PADDING.md)
 - [Action-0 training and notebook subset experiment](docs/notes/ACTION0_SNN_TRAINING.md) and [its shell wrappers](docs/notes/SEGMENTATIONS_BASH_SCRIPTS.md)
-- [Acceleration-CNN representation evaluation](docs/notes/ACCELERATION_CNN_REPRESENTATION_EVALUATION.md)
+- [Experiment A: raw-acceleration CNN representation evaluation](docs/notes/ACCELERATION_CNN_REPRESENTATION_EVALUATION.md)
+- [Experiment B: reconstructed acceleration with the frozen Experiment A CNN](docs/notes/RECONSTRUCTION_FROZEN_CNN_EVALUATION.md)
 
 `vendor/WritingRing/` contains historical/upstream acquisition and plotting
 utilities. The repository's current implementation and entry points are the
