@@ -1,0 +1,208 @@
+{
+  "repository_root": "/home/ted/project/writingring-viz",
+  "padded_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+  "producer_metadata": {
+    "input_kind": "spike-imu",
+    "feature_schema": "signed_wavelet_events_plus_imu_v1",
+    "channel_count": 21,
+    "target_length": 600,
+    "sampling_rate_hz": 200.0,
+    "padding_side": "right",
+    "processed_user_action_count": 21,
+    "source_segment_count": 1931,
+    "segment_count": 1924,
+    "skipped_segment_count": 7,
+    "board_assisted_package_count": 21,
+    "label_only_package_count": 0,
+    "failed_package_count": 0
+  },
+  "package_count": 21,
+  "segment_count": 1924,
+  "class_to_idx": {
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "F": 5,
+    "G": 6,
+    "H": 7,
+    "I": 8,
+    "J": 9,
+    "K": 10,
+    "L": 11,
+    "M": 12,
+    "N": 13,
+    "O": 14,
+    "P": 15,
+    "Q": 16,
+    "R": 17,
+    "S": 18,
+    "T": 19,
+    "U": 20,
+    "V": 21,
+    "W": 22,
+    "X": 23,
+    "Y": 24,
+    "Z": 25,
+    "a": 26,
+    "b": 27,
+    "c": 28,
+    "d": 29,
+    "e": 30,
+    "f": 31,
+    "g": 32,
+    "h": 33,
+    "i": 34,
+    "j": 35,
+    "k": 36,
+    "l": 37,
+    "m": 38,
+    "n": 39,
+    "o": 40,
+    "p": 41,
+    "q": 42,
+    "r": 43,
+    "s": 44,
+    "t": 45,
+    "u": 46,
+    "v": 47,
+    "w": 48,
+    "x": 49,
+    "y": 50,
+    "z": 51
+  },
+  "train_users": [
+    "user_0",
+    "user_1",
+    "user_3",
+    "user_4",
+    "user_5",
+    "user_6",
+    "user_7",
+    "user_9",
+    "user_10",
+    "user_11",
+    "user_12",
+    "user_15",
+    "user_17",
+    "user_18",
+    "user_19"
+  ],
+  "val_users": [
+    "user_8",
+    "user_14",
+    "user_20"
+  ],
+  "test_users": [
+    "user_2",
+    "user_13",
+    "user_16"
+  ],
+  "normalization": {
+    "source": "train users and valid_mask=True samples only",
+    "valid_time_points": 398318,
+    "mean": [
+      -0.7385649650412771,
+      0.18425464072946857,
+      0.22831727338011767
+    ],
+    "std": [
+      1.972248518260807,
+      1.6996267678156616,
+      1.6562014619881829
+    ]
+  },
+  "training": {
+    "random_seed": 12345,
+    "batch_size": 128,
+    "num_epochs_configured": 30,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.0,
+    "best_epoch": 27,
+    "best_val_balanced_accuracy": 0.28589743589743594,
+    "device": "cuda"
+  },
+  "model": {
+    "input_channels": 3,
+    "blocks": [
+      {
+        "out_channels": 64,
+        "kernel_size": 7,
+        "stride": 1,
+        "padding": 3
+      },
+      {
+        "out_channels": 128,
+        "kernel_size": 5,
+        "stride": 2,
+        "padding": 2
+      },
+      {
+        "out_channels": 256,
+        "kernel_size": 5,
+        "stride": 2,
+        "padding": 2
+      },
+      {
+        "out_channels": 256,
+        "kernel_size": 3,
+        "stride": 1,
+        "padding": 1
+      }
+    ],
+    "normalization": "BatchNorm1d",
+    "activation": "ReLU",
+    "pooling": "valid-length-propagated masked global average pooling",
+    "embedding_dim": 256,
+    "num_classes": 52
+  },
+  "retrieval_protocol": {
+    "query": "test users",
+    "gallery": "train users",
+    "knn_k_selected_on": "validation users against train gallery",
+    "selected_knn_k": 10,
+    "same_label_k_values": [
+      1,
+      3,
+      5,
+      10,
+      20,
+      50
+    ]
+  },
+  "primary_results": {
+    "model": "AccelerationCNN",
+    "best_epoch": 27,
+    "CNN_test_balanced_accuracy": 0.2842948717948718,
+    "CNN_test_macro_f1": 0.25966433696366803,
+    "kNN_selected_K": 10,
+    "kNN_test_balanced_accuracy": 0.2782051282051282,
+    "retrieval_macro_mAP": 0.18668810890209125,
+    "retrieval_micro_mAP": 0.18740201553146746,
+    "D_intra_macro": 0.08397339731009111,
+    "D_inter_centroids": 0.10430070757865906,
+    "D_inter_over_D_intra": 1.2420684516581197,
+    "SameLabel_macro_at_1": 0.2496794871794872,
+    "SameLabel_micro_at_1": 0.2536231884057971,
+    "SameLabel_macro_at_3": 0.25608974358974357,
+    "SameLabel_micro_at_3": 0.25603864734299514,
+    "SameLabel_macro_at_5": 0.23358974358974363,
+    "SameLabel_micro_at_5": 0.23478260869565215,
+    "SameLabel_macro_at_10": 0.21753205128205128,
+    "SameLabel_micro_at_10": 0.21920289855072464,
+    "SameLabel_macro_at_20": 0.1982692307692307,
+    "SameLabel_micro_at_20": 0.1989130434782609,
+    "SameLabel_macro_at_50": 0.1562051282051282,
+    "SameLabel_micro_at_50": 0.15731884057971016
+  },
+  "complementary_results": {
+    "model": "AccelerationCNN",
+    "linear_probe_test_balanced_accuracy": 0.22499999999999998,
+    "prototype_test_balanced_accuracy": 0.2951923076923077,
+    "NMI_arithmetic": 0.6444703209102342,
+    "ARI": 0.10791432941529318,
+    "silhouette_macro": -0.1510865443575748,
+    "silhouette_micro": -0.14840775191035185
+  }
+}

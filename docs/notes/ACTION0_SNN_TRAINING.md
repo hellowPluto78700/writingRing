@@ -6,6 +6,13 @@ and channels `0:15` from padded SpikeIMU input. It does not reuse the legacy
 HAR dataset/transforms, Board-event targets, Rockpool deployment model, or a
 random segment split.
 
+The separate
+[`acceleration_cnn_representation_evaluation.ipynb`](../../scripts/acceleration_cnn_representation_evaluation.ipynb)
+notebook is not a SynNet variant: it uses the producer acceleration channels
+`15:18` and evaluates a CNN representation across all discovered padded
+packages. Its contract and outputs are documented in
+[Acceleration-CNN representation evaluation](ACCELERATION_CNN_REPRESENTATION_EVALUATION.md).
+
 ## Producer contract
 
 The Action0 producer has two distinct representations:
