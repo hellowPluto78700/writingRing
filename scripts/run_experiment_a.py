@@ -49,6 +49,7 @@ from snn.accel_reconstruction_eval import (
     save_provenance,
     save_representation_evaluation,
 )
+from snn.accel_reconstruction_eval.datasets import natural_key, normalize_user_name
 
 
 DEFAULT_DATASET_ROOT = Path(
@@ -72,6 +73,26 @@ class ExperimentARunResult:
     label_split_counts: pd.DataFrame
     normalization: NormalizationStats
     artifact_paths: Mapping[str, Path]
+
+
+def _build_cohort_payload(
+    sample_manifest: pd.DataFrame,
+    *,
+    excluded_users: tuple[str, ...],
+) -> dict[str, list[str]]:
+    """Build the stable source-cohort audit fields for Experiment A."""
+    excluded_set = set(excluded_users)
+    source_users = {
+        normalize_user_name(value) for value in sample_manifest["user"]
+    }
+    eligible_users = sorted(
+        source_users.difference(excluded_set),
+        key=natural_key,
+    )
+    return {
+        "excluded_users": list(excluded_users),
+        "eligible_users": eligible_users,
+    }
 
 
 def _set_global_seed(seed: int) -> None:
@@ -116,6 +137,7 @@ def _prepare_split(
         explicit_train_users=split_config.explicit_train_users,
         explicit_val_users=split_config.explicit_val_users,
         explicit_test_users=split_config.explicit_test_users,
+        excluded_users=split_config.excluded_users,
         require_all_users_assigned=split_config.require_all_users_assigned,
         require_all_labels_in_all_splits=(
             split_config.require_all_labels_in_all_splits
@@ -171,6 +193,11 @@ def run_experiment_a(
         root,
         repository_root=repository_root,
         require_reconstruction=False,
+    )
+    excluded_users = tuple(config.split.excluded_users)
+    cohort_payload = _build_cohort_payload(
+        data.sample_manifest,
+        excluded_users=excluded_users,
     )
     split = _prepare_split(
         sample_manifest=data.sample_manifest,
@@ -283,6 +310,7 @@ def run_experiment_a(
         extra={
             "experiment_protocol": "raw_train_to_raw_test",
             "baseline_role": "authoritative_experiment_a_reference",
+            **cohort_payload,
         },
     )
 
@@ -355,12 +383,19 @@ def run_experiment_a(
             "val_users": split.val_users,
             "test_users": split.test_users,
             "class_to_idx": split.class_to_idx,
+            **cohort_payload,
             "best_epoch": best_epoch,
             "best_val_balanced_accuracy": best_val_ba,
             "producer_metadata": data.producer_metadata.to_dict(),
         },
     )
     artifact_paths["provenance"] = provenance_path
+
+    cohort_path = save_provenance(
+        output_dir / "cohort.json",
+        cohort_payload,
+    )
+    artifact_paths["cohort"] = cohort_path
 
     return ExperimentARunResult(
         output_dir=output_dir,

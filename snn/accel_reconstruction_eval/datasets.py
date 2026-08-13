@@ -769,6 +769,7 @@ def prepare_user_disjoint_splits(
     explicit_train_users: Sequence[object] | None = None,
     explicit_val_users: Sequence[object] | None = None,
     explicit_test_users: Sequence[object] | None = None,
+    excluded_users: Sequence[object] = (),
     require_all_users_assigned: bool = True,
     require_all_labels_in_all_splits: bool = True,
     class_to_idx: dict[str, int] | None = None,
@@ -779,18 +780,36 @@ def prepare_user_disjoint_splits(
     if missing:
         raise ValueError(f"sample_manifest is missing columns: {sorted(missing)}")
 
+    normalized_excluded_users = normalize_user_list(excluded_users)
+    excluded_user_set = set(normalized_excluded_users)
     explicit = (explicit_train_users, explicit_val_users, explicit_test_users)
-    if all(value is None for value in explicit):
+    normalized_explicit = tuple(
+        None if value is None else normalize_user_list(value or []) for value in explicit
+    )
+    for split_name, users in zip(("train", "val", "test"), normalized_explicit):
+        if users is None:
+            continue
+        overlap = sorted(excluded_user_set.intersection(users), key=natural_key)
+        if overlap:
+            raise ValueError(
+                f"Explicit {split_name} users include excluded users: {overlap}"
+            )
+
+    if excluded_user_set:
+        normalized_manifest_users = manifest["user"].astype(str).map(normalize_user_name)
+        manifest = manifest.loc[
+            ~normalized_manifest_users.isin(excluded_user_set)
+        ].reset_index(drop=True)
+
+    if all(value is None for value in normalized_explicit):
         train_users, val_users, test_users = automatic_user_split(
             manifest["user"].astype(str).unique().tolist(),
             train_fraction=train_fraction,
             val_fraction=val_fraction,
             seed=seed,
         )
-    elif all(value is not None for value in explicit):
-        train_users = normalize_user_list(explicit_train_users or [])
-        val_users = normalize_user_list(explicit_val_users or [])
-        test_users = normalize_user_list(explicit_test_users or [])
+    elif all(value is not None for value in normalized_explicit):
+        train_users, val_users, test_users = normalized_explicit
     else:
         raise ValueError(
             "Set all three explicit train/val/test user lists, or leave all three None"
@@ -857,6 +876,13 @@ def prepare_user_disjoint_splits(
             "At least one label is absent from a split:\n"
             + missing_table.to_string()
         )
+
+    assigned_user_names = set(train_users) | set(val_users) | set(test_users)
+    if excluded_user_set.intersection(assigned_user_names):
+        raise AssertionError("Excluded users must not be assigned to a split")
+    eligible_manifest_users = manifest["user"].astype(str).map(normalize_user_name)
+    if eligible_manifest_users.isin(excluded_user_set).any():
+        raise AssertionError("Excluded users must not remain in the sample manifest")
 
     return SplitAssignment(
         sample_manifest=manifest,

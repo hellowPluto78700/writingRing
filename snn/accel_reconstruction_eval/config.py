@@ -18,13 +18,16 @@ mixed:
 Experiment presets match the A/B/C/D terminology used in the notebooks.
 """
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
 try:
+    from .datasets import normalize_user_name
     from .evaluation import RepresentationEvaluationConfig
 except ImportError:  # direct-module use in notebooks/tests
+    from datasets import normalize_user_name
     from evaluation import RepresentationEvaluationConfig
 
 
@@ -56,6 +59,25 @@ class UserSplitConfig:
     explicit_test_users: tuple[str, ...] | None = None
     require_all_users_assigned: bool = True
     require_all_labels_in_all_splits: bool = True
+    excluded_users: Sequence[str] = ()
+
+    def __post_init__(self) -> None:
+        if isinstance(self.excluded_users, (str, bytes, bytearray)) or not isinstance(
+            self.excluded_users, Sequence
+        ):
+            raise TypeError(
+                "excluded_users must be a non-string sequence of user names"
+            )
+
+        normalized = tuple(
+            normalize_user_name(value) for value in self.excluded_users
+        )
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(
+                "excluded_users contains duplicate canonical user names: "
+                f"{normalized}"
+            )
+        object.__setattr__(self, "excluded_users", normalized)
 
     def validate(self) -> None:
         if self.train_fraction <= 0 or self.val_fraction <= 0:

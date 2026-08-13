@@ -22,7 +22,10 @@ The Experiment A checkpoint is never used for model weights or normalization.
 """
 
 import argparse
+import hashlib
 import random
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Mapping
@@ -35,6 +38,7 @@ from snn.accel_reconstruction_eval import (
     ExperimentConfig,
     MaskAwareAccelerationCNN,
     NormalizationStats,
+    SplitAssignment,
     build_adam_optimizer,
     build_cross_entropy,
     build_experiment_checkpoint,
@@ -55,6 +59,11 @@ from snn.accel_reconstruction_eval import (
     save_paired_preservation,
     save_provenance,
     save_representation_evaluation,
+)
+from snn.accel_reconstruction_eval.datasets import (
+    natural_key,
+    normalize_user_list,
+    normalize_user_name,
 )
 
 
@@ -89,6 +98,20 @@ class ExperimentDRunResult:
     artifact_paths: Mapping[str, Path]
 
 
+@dataclass(frozen=True)
+class _DCohortContract:
+    """Validated cohort authority used by Experiment D."""
+
+    excluded_users: tuple[str, ...]
+    eligible_users: tuple[str, ...]
+    train_users: tuple[str, ...]
+    val_users: tuple[str, ...]
+    test_users: tuple[str, ...]
+    class_to_idx: dict[str, int]
+    require_all_users_assigned: bool
+    source: str
+
+
 def _set_global_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -104,6 +127,17 @@ def _resolve_path(path: str | Path, repository_root: Path) -> Path:
     return value.resolve()
 
 
+def _sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _select_device(config: ExperimentConfig, requested: str | None) -> torch.device:
     if requested is not None:
         device = torch.device(requested)
@@ -117,26 +151,275 @@ def _select_device(config: ExperimentConfig, requested: str | None) -> torch.dev
     )
 
 
+def _canonical_checkpoint_user_list(
+    value: object,
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    if isinstance(value, (str, bytes, bytearray)) or not isinstance(
+        value, SequenceABC
+    ):
+        raise ValueError(
+            f"Checkpoint {field_name} must be a non-string user sequence"
+        )
+    if any(item is None for item in value):
+        raise ValueError(f"Checkpoint {field_name} contains a null user")
+    try:
+        normalized = normalize_user_list(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid checkpoint {field_name}: {exc}") from exc
+    return tuple(normalized)
+
+
+def _checkpoint_user_field(
+    checkpoint: Mapping[str, object],
+    field_name: str,
+) -> tuple[str, ...]:
+    if field_name not in checkpoint:
+        raise ValueError(f"Checkpoint is missing {field_name}")
+    return _canonical_checkpoint_user_list(
+        checkpoint[field_name],
+        field_name=field_name,
+    )
+
+
+def _checkpoint_class_mapping(value: object) -> dict[str, int]:
+    if not isinstance(value, MappingABC):
+        raise ValueError("Checkpoint class_to_idx must be a mapping")
+    try:
+        class_to_idx = {str(label): int(index) for label, index in value.items()}
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Checkpoint class_to_idx must map labels to integers") from exc
+    if not class_to_idx:
+        raise ValueError("Checkpoint class_to_idx must not be empty")
+    if sorted(class_to_idx.values()) != list(range(len(class_to_idx))):
+        raise ValueError("Checkpoint class_to_idx values must be contiguous 0..C-1")
+    return class_to_idx
+
+
+def _source_user_cohort(sample_manifest: pd.DataFrame) -> set[str]:
+    if "user" not in sample_manifest.columns:
+        raise ValueError("sample_manifest is missing the user column")
+    return {normalize_user_name(value) for value in sample_manifest["user"]}
+
+
+def _checkpoint_assignment_policy(
+    checkpoint: Mapping[str, object],
+    *,
+    modern: bool,
+) -> bool:
+    experiment_config = checkpoint.get("experiment_config")
+    if not isinstance(experiment_config, MappingABC):
+        if modern:
+            raise ValueError(
+                "Modern checkpoint must save experiment_config.split"
+            )
+        return True
+
+    split_config = experiment_config.get("split")
+    if not isinstance(split_config, MappingABC):
+        if modern:
+            raise ValueError(
+                "Modern checkpoint must save experiment_config.split"
+            )
+        return True
+    if "require_all_users_assigned" not in split_config:
+        if modern:
+            raise ValueError(
+                "Modern checkpoint must save split.require_all_users_assigned"
+            )
+        return True
+    value = split_config["require_all_users_assigned"]
+    if not isinstance(value, bool):
+        raise ValueError(
+            "Checkpoint split.require_all_users_assigned must be a boolean"
+        )
+    return value
+
+
+def _validate_local_cohort_config(config: ExperimentConfig) -> None:
+    split_config = config.split
+    if split_config.excluded_users:
+        raise ValueError(
+            "Experiment D local excluded_users must be empty; "
+            "the Experiment A checkpoint is authoritative"
+        )
+    if any(
+        value is not None
+        for value in (
+            split_config.explicit_train_users,
+            split_config.explicit_val_users,
+            split_config.explicit_test_users,
+        )
+    ):
+        raise ValueError(
+            "Experiment D local explicit user lists must all be None; "
+            "the Experiment A checkpoint is authoritative"
+        )
+
+
+def _resolve_cohort_contract(
+    sample_manifest: pd.DataFrame,
+    checkpoint: Mapping[str, object],
+) -> _DCohortContract:
+    cohort_fields = (
+        "excluded_users" in checkpoint,
+        "eligible_users" in checkpoint,
+    )
+    if any(cohort_fields) and not all(cohort_fields):
+        raise ValueError(
+            "Checkpoint cohort contract must contain both excluded_users and "
+            "eligible_users"
+        )
+    modern = all(cohort_fields)
+
+    split_users = tuple(
+        _checkpoint_user_field(checkpoint, field)
+        for field in ("train_users", "val_users", "test_users")
+    )
+    train_users, val_users, test_users = split_users
+    split_sets = {
+        "train": set(train_users),
+        "val": set(val_users),
+        "test": set(test_users),
+    }
+    for left, right in (("train", "val"), ("train", "test"), ("val", "test")):
+        overlap = split_sets[left].intersection(split_sets[right])
+        if overlap:
+            raise ValueError(
+                f"Checkpoint user leakage between {left} and {right}: "
+                f"{sorted(overlap, key=natural_key)}"
+            )
+
+    if modern:
+        excluded_users = _canonical_checkpoint_user_list(
+            checkpoint["excluded_users"],
+            field_name="excluded_users",
+        )
+        eligible_users = _canonical_checkpoint_user_list(
+            checkpoint["eligible_users"],
+            field_name="eligible_users",
+        )
+        excluded_set = set(excluded_users)
+        eligible_set = set(eligible_users)
+        if excluded_set.intersection(eligible_set):
+            raise ValueError(
+                "Checkpoint excluded_users and eligible_users overlap"
+            )
+        assigned_users = set().union(*split_sets.values())
+        split_outside_eligible = assigned_users.difference(eligible_set)
+        if split_outside_eligible:
+            raise ValueError(
+                "Checkpoint split users are not eligible: "
+                f"{sorted(split_outside_eligible, key=natural_key)}"
+            )
+
+        source_users = _source_user_cohort(sample_manifest)
+        expected_users = eligible_set.union(excluded_set)
+        if source_users != expected_users:
+            missing = sorted(
+                expected_users.difference(source_users),
+                key=natural_key,
+            )
+            additional = sorted(
+                source_users.difference(expected_users),
+                key=natural_key,
+            )
+            raise ValueError(
+                "Source dataset user cohort does not match checkpoint cohort; "
+                f"missing={missing}, additional={additional}"
+            )
+        source = "checkpoint"
+    else:
+        excluded_users = ()
+        assigned_users = set().union(*split_sets.values())
+        source_users = _source_user_cohort(sample_manifest)
+        if source_users != assigned_users:
+            missing = sorted(
+                assigned_users.difference(source_users),
+                key=natural_key,
+            )
+            additional = sorted(
+                source_users.difference(assigned_users),
+                key=natural_key,
+            )
+            raise ValueError(
+                "Legacy checkpoint fallback requires the dataset user cohort "
+                "to equal the checkpoint split-user union; "
+                f"missing={missing}, additional={additional}"
+            )
+        eligible_users = tuple(sorted(assigned_users, key=natural_key))
+        source = "legacy_no_exclusion_fallback"
+
+    class_to_idx = _checkpoint_class_mapping(checkpoint.get("class_to_idx"))
+    return _DCohortContract(
+        excluded_users=excluded_users,
+        eligible_users=eligible_users,
+        train_users=train_users,
+        val_users=val_users,
+        test_users=test_users,
+        class_to_idx=class_to_idx,
+        require_all_users_assigned=_checkpoint_assignment_policy(
+            checkpoint,
+            modern=modern,
+        ),
+        source=source,
+    )
+
+
+def _build_standalone_cohort(
+    sample_manifest: pd.DataFrame,
+    config: ExperimentConfig,
+    split: SplitAssignment,
+) -> _DCohortContract:
+    excluded_users = tuple(config.split.excluded_users)
+    excluded_set = set(excluded_users)
+    eligible_users = tuple(
+        sorted(
+            _source_user_cohort(sample_manifest).difference(excluded_set),
+            key=natural_key,
+        )
+    )
+    return _DCohortContract(
+        excluded_users=excluded_users,
+        eligible_users=eligible_users,
+        train_users=split.train_users,
+        val_users=split.val_users,
+        test_users=split.test_users,
+        class_to_idx=dict(split.class_to_idx),
+        require_all_users_assigned=config.split.require_all_users_assigned,
+        source="standalone_no_reference",
+    )
+
+
 def _prepare_split(
     *,
     sample_manifest: pd.DataFrame,
     config: ExperimentConfig,
     reference_checkpoint: Mapping[str, object] | None,
-):
+    cohort: _DCohortContract | None = None,
+) -> SplitAssignment:
     split_config = config.split
 
     if reference_checkpoint is not None:
+        _validate_local_cohort_config(config)
+        if cohort is None:
+            cohort = _resolve_cohort_contract(
+                sample_manifest,
+                reference_checkpoint,
+            )
         return prepare_user_disjoint_splits(
             sample_manifest,
             seed=config.random_seed,
-            explicit_train_users=reference_checkpoint["train_users"],
-            explicit_val_users=reference_checkpoint["val_users"],
-            explicit_test_users=reference_checkpoint["test_users"],
-            require_all_users_assigned=split_config.require_all_users_assigned,
+            explicit_train_users=cohort.train_users,
+            explicit_val_users=cohort.val_users,
+            explicit_test_users=cohort.test_users,
+            excluded_users=cohort.excluded_users,
+            require_all_users_assigned=cohort.require_all_users_assigned,
             require_all_labels_in_all_splits=(
                 split_config.require_all_labels_in_all_splits
             ),
-            class_to_idx=dict(reference_checkpoint["class_to_idx"]),
+            class_to_idx=dict(cohort.class_to_idx),
         )
 
     return prepare_user_disjoint_splits(
@@ -147,6 +430,7 @@ def _prepare_split(
         explicit_train_users=split_config.explicit_train_users,
         explicit_val_users=split_config.explicit_val_users,
         explicit_test_users=split_config.explicit_test_users,
+        excluded_users=split_config.excluded_users,
         require_all_users_assigned=split_config.require_all_users_assigned,
         require_all_labels_in_all_splits=(
             split_config.require_all_labels_in_all_splits
@@ -225,16 +509,40 @@ def run_experiment_d(
             "or set allow_new_split=True only if a new split is intentional."
         )
 
+    if reference is not None:
+        _validate_local_cohort_config(config)
+
     data = load_acceleration_data(
         root,
         repository_root=repository_root,
         require_reconstruction=True,
     )
+    reference_identity: dict[str, object] | None = None
+    if reference is not None:
+        if reference_path is None:
+            raise AssertionError("A loaded reference checkpoint needs a path")
+        reference_identity = {
+            "checkpoint": reference_path,
+            "sha256": _sha256_file(reference_path),
+            "artifact_type": reference.get("artifact_type"),
+            "schema_version": reference.get("schema_version"),
+        }
+
+    cohort: _DCohortContract | None = None
+    if reference is not None:
+        cohort = _resolve_cohort_contract(data.sample_manifest, reference)
     split = _prepare_split(
         sample_manifest=data.sample_manifest,
         config=config,
         reference_checkpoint=reference,
+        cohort=cohort,
     )
+    if cohort is None:
+        cohort = _build_standalone_cohort(
+            data.sample_manifest,
+            config,
+            split,
+        )
 
     normalization = fit_acceleration_normalization(
         data.packages,
@@ -388,6 +696,10 @@ def run_experiment_d(
                 None if reference_path is None else str(reference_path)
             ),
             "split_reference_only": reference is not None,
+            "reference_identity": reference_identity,
+            "excluded_users": list(cohort.excluded_users),
+            "eligible_users": list(cohort.eligible_users),
+            "cohort_source": cohort.source,
             "experiment_protocol": "mixed_train_dual_domain_test",
             "evaluation_test_sources": ["raw", "reconstruction"],
         },
@@ -507,13 +819,18 @@ def run_experiment_d(
             "resolved_padded_root": data.padded_root,
             "output_dir": output_dir,
             "reference_checkpoint": reference_path,
+            "split_reference_only": reference is not None,
+            "reference_identity": reference_identity,
             "device": torch_device,
             "config": config.to_dict(),
             "normalization": normalization.to_dict(),
+            "excluded_users": cohort.excluded_users,
+            "eligible_users": cohort.eligible_users,
             "train_users": split.train_users,
             "val_users": split.val_users,
             "test_users": split.test_users,
             "class_to_idx": split.class_to_idx,
+            "cohort_source": cohort.source,
             "best_epoch": best_epoch,
             "best_val_balanced_accuracy": best_val_ba,
             "producer_metadata": data.producer_metadata.to_dict(),
