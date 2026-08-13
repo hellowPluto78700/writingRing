@@ -15,6 +15,24 @@ The raw acquisition-rate contract is not established here. Current processing
 commands commonly use a nominal/default 200 Hz configuration; that setting is
 not a claim about every source recording's acquisition rate.
 
+## Known raw dataset corrections
+
+The following corrections apply to the raw dataset:
+
+- `data/user_4/0/0_timestamp.txt`: remove the line
+  `1720481135986401 wrong`; there should be only one `wrong` marker before the
+  following `f` marker.
+- `data/user_9/0/0_timestamp.txt`: change the `l` marker timestamp to
+  `1720740976674429`.
+- `data/user_3/0/2_board_0.gz`: replace the first Board chunk with a valid
+  serialized empty chunk; the original six-frame chunk had no press/lift event
+  and introduced a timestamp backward jump before `board_1.gz`.
+
+The first two entries are source-label corrections for
+`user_4/action_0/dataset_0` and `user_9/action_0/dataset_0`; the Board entry
+changes only the serialized contents of the specified Board chunk. None of
+these changes alter the Ring binary format or the IMU samples.
+
 ## Current workflow
 
 ```text

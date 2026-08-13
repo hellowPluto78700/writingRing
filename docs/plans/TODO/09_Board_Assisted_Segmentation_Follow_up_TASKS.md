@@ -15,7 +15,7 @@ expanding an allowed write scope or changing a contract below.
   `tests/test_segment_ring_imu_cli.py`.
 - **Required behavior:** In `aligned-board-events` mode, expose and explicitly
   forward Board-only final-segment maximum duration (default `5.0` seconds)
-  and carry-in press lookback (default `0.5` seconds) to
+  and carry-in press lookback (default `0.2` seconds) to
   `BoardEventSegmentationConfig`, converting seconds to the existing
   microsecond configuration fields. Continue explicitly forwarding the
   `0.2`-second pre-press and post-lift contexts. The label-mode construction
@@ -44,7 +44,7 @@ expanding an allowed write scope or changing a contract below.
   most five seconds; a longer final Board window skips with
   `final_segment_duration_gt_5s`; carry-in ownership, normal start, and
   midpoint start; no carry-in for a preceding lift or a press older than the
-  `0.5`-second lookback; empty-leading recovery searches strictly from the
+  `0.2`-second lookback; empty-leading recovery searches strictly from the
   label to the first Board frame, selects the most-prominent alignment-grade
   peak, and has no fallback; every exported Board sample has duration at most
   five seconds. Keep the label-only greater-than-five-second rule covered.
@@ -73,20 +73,20 @@ contract changes are authorized.
 
 - **Status:** FROZEN
 - **Dependencies:** T1 independently verified.
-- **Allowed writes:** `scripts/Bash_Script/action0_pipeline/_common.bash`,
+- **Allowed writes:** `scripts/bash_script/action0_pipeline/_common.bash`,
   `tests/test_action0_pipeline_scripts.py`.
 - **Required behavior:** The shared `pipeline_segment` aligned-Board argument
   branch explicitly passes `--maximum-segment-duration-seconds 5.0` and
-  `--carry-in-press-lookback-seconds 0.5` beside the existing `0.2`-second
+  `--carry-in-press-lookback-seconds 0.2` beside the existing `0.2`-second
   context arguments. This one shared change must cover raw, low-pass,
   Madgwick, and Xylo aligned-Board wrappers. The separate label argument
   branch must not receive Board-only flags. Repair the focused test's stale
   `scripts/action0_pipeline` path to the repository's existing
-  `scripts/Bash_Script/action0_pipeline` location, then assert aligned versus
+  `scripts/bash_script/action0_pipeline` location, then assert aligned versus
   label command construction.
 - **Acceptance:** All four aligned wrappers share the new explicit contract;
   all label wrappers remain unchanged; focused Action0 script tests pass.
-- **Validation:** `bash -n scripts/Bash_Script/action0_pipeline/_common.bash`
+- **Validation:** `bash -n scripts/bash_script/action0_pipeline/_common.bash`
   and `python -m pytest tests/test_action0_pipeline_scripts.py` in the
   preferred usable project Conda environment.
 - **Replan triggers:** Correct integration requires modifying individual
@@ -110,7 +110,7 @@ contract changes are authorized.
   channels `15:21`, searches strictly between the label and first Board frame,
   uses the alignment-grade peak detector and documented selection tie-break,
   and has no fallback. State Action0's explicit shared aligned-Board arguments
-  (contexts `0.2`, maximum duration `5.0`, carry-in lookback `0.5`) while
+  (contexts `0.2`, maximum duration `5.0`, carry-in lookback `0.2`) while
   retaining the label-branch distinction.
 - **Preserved facts:** Alignment offset creation, offset/time-domain,
   canonical timestamp, Board loading, channel, and provenance contracts do

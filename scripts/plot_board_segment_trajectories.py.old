@@ -13,10 +13,6 @@ Examples:
         --data-root data \
         --user user_0
 
-    # Omit --user to plot every discovered user for the selected action.
-    python scripts/plot_board_segment_trajectories.py \
-        --data-root data
-
 Defaults are tailored to the Action-0 low-pass aligned-Board pipeline:
 
     segmentation root:
@@ -46,6 +42,7 @@ import math
 from pathlib import Path
 import re
 import sys
+from typing import Iterable
 
 import matplotlib
 matplotlib.use("Agg")
@@ -68,7 +65,7 @@ DEFAULT_SEGMENTATION_ROOT = Path(
     "outputs/action0_rectified/low-pass/aligned-board-events/segmentation"
 )
 DEFAULT_OUTPUT_ROOT = Path("outputs/plotting_verification")
-SCRIPT_VERSION = "2.2"
+SCRIPT_VERSION = "2.1"
 
 
 REQUIRED_MANIFEST_COLUMNS = {
@@ -93,10 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument(
         "--user",
-        help=(
-            "Optional user directory, e.g. user_0. A bare integer such as 0 is also "
-            "accepted. When omitted, process all discovered users for the selected action."
-        ),
+        required=True,
+        help="User directory, e.g. user_0. A bare integer such as 0 is also accepted.",
     )
     parser.add_argument(
         "--recording",
@@ -105,8 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help=(
             "Optional recording/dataset ID (the integer prefix in <id>_ring_0.bin). "
-            "When omitted, process every discovered recording matching the selected action. "
-            "If --user is omitted, the selection spans all users."
+            "When omitted, process every discovered recording for the selected user/action."
         ),
     )
     parser.add_argument(
@@ -145,46 +139,42 @@ def normalize_user(value: str) -> str:
     return value if value.startswith("user_") else f"user_{value}"
 
 
-def resolve_recordings(
+def resolve_user_recordings(
     data_root: Path,
     *,
-    user: str | None,
+    user: str,
     action: str,
     dataset_id: int | None,
 ) -> list[Recording]:
-    """Discover recordings once and apply the optional user/dataset filters."""
     recordings = [
         recording
         for recording in discover_recordings(data_root)
-        if recording.action == str(action)
-        and (user is None or recording.user == user)
-        and (dataset_id is None or recording.dataset_id == dataset_id)
+        if recording.user == user and recording.action == str(action)
     ]
-    recordings.sort(key=lambda recording: (recording.user, recording.dataset_id))
+    recordings.sort(key=lambda recording: recording.dataset_id)
 
-    if not recordings:
-        user_description = user if user is not None else "all users"
-        recording_description = (
-            "all recordings"
-            if dataset_id is None
-            else f"dataset_id={dataset_id}"
-        )
-        raise ValueError(
-            f"no recordings found for {user_description}, action={action}, "
-            f"{recording_description}"
-        )
+    if dataset_id is None:
+        if not recordings:
+            raise ValueError(
+                f"no recordings found for user={user}, action={action}"
+            )
+        return recordings
 
-    identities = [
-        (recording.user, recording.dataset_id)
+    matches = [
+        recording
         for recording in recordings
+        if recording.dataset_id == dataset_id
     ]
-    if len(identities) != len(set(identities)):
+    if not matches:
         raise ValueError(
-            "recording identity is ambiguous after filtering; duplicate "
-            "(user, dataset_id) entries were discovered"
+            f"recording not found: user={user}, action={action}, dataset_id={dataset_id}"
         )
-
-    return recordings
+    if len(matches) != 1:
+        raise ValueError(
+            f"recording identity is ambiguous: user={user}, action={action}, "
+            f"dataset_id={dataset_id}"
+        )
+    return matches
 
 
 def segmentation_manifest_path(
@@ -730,31 +720,26 @@ def main() -> int:
         if args.dpi <= 0:
             raise ValueError("--dpi must be positive")
 
-        selected_user = normalize_user(args.user) if args.user is not None else None
+        user = normalize_user(args.user)
         action = str(args.action)
-        strict_single_recording = (
-            selected_user is not None and args.dataset_id is not None
-        )
+        strict_single_recording = args.dataset_id is not None
 
-        recordings = resolve_recordings(
+        recordings = resolve_user_recordings(
             args.data_root,
-            user=selected_user,
+            user=user,
             action=action,
             dataset_id=args.dataset_id,
         )
 
-        recordings_by_user: dict[str, list[Recording]] = {}
-        for recording in recordings:
-            recordings_by_user.setdefault(recording.user, []).append(recording)
+        manifest_path = segmentation_manifest_path(
+            args.segmentation_root, user=user, action=action
+        )
+        manifest = read_segmentation_manifest(manifest_path)
 
         totals = {
-            "users_selected": len(recordings_by_user),
-            "users_processed": 0,
-            "users_without_manifest": 0,
             "recordings_discovered": len(recordings),
             "recordings_processed": 0,
             "recordings_without_segments": 0,
-            "recordings_without_manifest": 0,
             "segments": 0,
             "written": 0,
             "skipped_existing": 0,
@@ -762,94 +747,57 @@ def main() -> int:
             "tracks": 0,
         }
 
-        for user, user_recordings in recordings_by_user.items():
-            manifest_path = segmentation_manifest_path(
-                args.segmentation_root, user=user, action=action
+        for recording in recordings:
+            segments = exported_segments_for_recording(
+                manifest, dataset_id=recording.dataset_id
             )
-
-            if not manifest_path.is_file():
-                message = f"segmentation manifest does not exist: {manifest_path}"
-                if selected_user is not None:
+            if segments.empty:
+                message = (
+                    f"no exported Board-assisted segments for "
+                    f"{recording.user}/action_{recording.action}/dataset_{recording.dataset_id}"
+                )
+                if strict_single_recording:
                     raise ValueError(message)
-                print(f"SKIP USER {user}: {message}")
-                totals["users_without_manifest"] += 1
-                totals["recordings_without_manifest"] += len(user_recordings)
+                print(f"SKIP: {message}")
+                totals["recordings_without_segments"] += 1
                 continue
-
-            manifest = read_segmentation_manifest(manifest_path)
-            totals["users_processed"] += 1
 
             print()
             print(
-                f"=== plotting user {user}: {len(user_recordings)} "
-                "recording(s) selected ==="
+                f"=== plotting recording {recording.dataset_id}: "
+                f"{len(segments)} exported segment(s) ==="
             )
-
-            for recording in user_recordings:
-                segments = exported_segments_for_recording(
-                    manifest, dataset_id=recording.dataset_id
-                )
-                if segments.empty:
-                    message = (
-                        f"no exported Board-assisted segments for "
-                        f"{recording.user}/action_{recording.action}/"
-                        f"dataset_{recording.dataset_id}"
-                    )
-                    if strict_single_recording:
-                        raise ValueError(message)
-                    print(f"SKIP: {message}")
-                    totals["recordings_without_segments"] += 1
-                    continue
-
-                print()
-                print(
-                    f"=== plotting {recording.user} recording "
-                    f"{recording.dataset_id}: {len(segments)} exported segment(s) ==="
-                )
-                stats = process_recording(
-                    recording=recording,
-                    segments=segments,
-                    manifest_path=manifest_path,
-                    output_root=args.output_root,
-                    dpi=args.dpi,
-                    overwrite=args.overwrite,
-                )
-                totals["recordings_processed"] += 1
-                for key in (
-                    "segments",
-                    "written",
-                    "skipped_existing",
-                    "contact_samples",
-                    "tracks",
-                ):
-                    totals[key] += stats[key]
+            stats = process_recording(
+                recording=recording,
+                segments=segments,
+                manifest_path=manifest_path,
+                output_root=args.output_root,
+                dpi=args.dpi,
+                overwrite=args.overwrite,
+            )
+            totals["recordings_processed"] += 1
+            for key in (
+                "segments",
+                "written",
+                "skipped_existing",
+                "contact_samples",
+                "tracks",
+            ):
+                totals[key] += stats[key]
 
         print()
         print("=== plotting summary ===")
-        if selected_user is None:
-            print(f"User/action: ALL USERS/action_{action}")
-        else:
-            print(f"User/action: {selected_user}/action_{action}")
-
-        if selected_user is None and args.dataset_id is None:
-            mode = "all users, all discovered recordings"
-        elif selected_user is None:
-            mode = f"all users, recording {args.dataset_id} where present"
-        elif args.dataset_id is None:
-            mode = f"user {selected_user}, all discovered recordings"
-        else:
-            mode = f"user {selected_user}, single recording {args.dataset_id}"
-        print(f"Mode: {mode}")
-
-        print(f"Users selected: {totals['users_selected']}")
-        print(f"Users with manifests processed: {totals['users_processed']}")
-        print(f"Users without manifests skipped: {totals['users_without_manifest']}")
+        print(f"User/action: {user}/action_{action}")
+        print(
+            "Mode: "
+            + (
+                f"single recording {args.dataset_id}"
+                if strict_single_recording
+                else "all discovered recordings"
+            )
+        )
         print(f"Recordings selected: {totals['recordings_discovered']}")
         print(f"Recordings processed: {totals['recordings_processed']}")
-        print(
-            "Recordings skipped due to missing manifest: "
-            f"{totals['recordings_without_manifest']}"
-        )
         print(
             "Recordings without exported segments: "
             f"{totals['recordings_without_segments']}"
@@ -859,12 +807,7 @@ def main() -> int:
         print(f"Existing images skipped: {totals['skipped_existing']}")
         print(f"Total plotted Board contact samples: {totals['contact_samples']}")
         print(f"Total plotted trajectory tracks: {totals['tracks']}")
-        output_summary = (
-            args.output_root
-            if selected_user is None
-            else args.output_root / selected_user
-        )
-        print(f"Output root: {output_summary}")
+        print(f"Output root: {args.output_root / user}")
         return 0
 
     except (

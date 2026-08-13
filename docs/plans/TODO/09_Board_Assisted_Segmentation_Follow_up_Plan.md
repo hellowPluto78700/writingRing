@@ -19,7 +19,7 @@
 
 ```text
 scripts/segment_ring_imu.py
-scripts/Bash_Script/action0_pipeline/_common.bash
+scripts/bash_script/action0_pipeline/_common.bash
 
 tests/test_board_event_segmentation.py
 tests/test_segment_ring_imu_cli.py
@@ -82,7 +82,7 @@ integration             |
 
 * Board mode CLI 能构造新的 config；
 * 默认 final segment limit = `5s`；
-* carry-in lookback = `0.5s`；
+* carry-in lookback = `0.2s`；
 * pre/post context 仍为 `0.2s`；
 * label mode CLI 行为无变化。
 
@@ -97,7 +97,7 @@ integration             |
 * `label gap >5s + final segment <=5s` → export；
 * `final segment >5s` → skip；
 * carry-in ownership、正常 start、midpoint start 均有测试；
-* label 前最近 event 为 lift / press 超过 0.5s → 不触发 carry-in；
+* label 前最近 event 为 lift / press 超过 0.2s → 不触发 carry-in；
 * empty `board_0` 首段只搜索 `(label, first Board frame)`；
 * 多峰时选择最大 prominence 的 alignment-grade peak；
 * 无合格 strong peak → 不 fallback；

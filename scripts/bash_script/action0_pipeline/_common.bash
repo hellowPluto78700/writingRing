@@ -18,7 +18,7 @@
 set -Eeuo pipefail
 
 _PIPELINE_COMMON_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# This repository keeps the wrappers under scripts/Bash_Script/action0_pipeline.
+# This repository keeps the wrappers under scripts/bash_script/action0_pipeline.
 # The common helper therefore has to walk three levels up to reach the project
 # root (not two, which would resolve relative paths under scripts/).
 PIPELINE_PROJECT_ROOT="$(cd -- "${_PIPELINE_COMMON_DIR}/../../.." && pwd)"
@@ -729,7 +729,7 @@ pipeline_segment() {
                 --pre-press-context-seconds 0.2
                 --post-lift-context-seconds 0.2
                 --maximum-segment-duration-seconds 5.0
-                --carry-in-press-lookback-seconds 0.5
+                --carry-in-press-lookback-seconds 0.2
                 --missing-event-policy skip
                 --crossing-touch-policy accept_until_next_press
                 --recording-error-policy skip

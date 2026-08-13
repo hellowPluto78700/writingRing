@@ -110,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help=(
             "lookback for assigning a preceding Board press to the next label "
-            "(aligned mode; default: 0.5)"
+            "(aligned mode; default: 0.2)"
         ),
     )
     parser.add_argument(
@@ -285,7 +285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 carry_in_press_lookback_us=_seconds_to_us(
                     args.carry_in_press_lookback_seconds,
-                    default_seconds=0.5,
+                    default_seconds=0.2,
                 ),
                 missing_event_policy=args.missing_event_policy or "skip",
                 crossing_touch_policy=(

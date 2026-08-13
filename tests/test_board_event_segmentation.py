@@ -724,7 +724,7 @@ def test_press_older_than_carry_in_lookback_keeps_historical_crossing_ownership(
     imu, timestamps = _ring(end_us=20_000_000)
     events, pairs = _aligned_tables(
         [
-            (12_400_000.0, 13_100_000.0, False),
+            (12_700_000.0, 13_100_000.0, False),
             (13_500_000.0, 13_800_000.0, False),
         ]
     )

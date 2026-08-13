@@ -12,7 +12,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "Bash_Script" / "action0_pipeline"
+PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "bash_script" / "action0_pipeline"
 COMMON_PATH = PIPELINE_ROOT / "_common.bash"
 
 
@@ -728,7 +728,7 @@ def test_segment_command_uses_board_only_flags_for_aligned_mode(tmp_path: Path) 
     assert "--pre-press-context-seconds 0.2" in aligned_command
     assert "--post-lift-context-seconds 0.2" in aligned_command
     assert "--maximum-segment-duration-seconds 5.0" in aligned_command
-    assert "--carry-in-press-lookback-seconds 0.5" in aligned_command
+    assert "--carry-in-press-lookback-seconds 0.2" in aligned_command
 
     label = subprocess.run(
         [

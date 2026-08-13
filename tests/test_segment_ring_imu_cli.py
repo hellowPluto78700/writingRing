@@ -205,7 +205,7 @@ def test_cli_forwards_aligned_board_defaults(
     assert config.pre_press_context_us == 200_000.0
     assert config.post_lift_context_us == 200_000.0
     assert config.maximum_segment_duration_us == 5_000_000.0
-    assert config.carry_in_press_lookback_us == 500_000.0
+    assert config.carry_in_press_lookback_us == 200_000.0
     capsys.readouterr()
 
 

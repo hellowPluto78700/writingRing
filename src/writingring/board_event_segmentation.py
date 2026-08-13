@@ -154,7 +154,7 @@ class BoardEventSegmentationConfig:
     crossing_touch_policy: str = "accept_until_next_press"
     minimum_label_interval_us: float = 100_000.0
     maximum_segment_duration_us: float = 5_000_000.0
-    carry_in_press_lookback_us: float = 500_000.0
+    carry_in_press_lookback_us: float = 200_000.0
     require_successful_alignment: bool = True
     label_time_domain: str = "ring"
     minimum_duration_frames: int = 3
@@ -2948,7 +2948,7 @@ def _classify_crossing_touches(
     labels: Sequence[SegmentLabel],
     *,
     policy: str,
-    carry_in_press_lookback_us: float = 500_000.0,
+    carry_in_press_lookback_us: float = 200_000.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Classify normal, carry-in, accepted, and rejected crossing pairs.
 

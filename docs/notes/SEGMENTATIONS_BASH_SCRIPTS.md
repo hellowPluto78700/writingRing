@@ -1,7 +1,7 @@
 # Action-0 segmentation Bash pipelines
 
 `docs/plans/Segmentations_Bash_Scripts_Plan.md` is implemented by the eight
-entry points under `scripts/Bash_Script/action0_pipeline/`; `_common.bash` is their shared
+entry points under `scripts/bash_script/action0_pipeline/`; `_common.bash` is their shared
 orchestration helper:
 
 | Script | Gravity method | Boundary mode |
@@ -131,7 +131,7 @@ boundary contract rather than relying on CLI defaults:
 --pre-press-context-seconds 0.2
 --post-lift-context-seconds 0.2
 --maximum-segment-duration-seconds 5.0
---carry-in-press-lookback-seconds 0.5
+--carry-in-press-lookback-seconds 0.2
 ```
 
 All four aligned-Board wrappers use that shared branch. Label wrappers use the

@@ -85,7 +85,7 @@ those values explicitly:
 --pre-press-context-seconds 0.2 \
 --post-lift-context-seconds 0.2 \
 --maximum-segment-duration-seconds 5.0 \
---carry-in-press-lookback-seconds 0.5
+--carry-in-press-lookback-seconds 0.2
 ```
 
 Transient touches do not define boundaries but are preserved in target
@@ -93,7 +93,7 @@ channels. Incomplete touches remain in the Board-event audit CSV but do not
 write a target. The default crossing policy is `accept_until_next_press`: a
 touch with `press < next_label < lift` can be a carry-in touch for the next
 label only when it is a complete, valid, non-transient pair; its press is at
-most the carry-in lookback (default 0.5 s) before that label; and the press and
+most the carry-in lookback (default 0.2 s) before that label; and the press and
 lift are the immediate neighboring events around the label. That pair is owned
 by the following label. Its nominal start is `press - pre_press_context`; if
 that would overlap the prior final window, the midpoint between the prior end
