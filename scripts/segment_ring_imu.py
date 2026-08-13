@@ -98,6 +98,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="context retained after the last valid Board lift (aligned mode; default: 0.2)",
     )
     parser.add_argument(
+        "--maximum-segment-duration-seconds",
+        type=float,
+        help=(
+            "maximum final Board-assisted segment duration in seconds "
+            "(aligned mode; default: 5.0)"
+        ),
+    )
+    parser.add_argument(
+        "--carry-in-press-lookback-seconds",
+        type=float,
+        help=(
+            "lookback for assigning a preceding Board press to the next label "
+            "(aligned mode; default: 0.5)"
+        ),
+    )
+    parser.add_argument(
         "--missing-event-policy",
         choices=("skip",),
         help="policy for a label interval without a complete valid touch (aligned mode; default: skip)",
@@ -263,6 +279,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 include_last_label=not args.exclude_last_label,
                 pre_press_context_us=_seconds_to_us(args.pre_press_context_seconds),
                 post_lift_context_us=_seconds_to_us(args.post_lift_context_seconds),
+                maximum_segment_duration_us=_seconds_to_us(
+                    args.maximum_segment_duration_seconds,
+                    default_seconds=5.0,
+                ),
+                carry_in_press_lookback_us=_seconds_to_us(
+                    args.carry_in_press_lookback_seconds,
+                    default_seconds=0.5,
+                ),
                 missing_event_policy=args.missing_event_policy or "skip",
                 crossing_touch_policy=(
                     args.crossing_touch_policy or "accept_until_next_press"
@@ -336,6 +360,8 @@ def _validate_mode_arguments(args: argparse.Namespace) -> None:
     aligned_values = (
         args.pre_press_context_seconds,
         args.post_lift_context_seconds,
+        args.maximum_segment_duration_seconds,
+        args.carry_in_press_lookback_seconds,
         args.missing_event_policy,
         args.crossing_touch_policy,
         args.recording_error_policy,
@@ -387,10 +413,10 @@ def _validate_mode_arguments(args: argparse.Namespace) -> None:
         )
 
 
-def _seconds_to_us(value: float | None) -> float:
+def _seconds_to_us(value: float | None, *, default_seconds: float = 0.2) -> float:
     """Convert an optional CLI duration to the stored timestamp unit."""
 
-    seconds = 0.2 if value is None else value
+    seconds = default_seconds if value is None else value
     return seconds * 1_000_000.0
 
 

@@ -135,6 +135,8 @@ def test_cli_routes_explicit_aligned_mode_with_only_aligned_options(
             "--gravity-removal-method", "raw",
             "--pre-press-context-seconds", "0.3",
             "--post-lift-context-seconds", "0.4",
+            "--maximum-segment-duration-seconds", "6.5",
+            "--carry-in-press-lookback-seconds", "0.75",
             "--recording-error-policy", "skip",
             "--verification-panel-seconds", "7",
             "--verification-dpi", "123",
@@ -145,11 +147,66 @@ def test_cli_routes_explicit_aligned_mode_with_only_aligned_options(
     verification = captured["verification_config"]
     assert config.pre_press_context_us == 300_000.0
     assert config.post_lift_context_us == 400_000.0
+    assert config.maximum_segment_duration_us == 6_500_000.0
+    assert config.carry_in_press_lookback_us == 750_000.0
     assert config.recording_error_policy == "skip"
     assert captured["gravity_config"].gravity_removal_method == "raw"
     assert verification.panel_duration_s == 7.0
     assert verification.output_dpi == 123
     assert "Board-guided" in capsys.readouterr().out
+
+
+def test_cli_forwards_aligned_board_defaults(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+    output_root = tmp_path / "outputs"
+    paths = SimpleNamespace(
+        raw_imu_path=output_root / "raw.npy",
+        labels_path=output_root / "labels.npy",
+        segment_offsets_path=output_root / "offsets.npy",
+        segment_lengths_path=output_root / "lengths.npy",
+        segments_csv_path=output_root / "segments.csv",
+        summary_json_path=output_root / "summary.json",
+        board_event_targets_path=output_root / "targets.npy",
+        board_events_csv_path=output_root / "board_events.csv",
+    )
+
+    def fake_aligned(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(
+            raw_imu=np.empty((0, 6), dtype=np.float32),
+            summary={
+                "exported_segment_count": 0,
+                "verification_image_count": 0,
+                "recording_count": 0,
+            },
+            output_paths=paths,
+        )
+
+    monkeypatch.setattr(
+        "writingring.board_event_segmentation.segment_user_action_by_aligned_board_events",
+        fake_aligned,
+    )
+    assert segment_ring_imu.main(
+        [
+            "--data-root", str(tmp_path / "data"),
+            "--user", "user_a", "--action", "a",
+            "--output-root", str(output_root),
+            "--boundary-mode", "aligned-board-events",
+            "--alignment-offset-root", str(tmp_path / "offsets"),
+            "--gravity-removal-method", "raw",
+        ]
+    ) == 0
+
+    config = captured["config"]
+    assert config.pre_press_context_us == 200_000.0
+    assert config.post_lift_context_us == 200_000.0
+    assert config.maximum_segment_duration_us == 5_000_000.0
+    assert config.carry_in_press_lookback_us == 500_000.0
+    capsys.readouterr()
 
 
 def test_cli_rejects_aligned_options_in_label_mode(tmp_path: Path, capsys) -> None:
@@ -161,6 +218,28 @@ def test_cli_rejects_aligned_options_in_label_mode(tmp_path: Path, capsys) -> No
         ]
     ) == 2
     assert "requires --overlay-aligned-board-events" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--maximum-segment-duration-seconds",
+        "--carry-in-press-lookback-seconds",
+    ],
+)
+def test_cli_rejects_board_only_duration_options_in_label_mode(
+    tmp_path: Path,
+    capsys,
+    option: str,
+) -> None:
+    assert segment_ring_imu.main(
+        [
+            "--data-root", str(tmp_path / "data"),
+            "--user", "user_a", "--action", "a",
+            option, "1.0",
+        ]
+    ) == 2
+    assert "aligned-board-events options require" in capsys.readouterr().err
 
 
 def test_cli_exports_raw_imu_in_label_mode(tmp_path: Path, capsys) -> None:

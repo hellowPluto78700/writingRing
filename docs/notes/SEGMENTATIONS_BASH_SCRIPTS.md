@@ -124,6 +124,19 @@ Aligned Action0 segmentation also explicitly passes
 fails a permitted local Board-segmentation validation is listed as a
 segmentation error and never rewritten as alignment `SKIPPED`.
 
+The same shared aligned-Board segmentation command explicitly passes its
+boundary contract rather than relying on CLI defaults:
+
+```text
+--pre-press-context-seconds 0.2
+--post-lift-context-seconds 0.2
+--maximum-segment-duration-seconds 5.0
+--carry-in-press-lookback-seconds 0.5
+```
+
+All four aligned-Board wrappers use that shared branch. Label wrappers use the
+separate label branch and receive none of these Board-only arguments.
+
 After every aligned segmentation pass, the wrapper writes
 `segmentation/segmentation_recording_error_report.json` and its CSV sibling.
 The JSON has one terminal state per discovered user/action; the CSV has one

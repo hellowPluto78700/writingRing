@@ -70,31 +70,44 @@ outcome-validation order.
 
 ## Boundary semantics
 
-`timestamp.txt` continues to provide the class and identifies the label that
-owns a touch from its press timestamp. Within an eligible interval, the final window starts 0.2 s
-before the first valid Board press and ends 0.2 s after the last valid Board
-lift. Change those values explicitly:
+`timestamp.txt` continues to provide the class. Board mode retains the
+label-only `wrong` and minimum-0.1-second label-start checks, but it does
+**not** reject a candidate just because its next label is more than five
+seconds away. Instead, after Board boundaries and contexts are resolved, the
+final Board-assisted window must be at most five seconds; a longer window is
+skipped with `final_segment_duration_gt_5s`.
+
+Within an eligible interval, the usual final window starts 0.2 s before the
+first valid Board press and ends 0.2 s after the last valid Board lift. Change
+those values explicitly:
 
 ```bash
 --pre-press-context-seconds 0.2 \
---post-lift-context-seconds 0.2
+--post-lift-context-seconds 0.2 \
+--maximum-segment-duration-seconds 5.0 \
+--carry-in-press-lookback-seconds 0.5
 ```
 
 Transient touches do not define boundaries but are preserved in target
 channels. Incomplete touches remain in the Board-event audit CSV but do not
 write a target. The default crossing policy is `accept_until_next_press`: a
-touch with `press < next_label <= lift < next_first_valid_press` remains owned
-by the press label, writes its normal press/lift targets, and may define that
-segment's final lift boundary. A crossing lift at or after the next label's
-first valid press, or one with no reliable next valid press, is rejected and
-remains audit-only. The CSV records `crosses_next_label_timestamp`,
-`crossing_resolution`, and `assigned_label_index` for each Board event.
+touch with `press < next_label < lift` can be a carry-in touch for the next
+label only when it is a complete, valid, non-transient pair; its press is at
+most the carry-in lookback (default 0.5 s) before that label; and the press and
+lift are the immediate neighboring events around the label. That pair is owned
+by the following label. Its nominal start is `press - pre_press_context`; if
+that would overlap the prior final window, the midpoint between the prior end
+and the carry-in press is used when it remains before the press. Otherwise the
+carry-in is rejected. Crossing touches that do not meet those conditions retain
+the normal crossing-policy handling and are audit-only when rejected. The CSV
+records `crosses_next_label_timestamp`, `crossing_resolution`, and
+`assigned_label_index` for each Board event.
 
 When neighboring 0.2 s contexts overlap, their split is the midpoint between
 the current segment's last lift and the following segment's first press. This
 retains both event cores instead of forcibly clipping at the label timestamp.
-Labels still use the existing `wrong`, minimum 0.1-second, and maximum
-5-second validity rules.
+The separate label-only mode retains its `wrong`, minimum-0.1-second, and
+maximum-5-second label-interval validity rules.
 
 The audit CSV distinguishes target assignment from boundary construction:
 

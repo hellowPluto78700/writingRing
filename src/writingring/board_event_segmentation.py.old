@@ -4,19 +4,6 @@ The recording-level API accepts already loaded immutable-source inputs.  The
 separate user/action API performs discovery, required alignment validation,
 verification plotting, and transactional output publication.  Label-only
 segmentation remains isolated in :mod:`writingring.segmentation`.
-
-Board-assisted policy in this version intentionally differs from label-only
-segmentation in three ways:
-
-* long label intervals remain eligible; the *final Board-assisted window* is
-  instead required to be at most ``maximum_segment_duration_us`` (5 s by
-  default);
-* a valid press/lift pair may be carried into the following label when the
-  press is at most ``carry_in_press_lookback_us`` before that label and the
-  pair is the immediate press-before/lift-after event pair around the label;
-* for the first exportable segment of a recording whose ``*_board_0.gz`` is a
-  serialized empty list, a strong alignment-grade Ring transient between the
-  label and the first real aligned Board frame can recover the start boundary.
 """
 
 from __future__ import annotations
@@ -52,11 +39,9 @@ from writingring.alignment_io import (
 from writingring.discovery import Recording
 from writingring.board_loader import BoardLoadError, load_board
 from writingring.event_alignment import (
-    EventAlignmentError,
     compute_transient_score,
     compute_transient_score_array,
     detect_board_events,
-    detect_transient_peak_regions,
 )
 from writingring.gravity import (
     GravityRemovalConfig,
@@ -81,6 +66,8 @@ from writingring.preprocessing_io import sha256_file
 from writingring.segmentation import (
     SegmentLabel,
     SegmentLabelParseError,
+    SegmentationConfig,
+    label_start_skip_reasons,
     load_timestamp_labels,
 )
 
@@ -127,24 +114,13 @@ _TARGET_CHANNELS: Final[dict[tuple[str, bool], int]] = {
     ("press", True): 2,
     ("lift", True): 3,
 }
-_CARRY_IN_RESOLUTION: Final[str] = "carried_into_next_label"
-_FIRST_SEGMENT_PEAK_SKIP_REASON: Final[str] = (
-    "first_segment_preboard_strong_peak_not_found"
-)
-_MAXIMUM_SEGMENT_SKIP_REASON: Final[str] = "final_segment_duration_gt_5s"
-
-
 class BoardEventSegmentationError(ValueError):
     """Raised when Board events cannot safely define aligned segments."""
 
 
 @dataclass(frozen=True, slots=True)
 class BoardEventSegmentationConfig:
-    """Independent boundary and event policies for aligned Board mode.
-
-    ``maximum_segment_duration_us`` applies to the final resolved
-    Board-assisted window, not to the distance between adjacent labels.
-    """
+    """Independent boundary and event policies for aligned Board mode."""
 
     output_dtype: str = "float32"
     include_last_label: bool = True
@@ -154,7 +130,6 @@ class BoardEventSegmentationConfig:
     crossing_touch_policy: str = "accept_until_next_press"
     minimum_label_interval_us: float = 100_000.0
     maximum_segment_duration_us: float = 5_000_000.0
-    carry_in_press_lookback_us: float = 500_000.0
     require_successful_alignment: bool = True
     label_time_domain: str = "ring"
     minimum_duration_frames: int = 3
@@ -309,8 +284,6 @@ class _CandidateWindow:
     final_start_us: float
     final_end_us: float
     collision_resolved: bool = False
-    carry_in_start: bool = False
-    transient_start_recovered: bool = False
 
 
 def prepare_complete_board_events(
@@ -426,9 +399,6 @@ def segment_recording_by_aligned_board_events(
     aligned_touch_pairs: pd.DataFrame,
     config: BoardEventSegmentationConfig = BoardEventSegmentationConfig(),
     boundary_timestamps_us: np.ndarray | None = None,
-    transient_score: np.ndarray | None = None,
-    leading_board_chunk_empty: bool = False,
-    first_aligned_board_frame_us: float | None = None,
 ) -> BoardEventSegmentationResult:
     """Build segments with boundary lookup separated from feature slicing.
 
@@ -436,10 +406,6 @@ def segment_recording_by_aligned_board_events(
     ``boundary_timestamps_us`` is supplied, all Board/label boundary searches
     use that work-axis vector while the returned IMU rows and their canonical
     timestamp metadata are selected by sample index.
-
-    Board-assisted label filtering deliberately ignores the label-only 5 s
-    maximum interval rule.  The 5 s default is enforced against every final
-    resolved Board-assisted segment instead.
     """
 
     dtype = _validated_config(config)
@@ -459,20 +425,18 @@ def segment_recording_by_aligned_board_events(
         aligned_board_events, aligned_touch_pairs
     )
     events, touch_pairs = _classify_crossing_touches(
-        events,
-        touch_pairs,
-        markers,
-        policy=config.crossing_touch_policy,
-        carry_in_press_lookback_us=config.carry_in_press_lookback_us,
+        events, touch_pairs, markers, policy=config.crossing_touch_policy
     )
-
-    # Board-assisted mode keeps the label-only "wrong" and too-close rules,
-    # but intentionally does not reject a label merely because the following
-    # label is more than 5 s away.  The actual final Board-derived segment is
-    # checked against maximum_segment_duration_us below.
-    label_reasons = _board_label_start_skip_reasons(
-        markers,
+    label_config = SegmentationConfig(
+        output_dtype=config.output_dtype,
+        include_last_label=config.include_last_label,
         minimum_label_interval_us=config.minimum_label_interval_us,
+        maximum_segment_duration_us=config.maximum_segment_duration_us,
+    )
+    label_reasons = label_start_skip_reasons(
+        markers,
+        ring_end_timestamp_us=float(boundary_timestamps[-1]),
+        config=label_config,
     )
     analyses = tuple(
         _analyze_label_interval(
@@ -521,78 +485,26 @@ def segment_recording_by_aligned_board_events(
         eligible = analysis.eligible_pairs
         first_press = float(eligible.iloc[0]["aligned_press_us"])
         last_lift = float(eligible.iloc[-1]["aligned_lift_us"])
-        start = max(
-            float(boundary_timestamps[0]),
-            first_press - config.pre_press_context_us,
-        )
-        end = min(
-            float(boundary_timestamps[-1]),
-            last_lift + config.post_lift_context_us,
-        )
         candidates[index] = _CandidateWindow(
             source_label_index=index,
             label=label,
             next_label=next_label,
             first_press_us=first_press,
             last_lift_us=last_lift,
-            provisional_start_us=start,
-            provisional_end_us=end,
+            provisional_start_us=max(float(boundary_timestamps[0]), first_press - config.pre_press_context_us),
+            provisional_end_us=min(float(boundary_timestamps[-1]), last_lift + config.post_lift_context_us),
             valid_pair_count=len(eligible),
             transient_pair_count=analysis.transient_touch_pair_count,
             incomplete_pair_count=analysis.incomplete_touch_pair_count,
             crossing_pair_count=analysis.crossing_touch_pair_count,
             accepted_crossing_pair_count=analysis.accepted_crossing_touch_pair_count,
             rejected_crossing_pair_count=analysis.rejected_crossing_touch_pair_count,
-            final_start_us=start,
-            final_end_us=end,
-            carry_in_start=(
-                str(eligible.iloc[0]["crossing_resolution"])
-                == _CARRY_IN_RESOLUTION
-            ),
+            final_start_us=max(float(boundary_timestamps[0]), first_press - config.pre_press_context_us),
+            final_end_us=min(float(boundary_timestamps[-1]), last_lift + config.post_lift_context_us),
         )
 
-    # Special first-segment recovery for a serialized-empty board_0 chunk.
-    if candidates and leading_board_chunk_empty and first_aligned_board_frame_us is not None:
-        first_index = min(candidates)
-        first_candidate = candidates[first_index]
-        if first_candidate.label.timestamp_us < first_aligned_board_frame_us:
-            recovered = _recover_first_segment_start_from_transient_peak(
-                first_candidate,
-                transient_score=transient_score,
-                boundary_timestamps_us=boundary_timestamps,
-                first_aligned_board_frame_us=first_aligned_board_frame_us,
-                pre_context_us=config.pre_press_context_us,
-            )
-            if not recovered:
-                skipped[first_index] = _skipped(
-                    first_candidate.label,
-                    first_index,
-                    first_candidate.next_label,
-                    _FIRST_SEGMENT_PEAK_SKIP_REASON,
-                    analysis=analyses[first_index],
-                )
-                del candidates[first_index]
-
-    # Resolve neighboring contexts.  A carry-in segment uses an asymmetric
-    # start rule: keep the previous segment unchanged and, only when the
-    # nominal press-0.2 s start intrudes into it, place the new start at the
-    # midpoint between previous.final_end and the carry-in press.
-    while True:
-        carry_in_failures = _resolve_window_collisions(candidates)
-        if not carry_in_failures:
-            break
-        for index, reason in carry_in_failures.items():
-            candidate = candidates.pop(index, None)
-            if candidate is not None:
-                skipped[index] = _skipped(
-                    candidate.label,
-                    index,
-                    candidate.next_label,
-                    reason,
-                    analysis=analyses[index],
-                )
+    _resolve_window_collisions(candidates)
     _resolve_remaining_overlaps(candidates)
-
     samples: list[BoardEventSegmentedSample] = []
     for index in sorted(candidates):
         candidate = candidates[index]
@@ -606,20 +518,6 @@ def segment_recording_by_aligned_board_events(
                 analysis=analyses[index],
             )
             continue
-
-        # Unified Board-assisted quality gate: every final segment, regardless
-        # of label spacing or boundary-recovery path, must be <= 5 s by default.
-        final_duration_us = candidate.final_end_us - candidate.final_start_us
-        if final_duration_us > config.maximum_segment_duration_us:
-            skipped[index] = _skipped(
-                candidate.label,
-                index,
-                candidate.next_label,
-                _MAXIMUM_SEGMENT_SKIP_REASON,
-                analysis=analyses[index],
-            )
-            continue
-
         start = int(
             np.searchsorted(boundary_timestamps, candidate.final_start_us, side="left")
         )
@@ -856,6 +754,10 @@ def segment_user_action_by_aligned_board_events(
                 input_kind=input_kind,
                 gravity_config=effective_gravity,
                 spike_root=spike_root,
+                # The caller-requested rate is a SUCCESS-only condition in
+                # aligned mode.  Load and validate every feature artifact
+                # before classifying its alignment outcome so a valid
+                # SKIPPED recording cannot fail this check prematurely.
                 expected_sampling_rate_hz=None,
             )
             preloaded_feature_inputs[recording.dataset_id] = feature_input
@@ -1032,8 +934,6 @@ def _prepare_success_recording_segmentation(
     board_frames: pd.DataFrame,
     board_contacts: pd.DataFrame,
     config: BoardEventSegmentationConfig,
-    transient_score: np.ndarray,
-    leading_board_chunk_empty: bool,
 ) -> tuple[tuple[SegmentLabel, ...], BoardEventSegmentationResult, tuple[str | None, ...]]:
     """Run the narrowly quarantineable portion of a SUCCESS recording."""
 
@@ -1071,9 +971,6 @@ def _prepare_success_recording_segmentation(
         events, pairs = align_board_event_tables(
             prepared.events, prepared.touch_pairs, offset=offset
         )
-        first_aligned_board_frame_us = float(
-            prepared.frames.iloc[0]["frame_timestamp_raw"]
-        ) + float(offset.boundary_offset_us)
     except BoardEventSegmentationError as error:
         raise _RecordingLocalSegmentationFailure(
             stage="board_event_alignment", cause=error
@@ -1087,9 +984,6 @@ def _prepare_success_recording_segmentation(
             aligned_touch_pairs=pairs,
             config=config,
             boundary_timestamps_us=boundary_timestamps_us,
-            transient_score=transient_score,
-            leading_board_chunk_empty=leading_board_chunk_empty,
-            first_aligned_board_frame_us=first_aligned_board_frame_us,
         )
         reasons = _combined_label_skip_reasons(source_labels, recording_result)
     except BoardEventSegmentationError as error:
@@ -1126,7 +1020,14 @@ def _build_aligned_recording_artifacts(
     create_verification_figure: object,
     verification_error: type[Exception],
 ) -> _AlignedRecordingArtifacts:
-    """Validate outcomes, then prepare only SUCCESS recordings for export."""
+    """Validate outcomes, then prepare only SUCCESS recordings for export.
+
+    Feature and Board inputs are loaded before the public alignment outcome
+    validator so both completed states are checked against current
+    provenance.  A validated SKIPPED recording is retained only as an audit
+    detail; it never enters label, event, segment, verification, or aggregate
+    processing.
+    """
 
     ordered_recordings = tuple(
         sorted(recordings, key=lambda recording: recording.dataset_id)
@@ -1244,18 +1145,6 @@ def _build_aligned_recording_artifacts(
                 f"could not build alignment boundary axis for dataset "
                 f"{recording.dataset_id}: {error}"
             ) from error
-
-        # Compute the exact same robust transient score once for both the
-        # first-segment recovery rule and the verification plot.  SpikeIMU
-        # therefore continues to use only its declared transient IMU channels
-        # (currently 15:21), never the spike event channels.
-        transient_score = compute_transient_score_array(
-            feature_input.values[:, feature_input.transient_channel_indices]
-        )
-        leading_board_chunk_empty = (
-            0 in tuple(board.validation.empty_leading_chunk_indices)
-        )
-
         try:
             source_labels, recording_result, reasons = (
                 _prepare_success_recording_segmentation(
@@ -1267,8 +1156,6 @@ def _build_aligned_recording_artifacts(
                     board_frames=board.frames,
                     board_contacts=board.contacts,
                     config=config,
-                    transient_score=transient_score,
-                    leading_board_chunk_empty=leading_board_chunk_empty,
                 )
             )
         except _RecordingLocalSegmentationFailure as failure:
@@ -1300,7 +1187,9 @@ def _build_aligned_recording_artifacts(
                 ring_dataframe=None,
                 feature_values=feature_input.values,
                 ring_timestamps_us=timestamps,
-                transient_score=transient_score,
+                transient_score=compute_transient_score_array(
+                    feature_input.values[:, feature_input.transient_channel_indices]
+                ),
                 aligned_board_events=recording_result.aligned_board_events,
                 labels=source_labels,
                 label_skip_reasons=reasons,
@@ -1489,6 +1378,7 @@ def _terminal_recording_error_summary(
         "alignment_required": config.require_successful_alignment,
         "alignment_offset_root": str(alignment_offset_root),
         "recording_error_policy": config.recording_error_policy,
+        "recording_error_policy": config.recording_error_policy,
         "published_segment_package": False,
     }
 
@@ -1609,12 +1499,8 @@ def _aggregate_and_write_aligned_outputs(
     event_rows: list[dict[str, object]] = []
     segment_index = 0
     for artifact in artifacts:
-        sample_by_label = {
-            sample.source_label_index: sample for sample in artifact.result.samples
-        }
-        skipped_by_label = {
-            sample.source_label_index: sample for sample in artifact.result.skipped
-        }
+        sample_by_label = {sample.source_label_index: sample for sample in artifact.result.samples}
+        skipped_by_label = {sample.source_label_index: sample for sample in artifact.result.skipped}
         for label_index, label in enumerate(artifact.labels):
             sample = sample_by_label.get(label_index)
             skipped = skipped_by_label.get(label_index)
@@ -1636,10 +1522,7 @@ def _aggregate_and_write_aligned_outputs(
                 all_samples.append(sample)
                 segment_index += 1
         event_rows.extend(
-            _board_event_rows(
-                artifact,
-                global_segment_start=segment_index - len(artifact.result.samples),
-            )
+            _board_event_rows(artifact, global_segment_start=segment_index - len(artifact.result.samples))
         )
     channel_count = artifacts[0].feature_input.channel_count
     raw_imu = (
@@ -1654,9 +1537,7 @@ def _aggregate_and_write_aligned_outputs(
     )
     labels = np.asarray([sample.label for sample in all_samples], dtype=np.str_)
     lengths = np.asarray([sample.sample_count for sample in all_samples], dtype=np.int32)
-    offsets = np.concatenate(
-        (np.array([0], dtype=np.int64), np.cumsum(lengths, dtype=np.int64))
-    )
+    offsets = np.concatenate((np.array([0], dtype=np.int64), np.cumsum(lengths, dtype=np.int64)))
     manifest = pd.DataFrame(manifest_rows)
     events = pd.DataFrame(event_rows)
     _validate_aggregate_arrays(
@@ -1861,9 +1742,7 @@ def _combined_label_skip_reasons(
     for skipped in result.skipped:
         reasons[skipped.source_label_index] = skipped.skip_reason
     if len(reasons) != len(labels):
-        raise BoardEventSegmentationError(
-            "recording result has incompatible label skip reasons"
-        )
+        raise BoardEventSegmentationError("recording result has incompatible label skip reasons")
     return tuple(reasons)
 
 
@@ -1891,27 +1770,19 @@ def _manifest_row(
     base: dict[str, object] = {
         "segment_index": segment_index,
         "exported": sample is not None,
-        "skip_reason": (
-            None
-            if sample is not None
-            else (skipped.skip_reason if skipped else "not_processed")
-        ),
+        "skip_reason": None if sample is not None else (skipped.skip_reason if skipped else "not_processed"),
         "user": artifact.recording.user,
         "action": artifact.recording.action,
         "dataset_id": artifact.recording.dataset_id,
         "source_label_index": label_index,
         "label": label.label,
         "label_timestamp_us": label.timestamp_us,
-        "next_label_timestamp_us": (
-            None if next_label is None else next_label.timestamp_us
-        ),
+        "next_label_timestamp_us": None if next_label is None else next_label.timestamp_us,
         "alignment_offset_us": artifact.offset.offset_us,
         "work_axis_offset_us": artifact.offset.work_axis_offset_us,
         "canonical_offset_us": artifact.offset.canonical_offset_us,
         "alignment_offset_domain": artifact.offset.offset_domain,
-        "canonical_offset_projection_success": (
-            artifact.offset.canonical_offset_projection_success
-        ),
+        "canonical_offset_projection_success": artifact.offset.canonical_offset_projection_success,
         "alignment_event_coverage_ratio": artifact.offset.event_coverage_ratio,
         "ring_source_path": str(artifact.recording.ring_0_path),
         "feature_values_path": str(feature.values_path),
@@ -1932,9 +1803,7 @@ def _manifest_row(
         "feature_metadata_sha256": feature.metadata_sha256,
         "timestamps_sha256": feature.timestamps_sha256,
         "acceleration_semantics": (
-            _acceleration_semantics(gravity_method)
-            if is_raw and gravity_method
-            else None
+            _acceleration_semantics(gravity_method) if is_raw and gravity_method else None
         ),
         "acceleration_g_unit": "g" if is_raw else None,
         "acceleration_m_s2_unit": "m/s^2",
@@ -1951,7 +1820,6 @@ def _manifest_row(
                 "provisional_end_timestamp_us": None,
                 "final_start_timestamp_us": None,
                 "final_end_timestamp_us": None,
-                "final_segment_duration_us": None,
                 "start_sample_index": None,
                 "stop_sample_index_exclusive": None,
                 "sample_count": None,
@@ -1968,14 +1836,10 @@ def _manifest_row(
                     0 if skipped is None else skipped.crossing_touch_pair_count
                 ),
                 "accepted_crossing_touch_pair_count": (
-                    0
-                    if skipped is None
-                    else skipped.accepted_crossing_touch_pair_count
+                    0 if skipped is None else skipped.accepted_crossing_touch_pair_count
                 ),
                 "rejected_crossing_touch_pair_count": (
-                    0
-                    if skipped is None
-                    else skipped.rejected_crossing_touch_pair_count
+                    0 if skipped is None else skipped.rejected_crossing_touch_pair_count
                 ),
                 "boundary_source": None,
                 "boundary_collision_resolved": False,
@@ -1990,9 +1854,6 @@ def _manifest_row(
             "provisional_end_timestamp_us": sample.provisional_end_timestamp_us,
             "final_start_timestamp_us": sample.final_start_timestamp_us,
             "final_end_timestamp_us": sample.final_end_timestamp_us,
-            "final_segment_duration_us": (
-                sample.final_end_timestamp_us - sample.final_start_timestamp_us
-            ),
             "start_sample_index": sample.start_sample_index,
             "stop_sample_index_exclusive": sample.stop_sample_index_exclusive,
             "sample_count": sample.sample_count,
@@ -2000,12 +1861,8 @@ def _manifest_row(
             "transient_touch_pair_count": sample.transient_touch_pair_count,
             "incomplete_touch_pair_count": sample.incomplete_touch_pair_count,
             "crossing_touch_pair_count": sample.crossing_touch_pair_count,
-            "accepted_crossing_touch_pair_count": (
-                sample.accepted_crossing_touch_pair_count
-            ),
-            "rejected_crossing_touch_pair_count": (
-                sample.rejected_crossing_touch_pair_count
-            ),
+            "accepted_crossing_touch_pair_count": sample.accepted_crossing_touch_pair_count,
+            "rejected_crossing_touch_pair_count": sample.rejected_crossing_touch_pair_count,
             "boundary_source": sample.boundary_source,
             "boundary_collision_resolved": sample.boundary_collision_resolved,
         }
@@ -2049,10 +1906,7 @@ def _board_event_rows(
                     break
         if channel is not None:
             for local_segment_index, sample in enumerate(samples):
-                if (
-                    _optional_int(event.assigned_label_index)
-                    != sample.source_label_index
-                ):
+                if _optional_int(event.assigned_label_index) != sample.source_label_index:
                     continue
                 boundary_start_us = (
                     sample.boundary_start_timestamp_us
@@ -2069,13 +1923,8 @@ def _board_event_rows(
                 segment_times = artifact.boundary_timestamps_us[
                     sample.start_sample_index : sample.stop_sample_index_exclusive
                 ]
-                local_index = int(
-                    np.searchsorted(segment_times, timestamp, side="left")
-                )
-                if (
-                    local_index < sample.sample_count
-                    and sample.board_event_targets[local_index, channel]
-                ):
+                local_index = int(np.searchsorted(segment_times, timestamp, side="left"))
+                if local_index < sample.sample_count and sample.board_event_targets[local_index, channel]:
                     assigned = global_segment_start + local_segment_index
                 break
         if assigned is None and boundary_segment_index is not None:
@@ -2096,9 +1945,7 @@ def _board_event_rows(
                 "transient": bool(event.transient),
                 "incomplete_touch": bool(event.incomplete_touch),
                 "crossing_touch": bool(event.crossing_touch),
-                "crosses_next_label_timestamp": bool(
-                    event.crosses_next_label_timestamp
-                ),
+                "crosses_next_label_timestamp": bool(event.crosses_next_label_timestamp),
                 "crossing_resolution": event.crossing_resolution,
                 "assigned_label_index": _optional_int(event.assigned_label_index),
                 "duration_frames": event.duration_frames,
@@ -2113,10 +1960,7 @@ def _board_event_rows(
 
 
 def _event_target_channel(event: object) -> int | None:
-    if (
-        bool(event.incomplete_touch)
-        or _optional_int(event.assigned_label_index) is None
-    ):
+    if bool(event.incomplete_touch) or _optional_int(event.assigned_label_index) is None:
         return None
     if not bool(event.valid_touch) and not bool(event.transient):
         return None
@@ -2164,9 +2008,7 @@ def _aligned_summary(
         for skipped in artifact.result.skipped:
             skip_counts[skipped.skip_reason] = skip_counts.get(skipped.skip_reason, 0) + 1
         for sample in artifact.result.samples:
-            boundary_counts[sample.boundary_source] = (
-                boundary_counts.get(sample.boundary_source, 0) + 1
-            )
+            boundary_counts[sample.boundary_source] = boundary_counts.get(sample.boundary_source, 0) + 1
     pairs = [artifact.result.aligned_touch_pairs for artifact in artifacts]
     pair_table = pd.concat(pairs, ignore_index=True) if pairs else pd.DataFrame()
     verification_paths = [artifact.verification_path for artifact in artifacts]
@@ -2192,7 +2034,9 @@ def _aligned_summary(
         }
         for artifact in artifacts
     ]
-    alignment_outcome_dependency = _alignment_outcome_dependency(recording_artifacts)
+    alignment_outcome_dependency = _alignment_outcome_dependency(
+        recording_artifacts
+    )
     return {
         "input_kind": input_kind,
         "boundary_mode": "aligned_board_events",
@@ -2205,9 +2049,7 @@ def _aligned_summary(
         ),
         "alignment_time_axis": {
             "strategy": artifacts[0].offset.alignment_time_axis_strategy,
-            "sampling_rate_hz": (
-                artifacts[0].offset.alignment_time_axis_sampling_rate_hz
-            ),
+            "sampling_rate_hz": artifacts[0].offset.alignment_time_axis_sampling_rate_hz,
             "sample_count": artifacts[0].offset.alignment_time_axis_sample_count,
         },
         "canonical_offset_projection_success": all(
@@ -2219,75 +2061,24 @@ def _aligned_summary(
         "alignment_offset_root": str(alignment_offset_root),
         "pre_press_context_us": config.pre_press_context_us,
         "post_lift_context_us": config.post_lift_context_us,
-        "minimum_label_interval_us": config.minimum_label_interval_us,
-        "maximum_final_segment_duration_us": config.maximum_segment_duration_us,
-        "carry_in_press_lookback_us": config.carry_in_press_lookback_us,
-        "long_label_intervals_allowed": True,
-        "first_segment_empty_board_transient_recovery": True,
-        "source_label_count": int(
-            sum(len(artifact.labels) for artifact in artifacts)
-        ),
+        "source_label_count": int(sum(len(artifact.labels) for artifact in artifacts)),
         "exported_segment_count": len(samples),
-        "skipped_segment_count": int(
-            sum(len(artifact.result.skipped) for artifact in artifacts)
-        ),
+        "skipped_segment_count": int(sum(len(artifact.result.skipped) for artifact in artifacts)),
         "skipped_segment_counts_by_reason": dict(sorted(skip_counts.items())),
-        "valid_touch_pair_count": (
-            int(pair_table["valid_touch"].astype(bool).sum())
-            if not pair_table.empty
-            else 0
-        ),
-        "transient_touch_pair_count": (
-            int(pair_table["transient"].astype(bool).sum())
-            if not pair_table.empty
-            else 0
-        ),
-        "incomplete_touch_pair_count": (
-            int(pair_table["incomplete_touch"].astype(bool).sum())
-            if not pair_table.empty
-            else 0
-        ),
-        "crossing_touch_pair_count": (
-            int(pair_table["crossing_touch"].astype(bool).sum())
-            if not pair_table.empty
-            else 0
-        ),
-        "accepted_crossing_touch_pair_count": (
-            int(
-                (
-                    pair_table["crossing_resolution"]
-                    == "accepted_before_next_press"
-                ).sum()
-            )
-            if not pair_table.empty
-            else 0
-        ),
-        "carry_in_touch_pair_count": (
-            int((pair_table["crossing_resolution"] == _CARRY_IN_RESOLUTION).sum())
-            if not pair_table.empty
-            else 0
-        ),
-        "rejected_crossing_touch_pair_count": (
-            int(
-                pair_table["crossing_resolution"]
-                .isin(
-                    (
-                        "rejected_overlaps_next_press",
-                        "rejected_next_press_missing",
-                    )
-                )
-                .sum()
-            )
-            if not pair_table.empty
-            else 0
-        ),
+        "valid_touch_pair_count": int(pair_table["valid_touch"].astype(bool).sum()) if not pair_table.empty else 0,
+        "transient_touch_pair_count": int(pair_table["transient"].astype(bool).sum()) if not pair_table.empty else 0,
+        "incomplete_touch_pair_count": int(pair_table["incomplete_touch"].astype(bool).sum()) if not pair_table.empty else 0,
+        "crossing_touch_pair_count": int(pair_table["crossing_touch"].astype(bool).sum()) if not pair_table.empty else 0,
+        "accepted_crossing_touch_pair_count": int(
+            (pair_table["crossing_resolution"] == "accepted_before_next_press").sum()
+        ) if not pair_table.empty else 0,
+        "rejected_crossing_touch_pair_count": int(
+            pair_table["crossing_resolution"].isin(
+                ("rejected_overlaps_next_press", "rejected_next_press_missing")
+            ).sum()
+        ) if not pair_table.empty else 0,
         "crossing_touch_policy": config.crossing_touch_policy,
-        "board_event_target_channels": [
-            "valid_press",
-            "valid_lift",
-            "transient_press",
-            "transient_lift",
-        ],
+        "board_event_target_channels": ["valid_press", "valid_lift", "transient_press", "transient_lift"],
         "boundary_source_counts": dict(sorted(boundary_counts.items())),
         "recording_count": len(artifacts),
         "source_recording_count": recording_artifacts.source_recording_count,
@@ -2315,8 +2106,7 @@ def _aligned_summary(
         "recordings_without_verification": [
             artifact.recording.dataset_id
             for artifact in artifacts
-            if not artifact.verification_path.is_file()
-            or artifact.verification_path.stat().st_size == 0
+            if not artifact.verification_path.is_file() or artifact.verification_path.stat().st_size == 0
         ],
         "output_dtype": output_dtype.name,
         "output_schema_version": 4,
@@ -2332,12 +2122,8 @@ def _aligned_summary(
         "transient_channel_indices": list(first_feature.transient_channel_indices),
         "transient_channel_names": list(first_feature.transient_channel_names),
         "event_channel_slice": [0, 15] if input_kind == "spike-imu" else None,
-        "acceleration_m_s2_channel_slice": (
-            [15, 18] if input_kind == "spike-imu" else [3, 6]
-        ),
-        "gyroscope_channel_slice": (
-            [18, 21] if input_kind == "spike-imu" else [6, 9]
-        ),
+        "acceleration_m_s2_channel_slice": [15, 18] if input_kind == "spike-imu" else [3, 6],
+        "gyroscope_channel_slice": [18, 21] if input_kind == "spike-imu" else [6, 9],
         "feature_values_sha256": [
             feature.values_sha256 for feature in feature_inputs
         ],
@@ -2357,21 +2143,14 @@ def _aligned_summary(
                     if feature.timestamps_path is not None
                 }
             ),
-            "sha256": sorted(
-                {feature.timestamps_sha256 for feature in feature_inputs}
-            ),
+            "sha256": sorted({feature.timestamps_sha256 for feature in feature_inputs}),
         },
         "alignment_input_hash_match_verified": (
             input_kind == "spike-imu"
-            and all(
-                artifact.offset.feature_values_sha256
-                == artifact.feature_input.values_sha256
-                and artifact.offset.feature_metadata_sha256
-                == artifact.feature_input.metadata_sha256
-                and artifact.offset.timestamp_sha256
-                == artifact.feature_input.timestamps_sha256
-                for artifact in artifacts
-            )
+            and all(artifact.offset.feature_values_sha256 == artifact.feature_input.values_sha256
+                    and artifact.offset.feature_metadata_sha256 == artifact.feature_input.metadata_sha256
+                    and artifact.offset.timestamp_sha256 == artifact.feature_input.timestamps_sha256
+                    for artifact in artifacts)
         ),
         "board_event_targets_present": True,
         "units": {
@@ -2400,20 +2179,17 @@ def _aligned_summary(
             ),
             "sampling_rate_hz": (
                 None
-                if not raw_gravity
-                or gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.sampling_rate_hz
             ),
             "low_pass_cutoff_hz": (
                 None
-                if not raw_gravity
-                or gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.low_pass_cutoff_hz
             ),
             "madgwick_beta": (
                 None
-                if not raw_gravity
-                or gravity_config.gravity_removal_method == "raw"
+                if not raw_gravity or gravity_config.gravity_removal_method == "raw"
                 else gravity_config.madgwick_beta
             ),
         },
@@ -2466,20 +2242,11 @@ def _validate_aggregate_arrays(
         or raw_imu.shape[1] != expected_channels
         or targets.shape != (len(raw_imu), 4)
     ):
-        raise BoardEventSegmentationError(
-            "aligned aggregate arrays have invalid channel shapes"
-        )
+        raise BoardEventSegmentationError("aligned aggregate arrays have invalid channel shapes")
     if len(labels) != len(lengths) or len(offsets) != len(labels) + 1:
-        raise BoardEventSegmentationError(
-            "aligned aggregate arrays have inconsistent segment counts"
-        )
-    if (
-        not np.array_equal(np.diff(offsets), lengths)
-        or int(offsets[-1]) != len(raw_imu)
-    ):
-        raise BoardEventSegmentationError(
-            "aligned aggregate offsets do not delimit raw IMU"
-        )
+        raise BoardEventSegmentationError("aligned aggregate arrays have inconsistent segment counts")
+    if not np.array_equal(np.diff(offsets), lengths) or int(offsets[-1]) != len(raw_imu):
+        raise BoardEventSegmentationError("aligned aggregate offsets do not delimit raw IMU")
 
 
 def _publish_staging_directory(
@@ -2537,44 +2304,6 @@ def _acceleration_semantics(method: str) -> str:
     return "gravity_removed_linear_acceleration"
 
 
-def _board_label_start_skip_reasons(
-    labels: Sequence[SegmentLabel],
-    *,
-    minimum_label_interval_us: float,
-) -> tuple[str | None, ...]:
-    """Apply Board-mode label validity without a maximum label-gap rule.
-
-    ``wrong`` remains invalid.  An adjacent interval shorter than the minimum
-    invalidates both neighboring starts, matching label-only semantics.  Long
-    label intervals remain eligible because Board events determine the actual
-    segment boundaries; the final segment duration is checked separately.
-    """
-
-    reasons: list[str | None] = [None] * len(labels)
-    for index, marker in enumerate(labels):
-        if marker.label.strip().casefold() == "wrong":
-            reasons[index] = "label_is_wrong"
-    for index in range(len(labels) - 1):
-        interval = labels[index + 1].timestamp_us - labels[index].timestamp_us
-        if interval < minimum_label_interval_us:
-            _set_board_skip_reason(
-                reasons, index, "adjacent_interval_lt_0.1s"
-            )
-            _set_board_skip_reason(
-                reasons, index + 1, "adjacent_interval_lt_0.1s"
-            )
-    return tuple(reasons)
-
-
-def _set_board_skip_reason(
-    reasons: list[str | None], index: int, reason: str
-) -> None:
-    """Keep an explicit ``wrong`` label reason when several rules apply."""
-
-    if reasons[index] is None:
-        reasons[index] = reason
-
-
 def _analyze_label_interval(
     *,
     source_label_index: int,
@@ -2594,8 +2323,7 @@ def _analyze_label_interval(
     complete = ~touch_pairs["incomplete_touch"].astype(bool) & np.isfinite(lift)
     ordered = lift > press
     owned = (
-        touch_pairs["assigned_label_index"].astype("Int64")
-        == source_label_index
+        touch_pairs["assigned_label_index"].astype("Int64") == source_label_index
     ).fillna(False)
     eligible_mask = (
         owned
@@ -2604,18 +2332,11 @@ def _analyze_label_interval(
         & touch_pairs["valid_touch"].astype(bool)
         & ~touch_pairs["transient"].astype(bool)
     )
-    transient_mask = (
-        owned
-        & complete
-        & ordered
-        & touch_pairs["transient"].astype(bool)
-    )
+    transient_mask = owned & complete & ordered & touch_pairs["transient"].astype(bool)
     incomplete_mask = in_interval & touch_pairs["incomplete_touch"].astype(bool)
     event_interval = events["aligned_event_timestamp_us"] >= label.timestamp_us
     if next_label is not None:
-        event_interval &= (
-            events["aligned_event_timestamp_us"] < next_label.timestamp_us
-        )
+        event_interval &= events["aligned_event_timestamp_us"] < next_label.timestamp_us
     else:
         event_interval &= events["aligned_event_timestamp_us"] <= ring_end_us
     incomplete_event_count = int(
@@ -2631,159 +2352,43 @@ def _analyze_label_interval(
             int(np.count_nonzero(incomplete_mask)), incomplete_event_count
         ),
         crossing_touch_pair_count=int(
-            np.count_nonzero(
-                in_interval
-                & touch_pairs["crosses_next_label_timestamp"].astype(bool)
-            )
+            np.count_nonzero(in_interval & touch_pairs["crosses_next_label_timestamp"].astype(bool))
         ),
         accepted_crossing_touch_pair_count=int(
             np.count_nonzero(
                 in_interval
-                & (
-                    touch_pairs["crossing_resolution"]
-                    == "accepted_before_next_press"
-                )
+                & (touch_pairs["crossing_resolution"] == "accepted_before_next_press")
             )
         ),
         rejected_crossing_touch_pair_count=int(
             np.count_nonzero(
                 in_interval
                 & touch_pairs["crossing_resolution"].isin(
-                    (
-                        "rejected_overlaps_next_press",
-                        "rejected_next_press_missing",
-                    )
+                    ("rejected_overlaps_next_press", "rejected_next_press_missing")
                 )
             )
         ),
     )
 
 
-def _recover_first_segment_start_from_transient_peak(
-    candidate: _CandidateWindow,
-    *,
-    transient_score: np.ndarray | None,
-    boundary_timestamps_us: np.ndarray,
-    first_aligned_board_frame_us: float,
-    pre_context_us: float,
-) -> bool:
-    """Recover an empty-leading-Board first-segment start from a strong peak.
+def _resolve_window_collisions(candidates: dict[int, _CandidateWindow]) -> None:
+    """Split overlapping adjacent contexts between their touch cores."""
 
-    Only alignment-grade peak regions strictly inside
-    ``(label_timestamp, first_aligned_board_frame)`` are eligible.  The most
-    prominent region wins, then the larger peak height, then the earlier peak
-    timestamp.  No raw-score/ordinary-local-maximum fallback is used.
-    """
-
-    if transient_score is None:
-        return False
-    try:
-        score = np.asarray(transient_score, dtype=np.float64)
-    except (TypeError, ValueError):
-        return False
-    if (
-        score.ndim != 1
-        or len(score) != len(boundary_timestamps_us)
-        or not np.isfinite(score).all()
-    ):
-        return False
-    label_us = float(candidate.label.timestamp_us)
-    board_start_us = float(first_aligned_board_frame_us)
-    if not label_us < board_start_us:
-        return False
-    try:
-        peaks = detect_transient_peak_regions(score, boundary_timestamps_us)
-    except EventAlignmentError:
-        return False
-    eligible = peaks.loc[
-        (peaks["peak_timestamp"] > label_us)
-        & (peaks["peak_timestamp"] < board_start_us)
-    ].copy()
-    if eligible.empty:
-        return False
-    selected = eligible.sort_values(
-        ["prominence", "height", "peak_timestamp"],
-        ascending=[False, False, True],
-        kind="mergesort",
-    ).iloc[0]
-    peak_us = float(selected["peak_timestamp"])
-    recovered_start = max(
-        float(boundary_timestamps_us[0]), peak_us - float(pre_context_us)
-    )
-    candidate.provisional_start_us = recovered_start
-    candidate.final_start_us = recovered_start
-    candidate.transient_start_recovered = True
-    # This is the first actual candidate, so carry-in collision handling is
-    # not applicable even if its first Board pair happened to cross a label.
-    candidate.carry_in_start = False
-    return True
-
-
-def _resolve_window_collisions(
-    candidates: dict[int, _CandidateWindow],
-) -> dict[int, str]:
-    """Resolve adjacent contexts and return carry-in candidates that must skip."""
-
-    failures: dict[int, str] = {}
     ordered = [candidates[index] for index in sorted(candidates)]
     for current, following in zip(ordered, ordered[1:], strict=False):
-        if following.carry_in_start:
-            reason = _resolve_carry_in_start_overlap(current, following)
-            if reason is not None:
-                failures[following.source_label_index] = reason
-            continue
         _resolve_pair_overlap(current, following)
-    return failures
 
 
 def _resolve_remaining_overlaps(candidates: dict[int, _CandidateWindow]) -> None:
-    """Final overlap guard after carry-in failures have been removed."""
-
     previous: _CandidateWindow | None = None
     for candidate in (candidates[index] for index in sorted(candidates)):
         if previous is not None and previous.final_end_us > candidate.final_start_us:
-            if candidate.carry_in_start:
-                reason = _resolve_carry_in_start_overlap(previous, candidate)
-                if reason is not None:
-                    raise BoardEventSegmentationError(
-                        "carry-in segment core overlaps the preceding resolved segment"
-                    )
-            else:
-                _resolve_pair_overlap(previous, candidate)
+            _resolve_pair_overlap(previous, candidate)
         previous = candidate
 
 
-def _resolve_carry_in_start_overlap(
-    previous: _CandidateWindow,
-    following: _CandidateWindow,
-) -> str | None:
-    """Keep previous unchanged and resolve only a carry-in segment's start.
-
-    Rules:
-
-    * if ``press - pre_context`` does not enter the previous final segment,
-      keep the nominal start;
-    * if it enters the previous segment but ``previous.final_end < press``,
-      start at the midpoint of ``previous.final_end`` and ``press``;
-    * if the previous segment reaches or passes the press itself, the carry-in
-      segment cannot retain its event core and is rejected.
-    """
-
-    if previous.final_end_us <= following.final_start_us:
-        return None
-    if previous.final_end_us >= following.first_press_us:
-        return "previous_segment_overlaps_carry_in_press"
-    following.final_start_us = (
-        previous.final_end_us + following.first_press_us
-    ) / 2.0
-    following.collision_resolved = True
-    return None
-
-
-def _resolve_pair_overlap(
-    current: _CandidateWindow, following: _CandidateWindow
-) -> None:
-    """Keep both event cores and split a normal overlapping context at midpoint."""
+def _resolve_pair_overlap(current: _CandidateWindow, following: _CandidateWindow) -> None:
+    """Keep both event cores and split an overlapping context at its midpoint."""
 
     if current.final_end_us <= following.final_start_us:
         return
@@ -2811,18 +2416,13 @@ def _event_targets_for_segment(
         timestamp = float(event.aligned_event_timestamp_us)
         if not final_start_us <= timestamp < final_end_us:
             continue
-        if (
-            bool(event.incomplete_touch)
-            or _optional_int(event.assigned_label_index) != source_label_index
-        ):
+        if bool(event.incomplete_touch) or _optional_int(event.assigned_label_index) != source_label_index:
             continue
         transient = bool(event.transient)
         if not bool(event.valid_touch) and not transient:
             continue
         channel = _TARGET_CHANNELS[(str(event.event_type), transient)]
-        local_index = int(
-            np.searchsorted(segment_timestamps_us, timestamp, side="left")
-        )
+        local_index = int(np.searchsorted(segment_timestamps_us, timestamp, side="left"))
         if local_index < len(segment_timestamps_us):
             targets[local_index, channel] = True
     return targets
@@ -2852,9 +2452,7 @@ def _skipped(
         source_label_index=index,
         label=label.label,
         label_timestamp_us=label.timestamp_us,
-        next_label_timestamp_us=(
-            None if next_label is None else next_label.timestamp_us
-        ),
+        next_label_timestamp_us=(None if next_label is None else next_label.timestamp_us),
         skip_reason=reason,
         valid_touch_pair_count=(
             0 if analysis is None else analysis.valid_touch_pair_count
@@ -2891,55 +2489,8 @@ def _standardize_board_detection(
     for table in (event_table, pair_table):
         table["crosses_next_label_timestamp"] = False
         table["crossing_resolution"] = "not_crossing"
-        table["assigned_label_index"] = pd.Series(
-            pd.NA, index=table.index, dtype="Int64"
-        )
+        table["assigned_label_index"] = pd.Series(pd.NA, index=table.index, dtype="Int64")
     return _validated_standard_event_tables(event_table, pair_table)
-
-
-def _event_neighbors_around_label(
-    ordered_events: pd.DataFrame,
-    label_timestamp_us: float,
-) -> tuple[object | None, object | None]:
-    """Return the nearest strict-before and first strict-after Board events."""
-
-    timestamps = ordered_events["aligned_event_timestamp_us"].to_numpy(
-        dtype=np.float64
-    )
-    before = np.flatnonzero(timestamps < label_timestamp_us)
-    after = np.flatnonzero(timestamps > label_timestamp_us)
-    previous = (
-        None
-        if len(before) == 0
-        else ordered_events.iloc[int(before[-1])]
-    )
-    following = (
-        None
-        if len(after) == 0
-        else ordered_events.iloc[int(after[0])]
-    )
-    return previous, following
-
-
-def _pair_is_immediate_carry_in_around_label(
-    ordered_events: pd.DataFrame,
-    *,
-    paired_touch_index: int,
-    label_timestamp_us: float,
-) -> bool:
-    """Require the same pair's press immediately before and lift immediately after."""
-
-    previous, following = _event_neighbors_around_label(
-        ordered_events, label_timestamp_us
-    )
-    if previous is None or following is None:
-        return False
-    return (
-        str(previous["event_type"]) == "press"
-        and _same_touch_index(previous["paired_touch_index"], paired_touch_index)
-        and str(following["event_type"]) == "lift"
-        and _same_touch_index(following["paired_touch_index"], paired_touch_index)
-    )
 
 
 def _classify_crossing_touches(
@@ -2948,29 +2499,17 @@ def _classify_crossing_touches(
     labels: Sequence[SegmentLabel],
     *,
     policy: str,
-    carry_in_press_lookback_us: float = 500_000.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Classify normal, carry-in, accepted, and rejected crossing pairs.
+    """Classify crossing pairs from their press interval and next valid press.
 
-    The carry-in rule has priority over the historical press-label crossing
-    rule.  A complete valid non-transient pair is reassigned to the following
-    label only when all of the following hold:
-
-    * ``press < next_label < lift``;
-    * ``next_label - press <= carry_in_press_lookback_us``;
-    * the nearest Board event before the label is this pair's press; and
-    * the first Board event after the label is this pair's lift.
-
-    If the nearest event before the label is a lift, or any other event lies
-    between the pair and the label, carry-in is not applied and the historical
-    crossing policy decides the pair instead.
+    A crossing pair is owned by its press label only when its lift is strictly
+    before the next label's first valid press.  This prevents one physical
+    touch from becoming a target in both neighboring segments.
     """
 
     event_table = events.copy(deep=True)
     pair_table = touch_pairs.copy(deep=True)
-    boundaries = np.asarray(
-        [label.timestamp_us for label in labels], dtype=np.float64
-    )
+    boundaries = np.asarray([label.timestamp_us for label in labels], dtype=np.float64)
     press = pair_table["aligned_press_us"].to_numpy(dtype=np.float64)
     lift = pair_table["aligned_lift_us"].to_numpy(dtype=np.float64)
     press_label_indices = np.searchsorted(boundaries, press, side="right") - 1
@@ -2990,11 +2529,6 @@ def _classify_crossing_touches(
         if len(candidates):
             first_valid_press[index] = float(np.min(candidates))
 
-    ordered_events = event_table.sort_values(
-        ["aligned_event_timestamp_us", "event_index"],
-        kind="mergesort",
-    ).reset_index(drop=True)
-
     crosses = np.zeros(len(pair_table), dtype=bool)
     resolutions = np.full(len(pair_table), "not_crossing", dtype=object)
     assigned = pd.Series(pd.NA, index=pair_table.index, dtype="Int64")
@@ -3004,32 +2538,10 @@ def _classify_crossing_touches(
         if not complete_ordered[row_index]:
             continue
         next_label_index = press_label_index + 1
-        if (
-            next_label_index >= len(labels)
-            or lift[row_index] < boundaries[next_label_index]
-        ):
+        if next_label_index >= len(labels) or lift[row_index] < boundaries[next_label_index]:
             assigned.iloc[row_index] = int(press_label_index)
             continue
-
         crosses[row_index] = True
-        next_label_us = float(boundaries[next_label_index])
-        pair_index = _optional_int(pair_table.iloc[row_index]["paired_touch_index"])
-        carry_in = (
-            pair_index is not None
-            and valid_non_transient[row_index]
-            and press[row_index] < next_label_us < lift[row_index]
-            and 0.0 < next_label_us - press[row_index] <= carry_in_press_lookback_us
-            and _pair_is_immediate_carry_in_around_label(
-                ordered_events,
-                paired_touch_index=pair_index,
-                label_timestamp_us=next_label_us,
-            )
-        )
-        if carry_in:
-            resolutions[row_index] = _CARRY_IN_RESOLUTION
-            assigned.iloc[row_index] = int(next_label_index)
-            continue
-
         next_press = first_valid_press.get(next_label_index)
         if next_press is None:
             resolutions[row_index] = "rejected_next_press_missing"
@@ -3039,34 +2551,23 @@ def _classify_crossing_touches(
                 assigned.iloc[row_index] = int(press_label_index)
         else:
             resolutions[row_index] = "rejected_overlaps_next_press"
-
     pair_table["crosses_next_label_timestamp"] = crosses
     pair_table["crossing_touch"] = crosses
     pair_table["crossing_resolution"] = resolutions
     pair_table["assigned_label_index"] = assigned
     pair_details = pair_table.set_index("paired_touch_index")
     event_table["crosses_next_label_timestamp"] = [
-        False
-        if pd.isna(pair_index)
-        else bool(
-            pair_details.loc[pair_index, "crosses_next_label_timestamp"]
-        )
+        False if pd.isna(pair_index) else bool(pair_details.loc[pair_index, "crosses_next_label_timestamp"])
         for pair_index in event_table["paired_touch_index"]
     ]
-    event_table["crossing_touch"] = event_table[
-        "crosses_next_label_timestamp"
-    ].astype(bool)
+    event_table["crossing_touch"] = event_table["crosses_next_label_timestamp"].astype(bool)
     event_table["crossing_resolution"] = [
-        "not_crossing"
-        if pd.isna(pair_index)
-        else str(pair_details.loc[pair_index, "crossing_resolution"])
+        "not_crossing" if pd.isna(pair_index) else str(pair_details.loc[pair_index, "crossing_resolution"])
         for pair_index in event_table["paired_touch_index"]
     ]
     event_table["assigned_label_index"] = pd.Series(
         [
-            pd.NA
-            if pd.isna(pair_index)
-            else pair_details.loc[pair_index, "assigned_label_index"]
+            pd.NA if pd.isna(pair_index) else pair_details.loc[pair_index, "assigned_label_index"]
             for pair_index in event_table["paired_touch_index"]
         ],
         index=event_table.index,
@@ -3081,9 +2582,7 @@ def _validated_standard_event_tables(
     events, touch_pairs = _with_crossing_classification_columns(events, touch_pairs)
     _require_dataframe(events, name="Board events")
     _require_dataframe(touch_pairs, name="Board touch pairs")
-    required_events = set(ALIGNED_BOARD_EVENT_COLUMNS) - {
-        "aligned_event_timestamp_us"
-    }
+    required_events = set(ALIGNED_BOARD_EVENT_COLUMNS) - {"aligned_event_timestamp_us"}
     required_pairs = set(ALIGNED_TOUCH_PAIR_COLUMNS) - {
         "aligned_press_us",
         "aligned_lift_us",
@@ -3095,12 +2594,10 @@ def _validated_standard_event_tables(
     _validate_event_types(event_table)
     _finite_series(event_table["frame_timestamp_raw"], name="frame_timestamp_raw")
     _finite_series(pair_table["press_timestamp_raw"], name="press_timestamp_raw")
-    lift_values = pd.to_numeric(pair_table["lift_timestamp_raw"], errors="coerce")
+    lift = pd.to_numeric(pair_table["lift_timestamp_raw"], errors="coerce")
     complete = ~pair_table["incomplete_touch"].astype(bool)
-    if not np.isfinite(lift_values[complete]).all():
-        raise BoardEventSegmentationError(
-            "complete touch pairs require finite lift timestamps"
-        )
+    if not np.isfinite(lift[complete]).all():
+        raise BoardEventSegmentationError("complete touch pairs require finite lift timestamps")
     return event_table, pair_table
 
 
@@ -3117,19 +2614,11 @@ def _validated_aligned_event_tables(
     event_table = events.loc[:, list(ALIGNED_BOARD_EVENT_COLUMNS)].copy(deep=True)
     pair_table = touch_pairs.loc[:, list(ALIGNED_TOUCH_PAIR_COLUMNS)].copy(deep=True)
     _validate_event_types(event_table)
-    _finite_series(
-        event_table["aligned_event_timestamp_us"], name="aligned event timestamp"
-    )
-    _finite_series(
-        pair_table["aligned_press_us"], name="aligned press timestamp"
-    )
+    _finite_series(event_table["aligned_event_timestamp_us"], name="aligned event timestamp")
+    _finite_series(pair_table["aligned_press_us"], name="aligned press timestamp")
     complete = ~pair_table["incomplete_touch"].astype(bool)
-    if not np.isfinite(
-        pair_table.loc[complete, "aligned_lift_us"].to_numpy(dtype=float)
-    ).all():
-        raise BoardEventSegmentationError(
-            "complete touch pairs require finite aligned lift timestamps"
-        )
+    if not np.isfinite(pair_table.loc[complete, "aligned_lift_us"].to_numpy(dtype=float)).all():
+        raise BoardEventSegmentationError("complete touch pairs require finite aligned lift timestamps")
     if (
         pair_table.loc[complete, "aligned_lift_us"].to_numpy(dtype=np.float64)
         <= pair_table.loc[complete, "aligned_press_us"].to_numpy(dtype=np.float64)
@@ -3143,7 +2632,7 @@ def _validated_aligned_event_tables(
 def _with_crossing_classification_columns(
     events: pd.DataFrame, touch_pairs: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Accept pre-policy event tables while normalizing audit columns."""
+    """Accept pre-policy event tables while normalizing new audit columns."""
 
     _require_dataframe(events, name="Board events")
     _require_dataframe(touch_pairs, name="Board touch pairs")
@@ -3165,55 +2654,33 @@ def _with_crossing_classification_columns(
 
 def _validated_config(config: BoardEventSegmentationConfig) -> np.dtype:
     if not isinstance(config, BoardEventSegmentationConfig):
-        raise BoardEventSegmentationError(
-            "config must be BoardEventSegmentationConfig"
-        )
+        raise BoardEventSegmentationError("config must be BoardEventSegmentationConfig")
     if config.output_dtype not in {"float32", "float64"}:
-        raise BoardEventSegmentationError(
-            "output_dtype must be float32 or float64"
-        )
+        raise BoardEventSegmentationError("output_dtype must be float32 or float64")
     if not isinstance(config.include_last_label, bool):
         raise BoardEventSegmentationError("include_last_label must be a boolean")
     for value, name in (
         (config.pre_press_context_us, "pre_press_context_us"),
         (config.post_lift_context_us, "post_lift_context_us"),
-        (config.carry_in_press_lookback_us, "carry_in_press_lookback_us"),
     ):
         if _finite_float(value, name=name) < 0.0:
             raise BoardEventSegmentationError(f"{name} must be nonnegative")
-    minimum = _finite_float(
-        config.minimum_label_interval_us, name="minimum_label_interval_us"
-    )
-    maximum = _finite_float(
-        config.maximum_segment_duration_us, name="maximum_segment_duration_us"
-    )
+    minimum = _finite_float(config.minimum_label_interval_us, name="minimum_label_interval_us")
+    maximum = _finite_float(config.maximum_segment_duration_us, name="maximum_segment_duration_us")
     if minimum <= 0.0 or maximum <= 0.0 or minimum > maximum:
-        raise BoardEventSegmentationError(
-            "label minimum and final-segment maximum must be positive and ordered"
-        )
+        raise BoardEventSegmentationError("label interval limits must be positive and ordered")
     if config.missing_event_policy != "skip":
-        raise BoardEventSegmentationError(
-            "only missing_event_policy='skip' is implemented"
-        )
+        raise BoardEventSegmentationError("only missing_event_policy='skip' is implemented")
     if config.crossing_touch_policy not in {"accept_until_next_press", "skip"}:
         raise BoardEventSegmentationError(
             "crossing_touch_policy must be 'accept_until_next_press' or 'skip'"
         )
     if config.label_time_domain not in {"ring", "board"}:
-        raise BoardEventSegmentationError(
-            "label_time_domain must be 'ring' or 'board'"
-        )
+        raise BoardEventSegmentationError("label_time_domain must be 'ring' or 'board'")
     if not isinstance(config.require_successful_alignment, bool):
-        raise BoardEventSegmentationError(
-            "require_successful_alignment must be a boolean"
-        )
-    if (
-        not isinstance(config.minimum_duration_frames, int)
-        or config.minimum_duration_frames < 1
-    ):
-        raise BoardEventSegmentationError(
-            "minimum_duration_frames must be a positive integer"
-        )
+        raise BoardEventSegmentationError("require_successful_alignment must be a boolean")
+    if not isinstance(config.minimum_duration_frames, int) or config.minimum_duration_frames < 1:
+        raise BoardEventSegmentationError("minimum_duration_frames must be a positive integer")
     if config.recording_error_policy not in {"error", "skip"}:
         raise BoardEventSegmentationError(
             "recording_error_policy must be 'error' or 'skip'"
@@ -3228,25 +2695,17 @@ def _validated_ring_inputs(
         imu = np.asarray(ring_imu, dtype=np.float64)
         timestamps = np.asarray(ring_timestamps_us, dtype=np.float64)
     except (TypeError, ValueError) as error:
-        raise BoardEventSegmentationError(
-            "Ring IMU and timestamps must be numeric"
-        ) from error
+        raise BoardEventSegmentationError("Ring IMU and timestamps must be numeric") from error
     if imu.ndim != 2 or imu.shape[1] == 0 or len(imu) == 0:
         raise BoardEventSegmentationError(
             "feature values must have nonempty shape (M, C)"
         )
     if timestamps.ndim != 1 or len(timestamps) != len(imu):
-        raise BoardEventSegmentationError(
-            "Ring timestamps must be a length-M vector"
-        )
+        raise BoardEventSegmentationError("Ring timestamps must be a length-M vector")
     if not np.isfinite(imu).all() or not np.isfinite(timestamps).all():
-        raise BoardEventSegmentationError(
-            "Ring IMU and timestamps must be finite"
-        )
+        raise BoardEventSegmentationError("Ring IMU and timestamps must be finite")
     if np.any(np.diff(timestamps) < 0.0):
-        raise BoardEventSegmentationError(
-            "Ring timestamps must be nondecreasing"
-        )
+        raise BoardEventSegmentationError("Ring timestamps must be nondecreasing")
     return imu.copy(), timestamps.copy()
 
 
@@ -3257,7 +2716,7 @@ def _resolve_feature_arguments(
     ring_imu: np.ndarray | None,
     ring_timestamps_us: np.ndarray | None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Accept generic feature names while retaining raw-ring API aliases."""
+    """Accept generic feature names while retaining the raw-ring API aliases."""
 
     if feature_values is not None and ring_imu is not None:
         raise BoardEventSegmentationError(
@@ -3276,39 +2735,27 @@ def _resolve_feature_arguments(
     return values, timestamps
 
 
-def _validated_labels(
-    labels: Sequence[SegmentLabel],
-) -> tuple[SegmentLabel, ...]:
+def _validated_labels(labels: Sequence[SegmentLabel]) -> tuple[SegmentLabel, ...]:
     markers = tuple(labels)
     if not markers:
-        raise BoardEventSegmentationError(
-            "at least one timestamp label is required"
-        )
+        raise BoardEventSegmentationError("at least one timestamp label is required")
     previous: float | None = None
     for marker in markers:
         if not isinstance(marker, SegmentLabel):
-            raise BoardEventSegmentationError(
-                "labels must contain SegmentLabel values"
-            )
+            raise BoardEventSegmentationError("labels must contain SegmentLabel values")
         timestamp = _finite_float(marker.timestamp_us, name="label timestamp")
         if not marker.label:
             raise BoardEventSegmentationError("label text must be nonempty")
         if previous is not None and timestamp <= previous:
-            raise BoardEventSegmentationError(
-                "label timestamps must be strictly increasing"
-            )
+            raise BoardEventSegmentationError("label timestamps must be strictly increasing")
         previous = timestamp
     return markers
 
 
-def _validate_label_range(
-    labels: Sequence[SegmentLabel], timestamps: np.ndarray
-) -> None:
+def _validate_label_range(labels: Sequence[SegmentLabel], timestamps: np.ndarray) -> None:
     for marker in labels:
         if marker.timestamp_us < timestamps[0] or marker.timestamp_us > timestamps[-1]:
-            raise BoardEventSegmentationError(
-                "label timestamp is outside the Ring range"
-            )
+            raise BoardEventSegmentationError("label timestamp is outside the Ring range")
 
 
 def _validated_boundary_timestamps(
@@ -3343,9 +2790,7 @@ def _canonical_point_for_boundary(
     canonical_timestamps_us: np.ndarray,
     boundary_timestamps_us: np.ndarray,
 ) -> float:
-    index = int(
-        np.searchsorted(boundary_timestamps_us, timestamp_us, side="left")
-    )
+    index = int(np.searchsorted(boundary_timestamps_us, timestamp_us, side="left"))
     index = min(max(index, 0), len(canonical_timestamps_us) - 1)
     return float(canonical_timestamps_us[index])
 
@@ -3369,9 +2814,7 @@ def _canonical_end_for_boundary(
     canonical_timestamps_us: np.ndarray,
     boundary_timestamps_us: np.ndarray,
 ) -> float:
-    index = int(
-        np.searchsorted(boundary_timestamps_us, timestamp_us, side="left")
-    )
+    index = int(np.searchsorted(boundary_timestamps_us, timestamp_us, side="left"))
     if index >= len(canonical_timestamps_us):
         return float(canonical_timestamps_us[-1])
     return float(canonical_timestamps_us[index])
@@ -3381,12 +2824,7 @@ def _validated_board_frames(frames: pd.DataFrame) -> pd.DataFrame:
     _require_dataframe(frames, name="Board frames")
     _require_columns(
         frames,
-        {
-            "global_frame_index",
-            "frame_timestamp_raw",
-            "chunk_index",
-            "contact_count",
-        },
+        {"global_frame_index", "frame_timestamp_raw", "chunk_index", "contact_count"},
         name="Board frames",
     )
     if frames.empty:
@@ -3402,44 +2840,30 @@ def _validated_board_contacts(contacts: pd.DataFrame) -> pd.DataFrame:
     return contacts.copy(deep=True)
 
 
-def _validate_final_samples(
-    samples: Sequence[BoardEventSegmentedSample],
-) -> None:
+def _validate_final_samples(samples: Sequence[BoardEventSegmentedSample]) -> None:
     previous_stop: int | None = None
     for sample in samples:
         if not 0 <= sample.start_sample_index < sample.stop_sample_index_exclusive:
-            raise BoardEventSegmentationError(
-                "final segmentation window is empty"
-            )
+            raise BoardEventSegmentationError("final segmentation window is empty")
         if previous_stop is not None and previous_stop > sample.start_sample_index:
-            raise BoardEventSegmentationError(
-                "final segmentation windows overlap"
-            )
+            raise BoardEventSegmentationError("final segmentation windows overlap")
         previous_stop = sample.stop_sample_index_exclusive
 
 
 def _require_dataframe(value: object, *, name: str) -> None:
     if not isinstance(value, pd.DataFrame):
-        raise BoardEventSegmentationError(
-            f"{name} must be a pandas DataFrame"
-        )
+        raise BoardEventSegmentationError(f"{name} must be a pandas DataFrame")
 
 
-def _require_columns(
-    dataframe: pd.DataFrame, required: set[str], *, name: str
-) -> None:
+def _require_columns(dataframe: pd.DataFrame, required: set[str], *, name: str) -> None:
     missing = sorted(required - set(dataframe.columns))
     if missing:
-        raise BoardEventSegmentationError(
-            f"{name} is missing column(s): {', '.join(missing)}"
-        )
+        raise BoardEventSegmentationError(f"{name} is missing column(s): {', '.join(missing)}")
 
 
 def _validate_event_types(events: pd.DataFrame) -> None:
     if not events["event_type"].isin(("press", "lift")).all():
-        raise BoardEventSegmentationError(
-            "Board event_type values must be press or lift"
-        )
+        raise BoardEventSegmentationError("Board event_type values must be press or lift")
 
 
 def _finite_series(values: pd.Series, *, name: str) -> None:

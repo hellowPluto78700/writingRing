@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -44,6 +45,14 @@ def _ring(*, end_us: int = 15_000_000) -> tuple[np.ndarray, np.ndarray]:
     timestamps = np.arange(0, end_us + 1, 100_000, dtype=np.float64)
     imu = np.column_stack([timestamps + axis for axis in range(6)])
     return imu, timestamps
+
+
+def _board_validation(*, empty_leading_chunk_indices: tuple[int, ...] = ()) -> SimpleNamespace:
+    """Return the validation metadata required by the production Board contract."""
+
+    return SimpleNamespace(
+        empty_leading_chunk_indices=empty_leading_chunk_indices,
+    )
 
 
 def _labels(*values: tuple[float, str]) -> tuple[SegmentLabel, ...]:
@@ -422,6 +431,101 @@ def test_single_touch_generates_context_window_and_event_targets() -> None:
     assert {skipped.skip_reason for skipped in result.skipped} == {"no_complete_touch_pair"}
 
 
+def test_board_label_gap_over_five_seconds_exports_short_final_windows() -> None:
+    imu, timestamps = _ring(end_us=25_000_000)
+    events, pairs = _aligned_tables(
+        [
+            (10_500_000.0, 11_000_000.0, False),
+            (20_500_000.0, 21_000_000.0, False),
+        ]
+    )
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "a"), (20_000_000.0, "b")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    assert result.samples
+    assert [sample.label for sample in result.samples] == ["a", "b"]
+    assert (
+        result.samples[0].next_label_timestamp_us
+        - result.samples[0].label_timestamp_us
+        > 5_000_000.0
+    )
+    assert all(
+        sample.final_end_timestamp_us - sample.final_start_timestamp_us
+        <= 5_000_000.0
+        for sample in result.samples
+    )
+
+
+def test_board_final_window_longer_than_five_seconds_is_skipped() -> None:
+    imu, timestamps = _ring(end_us=25_000_000)
+    events, pairs = _aligned_tables([(10_500_000.0, 16_000_000.0, False)])
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "too_long"), (20_000_000.0, "next")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    assert result.samples == ()
+    first_skip = next(item for item in result.skipped if item.source_label_index == 0)
+    assert first_skip.skip_reason == "final_segment_duration_gt_5s"
+
+
+def test_empty_leading_board_recovery_selects_most_prominent_peak_in_strict_range() -> None:
+    timestamps = np.arange(8_000_000.0, 20_000_001.0, 100_000.0)
+    imu = np.column_stack([timestamps + axis for axis in range(6)])
+    transient_score = np.zeros(len(timestamps), dtype=np.float64)
+    # The detector reports peaks near 9.7, 11.7, 12.7, and 14.2 s.  Only the
+    # two middle peaks are strictly between the label and first Board frame.
+    transient_score[[15, 35, 45, 60]] = [100.0, 20.0, 50.0, 100.0]
+    events, pairs = _aligned_tables([(13_500_000.0, 14_000_000.0, False)])
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "recovered")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+        transient_score=transient_score,
+        leading_board_chunk_empty=True,
+        first_aligned_board_frame_us=13_000_000.0,
+    )
+
+    assert [sample.label for sample in result.samples] == ["recovered"]
+    sample = result.samples[0]
+    assert sample.boundary_start_timestamp_us == 12_500_000.0
+    assert sample.final_start_timestamp_us == 12_500_000.0
+    assert sample.final_end_timestamp_us - sample.final_start_timestamp_us <= 5_000_000.0
+
+
+def test_empty_leading_board_recovery_has_no_fallback_without_alignment_grade_peak() -> None:
+    timestamps = np.arange(8_000_000.0, 20_000_001.0, 100_000.0)
+    imu = np.column_stack([timestamps + axis for axis in range(6)])
+    events, pairs = _aligned_tables([(13_500_000.0, 14_000_000.0, False)])
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "recovery_failed")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+        transient_score=np.zeros(len(timestamps), dtype=np.float64),
+        leading_board_chunk_empty=True,
+        first_aligned_board_frame_us=13_000_000.0,
+    )
+
+    assert result.samples == ()
+    assert result.skipped[0].skip_reason == "first_segment_preboard_strong_peak_not_found"
+
+
 def test_work_axis_boundary_lookup_slices_canonical_feature_indices() -> None:
     canonical = np.array(
         [0.0, 900_000.0, 1_100_000.0, 1_600_000.0, 2_500_000.0, 3_000_000.0]
@@ -504,9 +608,9 @@ def test_collision_resolution_uses_next_label_as_hard_boundary() -> None:
     assert (second.first_press_paired_touch_index, second.last_lift_paired_touch_index) == (1, 1)
 
 
-def test_crossing_touch_and_label_skip_rules_export_no_segment() -> None:
+def test_historical_crossing_touch_without_carry_in_exports_no_segment() -> None:
     imu, timestamps = _ring()
-    events, pairs = _aligned_tables([(12_500_000.0, 13_100_000.0, False)])
+    events, pairs = _aligned_tables([(12_400_000.0, 13_100_000.0, False)])
 
     result = segment_recording_by_aligned_board_events(
         ring_imu=imu,
@@ -531,12 +635,120 @@ def test_crossing_touch_and_label_skip_rules_export_no_segment() -> None:
     assert {item.skip_reason for item in close.skipped} >= {"adjacent_interval_lt_0.1s"}
 
 
+def test_carry_in_press_is_owned_by_following_label_and_keeps_nominal_start() -> None:
+    imu, timestamps = _ring(end_us=20_000_000)
+    events, pairs = _aligned_tables(
+        [
+            (10_500_000.0, 11_000_000.0, False),
+            (12_800_000.0, 13_200_000.0, False),
+        ]
+    )
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels(
+            (10_000_000.0, "a"),
+            (13_000_000.0, "b"),
+            (17_000_000.0, "c"),
+        ),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    assert [sample.label for sample in result.samples] == ["a", "b"]
+    carry = result.samples[1]
+    assert carry.source_label_index == 1
+    assert carry.first_press_paired_touch_index == 1
+    assert carry.final_start_timestamp_us == 12_600_000.0
+    assert carry.boundary_collision_resolved is False
+    carry_pair = result.aligned_touch_pairs.iloc[1]
+    assert carry_pair["crossing_resolution"] == "carried_into_next_label"
+    assert carry_pair["assigned_label_index"] == 1
+
+
+def test_carry_in_start_uses_midpoint_when_nominal_context_enters_previous_window() -> None:
+    imu, timestamps = _ring(end_us=20_000_000)
+    events, pairs = _aligned_tables(
+        [
+            (11_500_000.0, 12_550_000.0, False),
+            (12_800_000.0, 13_200_000.0, False),
+        ]
+    )
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels(
+            (10_000_000.0, "a"),
+            (13_000_000.0, "b"),
+            (17_000_000.0, "c"),
+        ),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    first, carry = result.samples
+    assert first.boundary_end_timestamp_us == 12_750_000.0
+    assert carry.boundary_start_timestamp_us == pytest.approx(12_775_000.0)
+    assert carry.final_start_timestamp_us == 12_800_000.0
+    assert carry.boundary_collision_resolved
+    assert carry.first_press_timestamp_us == 12_800_000.0
+
+
+def test_crossing_touch_after_preceding_lift_does_not_trigger_carry_in() -> None:
+    imu, timestamps = _ring(end_us=20_000_000)
+    events, pairs = _aligned_tables(
+        [
+            (10_500_000.0, 12_800_000.0, False),
+            (12_500_000.0, 13_100_000.0, False),
+            (13_500_000.0, 13_800_000.0, False),
+        ]
+    )
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "a"), (13_000_000.0, "b")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    assert [sample.label for sample in result.samples] == ["a", "b"]
+    crossing = result.aligned_touch_pairs.iloc[1]
+    assert crossing["crossing_resolution"] == "accepted_before_next_press"
+    assert crossing["assigned_label_index"] == 0
+
+
+def test_press_older_than_carry_in_lookback_keeps_historical_crossing_ownership() -> None:
+    imu, timestamps = _ring(end_us=20_000_000)
+    events, pairs = _aligned_tables(
+        [
+            (12_400_000.0, 13_100_000.0, False),
+            (13_500_000.0, 13_800_000.0, False),
+        ]
+    )
+
+    result = segment_recording_by_aligned_board_events(
+        ring_imu=imu,
+        ring_timestamps_us=timestamps,
+        labels=_labels((10_000_000.0, "a"), (13_000_000.0, "b")),
+        aligned_board_events=events,
+        aligned_touch_pairs=pairs,
+    )
+
+    assert [sample.label for sample in result.samples] == ["a", "b"]
+    crossing = result.aligned_touch_pairs.iloc[0]
+    assert crossing["crossing_resolution"] == "accepted_before_next_press"
+    assert crossing["assigned_label_index"] == 0
+
+
 def test_crossing_events_are_never_targets_when_neighbor_has_a_segment() -> None:
     imu, timestamps = _ring()
     events, pairs = _aligned_tables(
         [
             (10_500_000.0, 11_000_000.0, False),
-            (12_800_000.0, 13_100_000.0, False),
+            (12_400_000.0, 13_100_000.0, False),
             (13_200_000.0, 13_500_000.0, False),
         ]
     )
@@ -561,7 +773,7 @@ def test_accepted_crossing_is_owned_by_press_label_and_writes_targets() -> None:
     imu, timestamps = _ring()
     events, pairs = _aligned_tables(
         [
-            (12_800_000.0, 13_200_000.0, False),
+            (12_400_000.0, 13_200_000.0, False),
             (13_600_000.0, 13_900_000.0, False),
         ]
     )
@@ -615,7 +827,7 @@ def test_normal_and_accepted_crossing_use_last_lift_and_midpoint_context_split()
     events, pairs = _aligned_tables(
         [
             (10_500_000.0, 11_000_000.0, False),
-            (12_800_000.0, 13_300_000.0, False),
+            (12_400_000.0, 13_300_000.0, False),
             (13_500_000.0, 13_800_000.0, False),
         ]
     )
@@ -735,6 +947,7 @@ def test_user_action_aggregation_publishes_arrays_audit_and_verification(
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
                 "chunk_paths": (board_path,),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -856,6 +1069,7 @@ def test_user_action_quarantines_one_successful_alignment_recording_and_retains_
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
                 "chunk_paths": (board_paths[recording.dataset_id],),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -949,6 +1163,7 @@ def test_user_action_all_local_segmentation_errors_publish_report_without_empty_
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
                 "chunk_paths": (board_path,),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1039,6 +1254,7 @@ def test_user_action_mixed_success_and_skipped_excludes_recording_skip_from_outp
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
                 "chunk_paths": (board_paths[recording.dataset_id],),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1177,6 +1393,7 @@ def test_user_action_mixed_success_and_event_coverage_skipped_processes_only_suc
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(10)}),
                 "chunk_paths": (board_paths[recording.dataset_id],),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1251,6 +1468,7 @@ def test_user_action_stale_skipped_outcome_fails_before_labels(
                 "frames": pd.DataFrame(),
                 "contacts": pd.DataFrame(),
                 "chunk_paths": (board_path,),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1303,6 +1521,7 @@ def test_user_action_all_skipped_fails_before_empty_aggregate(
                 "frames": pd.DataFrame(),
                 "contacts": pd.DataFrame(),
                 "chunk_paths": (board_paths[recording.dataset_id],),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1355,6 +1574,7 @@ def test_user_action_all_event_coverage_skips_fail_before_aggregation_or_publica
                 "frames": pd.DataFrame(),
                 "contacts": pd.DataFrame(),
                 "chunk_paths": (board_paths[recording.dataset_id],),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1407,6 +1627,7 @@ def test_user_action_aligned_mode_rejects_missing_outcome_without_publishing(
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(4)}),
                 "chunk_paths": (board_path,),
+                "validation": _board_validation(),
             },
         )(),
     )
@@ -1504,6 +1725,7 @@ def test_verification_failure_preserves_existing_aligned_output(
                 "frames": frames,
                 "contacts": pd.DataFrame({"global_frame_index": np.arange(5)}),
                 "chunk_paths": (board_path,),
+                "validation": _board_validation(),
             },
         )(),
     )

@@ -339,6 +339,7 @@ def _patch_spike_aligned_board_loader(
             frames=frames,
             contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
             chunk_paths=(board_paths[recording.dataset_id],),
+            validation=SimpleNamespace(empty_leading_chunk_indices=()),
         ),
     )
 
@@ -545,6 +546,7 @@ def test_spike_aligned_board_aggregation_rejects_mixed_sampling_rates(
             frames=frames,
             contacts=pd.DataFrame({"global_frame_index": np.arange(4)}),
             chunk_paths=(board_paths[recording.dataset_id],),
+            validation=SimpleNamespace(empty_leading_chunk_indices=()),
         ),
     )
 
@@ -777,6 +779,7 @@ def test_spike_board_assist_publishes_21_channels_and_board_targets(
             frames=frames,
             contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
             chunk_paths=(board_path,),
+            validation=SimpleNamespace(empty_leading_chunk_indices=()),
         ),
     )
     _publish_spike_success_outcome(offset_root, feature_input, board_path)
@@ -898,6 +901,7 @@ def test_spike_board_assist_publishes_alignment_outcome_dependency_for_mixed_sta
             frames=frames,
             contacts=pd.DataFrame({"global_frame_index": np.arange(6)}),
             chunk_paths=(board_paths[recording.dataset_id],),
+            validation=SimpleNamespace(empty_leading_chunk_indices=()),
         ),
     )
 

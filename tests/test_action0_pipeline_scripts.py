@@ -12,7 +12,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "action0_pipeline"
+PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "Bash_Script" / "action0_pipeline"
 COMMON_PATH = PIPELINE_ROOT / "_common.bash"
 
 
@@ -688,6 +688,63 @@ def test_aligned_board_cli_requests_skip_and_authorized_outcome_overwrite() -> N
     overwrite_end = common.index("pipeline_init()")
     overwrite_block = common[overwrite_start:overwrite_end]
     assert "--overwrite-outcome" in overwrite_block
+
+
+def test_segment_command_uses_board_only_flags_for_aligned_mode(tmp_path: Path) -> None:
+    calls_path = tmp_path / "calls.log"
+    common_setup = [
+        f"source {shlex.quote(str(COMMON_PATH))}",
+        f"CALLS={shlex.quote(str(calls_path))}",
+        f"LOG_ROOT={shlex.quote(str(tmp_path))}",
+        "PYTHON_CMD=(python3)",
+        "DATA_ROOT=/unused",
+        "SPIKE_ROOT=/unused",
+        f"SEGMENT_ROOT={shlex.quote(str(tmp_path / 'segmentation'))}",
+        f"OFFSET_ROOT={shlex.quote(str(tmp_path / 'offsets'))}",
+        "SAMPLING_RATE=200",
+        "PIPELINE_USERS=(user)",
+        "ACTION=0",
+        "SEGMENT_OVERWRITE_ARGS=()",
+        "PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()",
+        "pipeline_run_logged() { printf '%s\\n' \"$*\" >>\"$CALLS\"; }",
+        "pipeline_write_segmentation_error_report() { :; }",
+    ]
+
+    aligned = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "\n".join(
+                [*common_setup, "BOUNDARY_MODE=aligned-board-events", "pipeline_segment"]
+            ),
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert aligned.returncode == 0, aligned.stdout + aligned.stderr
+    aligned_command = calls_path.read_text(encoding="utf-8").splitlines()[-1]
+    assert "--pre-press-context-seconds 0.2" in aligned_command
+    assert "--post-lift-context-seconds 0.2" in aligned_command
+    assert "--maximum-segment-duration-seconds 5.0" in aligned_command
+    assert "--carry-in-press-lookback-seconds 0.5" in aligned_command
+
+    label = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "\n".join([*common_setup, "BOUNDARY_MODE=label", "pipeline_segment"]),
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert label.returncode == 0, label.stdout + label.stderr
+    label_command = calls_path.read_text(encoding="utf-8").splitlines()[-1]
+    assert "--maximum-segment-duration-seconds" not in label_command
+    assert "--carry-in-press-lookback-seconds" not in label_command
 
 
 def _run_alignment_status_stub(

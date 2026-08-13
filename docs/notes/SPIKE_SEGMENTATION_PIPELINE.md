@@ -134,6 +134,17 @@ before Board-assisted outputs are published. The sampling-rate preflight also
 completes before staging; mixed-rate SpikeIMU recordings cannot produce an
 aggregate whose single top-level rate describes only the first recording.
 
+For an exportable first label whose leading `board_0` chunk is serialized
+empty, Board-assisted segmentation may recover its start from a transient
+peak. This is not a search over wavelet event channels: it scores only the
+trailing SpikeIMU transient input `spikeIMU[:, 15:21]`. The candidate peak must
+lie strictly between the label timestamp and the first aligned Board frame,
+and must be accepted by the same alignment-grade
+`detect_transient_peak_regions` detector used for alignment. Among eligible
+peaks, selection is greatest prominence, then greatest height, then earliest
+timestamp. No qualifying peak means no recovery fallback; normal Board-event
+availability rules continue to decide the candidate.
+
 ## Compatibility and migration
 
 Omitting both selectors keeps the existing raw-ring label workflow. Existing

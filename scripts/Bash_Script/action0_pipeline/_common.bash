@@ -728,6 +728,8 @@ pipeline_segment() {
                 --alignment-offset-root "$OFFSET_ROOT"
                 --pre-press-context-seconds 0.2
                 --post-lift-context-seconds 0.2
+                --maximum-segment-duration-seconds 5.0
+                --carry-in-press-lookback-seconds 0.5
                 --missing-event-policy skip
                 --crossing-touch-policy accept_until_next_press
                 --recording-error-policy skip

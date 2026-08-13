@@ -12,6 +12,12 @@ requires a previously exported successful Ring--Board offset and derives
 boundaries from aligned Board press/lift events. The `--input-kind` selector
 chooses the matrix being sliced; it never changes the boundary policy.
 
+The greater-than-five-second label-gap rule documented below belongs only to
+`boundary-mode=label`. Aligned Board mode keeps the `wrong` and too-close
+label checks but may export a label gap longer than five seconds when its
+resolved final Board-assisted window is at most five seconds; it skips a final
+window longer than five seconds.
+
 For the default `raw-ring` input, `scripts/segment_ring_imu.py` first removes
 the gravity contribution from each primary Ring recording, then exports
 variable-length IMU segments for one `user` and one `action`. It uses only
@@ -140,7 +146,7 @@ first selected Ring sample. The last label extends through the final Ring
 sample. Duplicated Ring timestamps at a boundary belong entirely to the later
 segment, so no sample is duplicated across segments.
 
-### Invalid label starts
+### Invalid label starts (label mode only)
 
 A marker is retained as a boundary but not exported as a segment start when
 its label is `wrong` (case-insensitive), or when its adjacent timestamp pair
