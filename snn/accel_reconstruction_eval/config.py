@@ -24,10 +24,10 @@ from pathlib import Path
 from typing import Literal
 
 try:
-    from .datasets import normalize_user_name
+    from .datasets import normalize_label_list, normalize_user_name
     from .evaluation import RepresentationEvaluationConfig
 except ImportError:  # direct-module use in notebooks/tests
-    from datasets import normalize_user_name
+    from datasets import normalize_label_list, normalize_user_name
     from evaluation import RepresentationEvaluationConfig
 
 
@@ -60,6 +60,7 @@ class UserSplitConfig:
     require_all_users_assigned: bool = True
     require_all_labels_in_all_splits: bool = True
     excluded_users: Sequence[str] = ()
+    included_labels: Sequence[str] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.excluded_users, (str, bytes, bytearray)) or not isinstance(
@@ -78,6 +79,11 @@ class UserSplitConfig:
                 f"{normalized}"
             )
         object.__setattr__(self, "excluded_users", normalized)
+
+        if self.included_labels is None:
+            return
+        normalized_labels = normalize_label_list(self.included_labels)
+        object.__setattr__(self, "included_labels", tuple(normalized_labels))
 
     def validate(self) -> None:
         if self.train_fraction <= 0 or self.val_fraction <= 0:

@@ -54,3 +54,21 @@ def test_excluded_users_reject_scalar_or_non_sequence_input(
 def test_excluded_users_reject_canonical_duplicates() -> None:
     with pytest.raises(ValueError, match="duplicate canonical"):
         UserSplitConfig(excluded_users=("17", "user_17"))
+
+
+def test_included_labels_are_ordered_immutable_and_canonical() -> None:
+    split = UserSplitConfig(included_labels=("b", 3, "a"))
+
+    assert split.included_labels == ("b", "3", "a")
+    assert isinstance(split.included_labels, tuple)
+
+
+def test_included_labels_reject_duplicates() -> None:
+    with pytest.raises(ValueError, match="duplicate canonical"):
+        UserSplitConfig(included_labels=("a", "a"))
+
+
+@pytest.mark.parametrize("included_labels", ["a", 3])
+def test_included_labels_reject_scalar_inputs(included_labels: object) -> None:
+    with pytest.raises(TypeError, match="included_labels.*sequence"):
+        UserSplitConfig(included_labels=included_labels)  # type: ignore[arg-type]

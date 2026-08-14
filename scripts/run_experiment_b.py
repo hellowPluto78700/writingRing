@@ -54,6 +54,7 @@ from snn.accel_reconstruction_eval import (
     load_checkpoint,
     normalization_from_checkpoint,
     prepare_user_disjoint_splits,
+    restrict_manifest_to_cohort,
     restore_model_from_checkpoint,
     save_embedding_bundle,
     save_paired_preservation,
@@ -268,6 +269,11 @@ def _validate_local_cohort_config(config: ExperimentConfig) -> None:
             "Experiment B local explicit user lists must all be None; "
             "the Experiment A checkpoint is authoritative"
         )
+    if split_config.included_labels is not None:
+        raise ValueError(
+            "Experiment B local included_labels must be None; "
+            "the Experiment A checkpoint is authoritative"
+        )
 
 
 def _resolve_cohort_contract(
@@ -326,28 +332,10 @@ def _resolve_cohort_contract(
                 f"{sorted(split_outside_eligible, key=natural_key)}"
             )
 
-        source_users = _source_user_cohort(sample_manifest)
-        expected_users = eligible_set.union(excluded_set)
-        if source_users != expected_users:
-            missing = sorted(expected_users.difference(source_users), key=natural_key)
-            additional = sorted(source_users.difference(expected_users), key=natural_key)
-            raise ValueError(
-                "Source dataset user cohort does not match checkpoint cohort; "
-                f"missing={missing}, additional={additional}"
-            )
         source = "checkpoint"
     else:
         excluded_users = ()
         assigned_users = set().union(*split_sets.values())
-        source_users = _source_user_cohort(sample_manifest)
-        if source_users != assigned_users:
-            missing = sorted(assigned_users.difference(source_users), key=natural_key)
-            additional = sorted(source_users.difference(assigned_users), key=natural_key)
-            raise ValueError(
-                "Legacy checkpoint fallback requires the dataset user cohort "
-                "to equal the checkpoint split-user union; "
-                f"missing={missing}, additional={additional}"
-            )
         eligible_users = tuple(sorted(assigned_users, key=natural_key))
         source = "legacy_no_exclusion_fallback"
 
@@ -377,9 +365,18 @@ def _prepare_split(
     _validate_local_cohort_config(config)
     if cohort is None:
         cohort = _resolve_cohort_contract(sample_manifest, checkpoint)
+    filtered_manifest = restrict_manifest_to_cohort(
+        sample_manifest,
+        split_users=(
+            *cohort.train_users,
+            *cohort.val_users,
+            *cohort.test_users,
+        ),
+        class_to_idx=cohort.class_to_idx,
+    )
     split_config = config.split
     return prepare_user_disjoint_splits(
-        sample_manifest,
+        filtered_manifest,
         seed=config.random_seed,
         explicit_train_users=cohort.train_users,
         explicit_val_users=cohort.val_users,

@@ -24,7 +24,7 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal, Sequence
+from typing import Literal, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -78,6 +78,10 @@ __all__ = [
     "AccelerationSegmentDataset",
     "MixedAccelerationDataset",
     "natural_key",
+    "normalize_label_list",
+    "normalize_user_list",
+    "normalize_user_name",
+    "restrict_manifest_to_cohort",
     "resolve_padded_root",
     "load_acceleration_data",
     "automatic_user_split",
@@ -703,11 +707,79 @@ def normalize_user_name(value: object) -> str:
     return text
 
 
+def normalize_label_list(values: Sequence[object]) -> list[str]:
+    """Canonicalize an ordered label selection and reject duplicates."""
+    if isinstance(values, (str, bytes, bytearray)) or not isinstance(values, Sequence):
+        raise TypeError("included_labels must be a non-string label sequence")
+    if any(value is None for value in values):
+        raise ValueError("included_labels must not contain null labels")
+    normalized = [str(value) for value in values]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError(
+            "included_labels contains duplicate canonical labels: "
+            f"{normalized}"
+        )
+    return normalized
+
+
 def normalize_user_list(values: Sequence[object]) -> list[str]:
     normalized = [normalize_user_name(value) for value in values]
     if len(normalized) != len(set(normalized)):
         raise ValueError(f"User list contains duplicates: {normalized}")
     return normalized
+
+
+def restrict_manifest_to_cohort(
+    sample_manifest: pd.DataFrame,
+    *,
+    split_users: Sequence[object],
+    class_to_idx: Mapping[object, object],
+) -> pd.DataFrame:
+    """Retain exactly the users and labels authorized by an A checkpoint.
+
+    Dataset/package loading and validation happen before this manifest-level
+    operation.  Filtering preserves source row order and all sample identity
+    columns, while making missing required users or labels explicit instead of
+    silently intersecting the checkpoint cohort with the available data.
+    """
+    required_columns = {"user", "label"}
+    missing = required_columns.difference(sample_manifest.columns)
+    if missing:
+        raise ValueError(f"sample_manifest is missing columns: {sorted(missing)}")
+
+    normalized_users = normalize_user_list(split_users)
+    required_users = set(normalized_users)
+    if not required_users:
+        raise ValueError("A checkpoint split-user union must not be empty")
+
+    if not isinstance(class_to_idx, Mapping):
+        raise TypeError("A checkpoint class_to_idx must be a mapping")
+    required_labels = {str(label) for label in class_to_idx}
+    if not required_labels:
+        raise ValueError("A checkpoint class_to_idx must not be empty")
+
+    manifest = sample_manifest.copy().reset_index(drop=True)
+    manifest_users = manifest["user"].astype(str).map(normalize_user_name)
+    manifest_labels = manifest["label"].astype(str)
+    user_mask = manifest_users.isin(required_users)
+    user_manifest_labels = set(manifest_labels.loc[user_mask])
+    missing_labels = sorted(required_labels.difference(user_manifest_labels))
+    if missing_labels:
+        raise ValueError(
+            "A checkpoint class_to_idx labels are missing after user cohort "
+            f"restriction: {missing_labels}"
+        )
+
+    selected_mask = user_mask & manifest_labels.isin(required_labels)
+    surviving_users = set(manifest_users.loc[selected_mask])
+    missing_users = sorted(required_users.difference(surviving_users), key=natural_key)
+    if missing_users:
+        raise ValueError(
+            "A checkpoint split users have no surviving rows after label "
+            f"restriction: {missing_users}"
+        )
+
+    return manifest.loc[selected_mask].reset_index(drop=True)
 
 
 def _validate_user_splits(
@@ -770,6 +842,7 @@ def prepare_user_disjoint_splits(
     explicit_val_users: Sequence[object] | None = None,
     explicit_test_users: Sequence[object] | None = None,
     excluded_users: Sequence[object] = (),
+    included_labels: Sequence[object] | None = None,
     require_all_users_assigned: bool = True,
     require_all_labels_in_all_splits: bool = True,
     class_to_idx: dict[str, int] | None = None,
@@ -782,6 +855,9 @@ def prepare_user_disjoint_splits(
 
     normalized_excluded_users = normalize_user_list(excluded_users)
     excluded_user_set = set(normalized_excluded_users)
+    normalized_included_labels = (
+        None if included_labels is None else normalize_label_list(included_labels)
+    )
     explicit = (explicit_train_users, explicit_val_users, explicit_test_users)
     normalized_explicit = tuple(
         None if value is None else normalize_user_list(value or []) for value in explicit
@@ -799,6 +875,26 @@ def prepare_user_disjoint_splits(
         normalized_manifest_users = manifest["user"].astype(str).map(normalize_user_name)
         manifest = manifest.loc[
             ~normalized_manifest_users.isin(excluded_user_set)
+        ].reset_index(drop=True)
+
+    if normalized_included_labels is not None:
+        available_labels = set(manifest["label"].astype(str))
+        missing_labels = [
+            label
+            for label in normalized_included_labels
+            if label not in available_labels
+        ]
+        if missing_labels:
+            raise ValueError(
+                "Requested labels are absent after user exclusion: "
+                f"{missing_labels}"
+            )
+        if not normalized_included_labels:
+            raise ValueError(
+                "included_labels must contain at least one label when provided"
+            )
+        manifest = manifest.loc[
+            manifest["label"].astype(str).isin(set(normalized_included_labels))
         ].reset_index(drop=True)
 
     if all(value is None for value in normalized_explicit):

@@ -91,3 +91,27 @@ def test_prepare_split_without_exclusions_matches_existing_split_contract() -> N
     assert_frame_equal(result.sample_manifest, expected.sample_manifest)
     assert_frame_equal(result.split_summary, expected.split_summary)
     assert_frame_equal(result.label_split_counts, expected.label_split_counts)
+
+
+def test_prepare_split_applies_labels_after_user_exclusions() -> None:
+    manifest = _manifest([f"user_{index}" for index in range(4)])
+    config = replace(
+        experiment_a_config(random_seed=17),
+        split=UserSplitConfig(
+            explicit_train_users=("user_0",),
+            explicit_val_users=("user_2",),
+            explicit_test_users=("user_3",),
+            excluded_users=("user_1",),
+            included_labels=("b",),
+        ),
+    )
+
+    result = _prepare_split(sample_manifest=manifest, config=config)
+
+    assert set(result.sample_manifest["label"]) == {"b"}
+    assert set(result.sample_manifest["user"]) == {
+        "user_0",
+        "user_2",
+        "user_3",
+    }
+    assert result.class_to_idx == {"b": 0}

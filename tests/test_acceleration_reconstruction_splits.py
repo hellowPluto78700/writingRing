@@ -156,3 +156,56 @@ def test_empty_exclusion_preserves_existing_split_result() -> None:
     assert_frame_equal(default_result.sample_manifest, empty_result.sample_manifest)
     assert_frame_equal(default_result.split_summary, empty_result.split_summary)
     assert_frame_equal(default_result.label_split_counts, empty_result.label_split_counts)
+
+
+def test_label_selection_preserves_surviving_segment_identity_and_class_mapping() -> None:
+    manifest = _manifest([f"user_{index}" for index in range(4)])
+    expected_ids = set(
+        manifest.loc[
+            manifest["label"].isin(["a", "b"])
+            & ~manifest["user"].isin(["user_1"]),
+            "sample_id",
+        ]
+    )
+
+    result = prepare_user_disjoint_splits(
+        manifest,
+        explicit_train_users=("user_0",),
+        explicit_val_users=("user_2",),
+        explicit_test_users=("user_3",),
+        excluded_users=("user_1",),
+        included_labels=("b", "a"),
+    )
+
+    assert set(result.sample_manifest["label"]) == {"a", "b"}
+    assert set(result.sample_manifest["sample_id"]) == expected_ids
+    assert result.class_to_idx == {"a": 0, "b": 1}
+    assert "user_1" not in set(result.sample_manifest["user"])
+
+
+def test_label_selection_requires_labels_after_user_exclusion() -> None:
+    manifest = _manifest([f"user_{index}" for index in range(4)])
+    manifest.loc[manifest["user"] == "user_3", "label"] = "only_excluded"
+
+    with pytest.raises(ValueError, match="absent after user exclusion"):
+        prepare_user_disjoint_splits(
+            manifest,
+            excluded_users=("user_3",),
+            included_labels=("only_excluded",),
+        )
+
+
+def test_explicit_user_filtered_out_by_label_selection_fails() -> None:
+    manifest = _manifest([f"user_{index}" for index in range(4)])
+    manifest = manifest.loc[
+        ~((manifest["user"] == "user_3") & (manifest["label"] == "a"))
+    ].reset_index(drop=True)
+
+    with pytest.raises(FileNotFoundError, match="Requested users are absent"):
+        prepare_user_disjoint_splits(
+            manifest,
+            explicit_train_users=("user_0",),
+            explicit_val_users=("user_1",),
+            explicit_test_users=("user_3",),
+            included_labels=("a",),
+        )

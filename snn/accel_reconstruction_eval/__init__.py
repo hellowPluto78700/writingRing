@@ -38,7 +38,11 @@ from .datasets import (
     fit_acceleration_normalization,
     load_acceleration_data,
     make_loader,
+    normalize_label_list,
+    normalize_user_list,
+    normalize_user_name,
     prepare_user_disjoint_splits,
+    restrict_manifest_to_cohort,
     resolve_padded_root,
 )
 from .embedding import (
@@ -147,6 +151,10 @@ __all__ = [
     "fit_acceleration_normalization",
     "build_dataset",
     "make_loader",
+    "normalize_label_list",
+    "normalize_user_list",
+    "normalize_user_name",
+    "restrict_manifest_to_cohort",
     "build_split_loaders",
     # Model/training
     "INPUT_CHANNELS",

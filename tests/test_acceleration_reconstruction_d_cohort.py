@@ -20,7 +20,10 @@ from snn.accel_reconstruction_eval.datasets import NormalizationStats
 from snn.accel_reconstruction_eval.io import load_checkpoint as read_checkpoint
 
 
-def _manifest(users: list[str]) -> pd.DataFrame:
+def _manifest(
+    users: list[str],
+    labels: tuple[str, ...] = ("a", "b"),
+) -> pd.DataFrame:
     rows: list[dict[str, str]] = []
     for user in users:
         rows.extend(
@@ -29,7 +32,7 @@ def _manifest(users: list[str]) -> pd.DataFrame:
                 "user": user,
                 "label": label,
             }
-            for label in ("a", "b")
+            for label in labels
         )
     return pd.DataFrame(rows)
 
@@ -111,6 +114,7 @@ def test_modern_reference_inherits_exclusion_and_saved_assignment_policy() -> No
             explicit_val_users=("user_1",),
             explicit_test_users=("user_2",),
         ),
+        UserSplitConfig(included_labels=("a",)),
     ],
 )
 def test_local_d_cohort_selection_conflicts_with_reference(
@@ -127,21 +131,55 @@ def test_local_d_cohort_selection_conflicts_with_reference(
         )
 
 
-@pytest.mark.parametrize(
-    "users",
-    [
-        [f"user_{index}" for index in range(5)] + ["user_9"],
-        [f"user_{index}" for index in range(4)],
-    ],
-)
-def test_modern_reference_rejects_dataset_cohort_drift(users: list[str]) -> None:
+def test_modern_reference_filters_added_dataset_users() -> None:
     checkpoint = _checkpoint(
         eligible=[f"user_{index}" for index in range(4)],
         excluded=["user_4"],
     )
+    result = runner._prepare_split(
+        sample_manifest=_manifest(
+            [f"user_{index}" for index in range(5)] + ["user_9"]
+        ),
+        config=_config(),
+        reference_checkpoint=checkpoint,
+    )
+    assert set(result.sample_manifest["user"]) == {
+        f"user_{index}" for index in range(3)
+    }
 
-    with pytest.raises(ValueError, match="Source dataset user cohort"):
-        runner._resolve_cohort_contract(_manifest(users), checkpoint)
+
+def test_modern_reference_rejects_missing_split_user() -> None:
+    checkpoint = _checkpoint(
+        eligible=[f"user_{index}" for index in range(4)],
+        excluded=["user_4"],
+    )
+    with pytest.raises(ValueError, match="no surviving rows"):
+        runner._prepare_split(
+            sample_manifest=_manifest(["user_0", "user_1", "user_3"]),
+            config=_config(),
+            reference_checkpoint=checkpoint,
+        )
+
+
+def test_reference_filter_keeps_only_checkpoint_labels() -> None:
+    checkpoint = _checkpoint(
+        eligible=["user_0", "user_1", "user_2"],
+        class_to_idx={"a": 0, "b": 1},
+    )
+    result = runner._prepare_split(
+        sample_manifest=_manifest(
+            ["user_0", "user_1", "user_2", "user_9"],
+            labels=("a", "b", "unselected"),
+        ),
+        config=_config(),
+        reference_checkpoint=checkpoint,
+    )
+    assert set(result.sample_manifest["label"]) == {"a", "b"}
+    assert set(result.sample_manifest["user"]) == {
+        "user_0",
+        "user_1",
+        "user_2",
+    }
 
 
 def test_modern_reference_rejects_excluded_split_and_class_drift() -> None:
@@ -160,7 +198,7 @@ def test_modern_reference_rejects_excluded_split_and_class_drift() -> None:
         eligible=["user_0", "user_1", "user_2"],
         class_to_idx={"a": 0, "other": 1},
     )
-    with pytest.raises(ValueError, match="class_to_idx label set differs"):
+    with pytest.raises(ValueError, match="class_to_idx labels are missing"):
         runner._prepare_split(
             sample_manifest=_manifest([f"user_{index}" for index in range(3)]),
             config=_config(),
@@ -229,8 +267,12 @@ def test_legacy_reference_uses_exact_no_exclusion_fallback() -> None:
     assert contract.excluded_users == ()
     assert contract.eligible_users == tuple(users)
 
-    with pytest.raises(ValueError, match="split-user union"):
-        runner._resolve_cohort_contract(_manifest(users + ["user_9"]), checkpoint)
+    result = runner._prepare_split(
+        sample_manifest=_manifest(users + ["user_9"]),
+        config=_config(),
+        reference_checkpoint=checkpoint,
+    )
+    assert set(result.sample_manifest["user"]) == set(users)
 
 
 @pytest.mark.parametrize(

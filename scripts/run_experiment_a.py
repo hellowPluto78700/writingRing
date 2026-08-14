@@ -5,8 +5,9 @@ from __future__ import annotations
 Protocol
 --------
 1. Load canonical padded SpikeIMU packages.
-2. Build a user-disjoint train/validation/test split.
-3. Fit acceleration normalization on RAW TRAIN valid samples only.
+2. Apply configured user exclusions and label selection, then build a
+   user-disjoint train/validation/test split.
+3. Fit acceleration normalization on the final RAW TRAIN valid samples only.
 4. Train a new MaskAwareAccelerationCNN from scratch on raw acceleration
    channels 15:18.
 5. Select the best epoch using validation balanced accuracy.
@@ -138,6 +139,7 @@ def _prepare_split(
         explicit_val_users=split_config.explicit_val_users,
         explicit_test_users=split_config.explicit_test_users,
         excluded_users=split_config.excluded_users,
+        included_labels=split_config.included_labels,
         require_all_users_assigned=split_config.require_all_users_assigned,
         require_all_labels_in_all_splits=(
             split_config.require_all_labels_in_all_splits

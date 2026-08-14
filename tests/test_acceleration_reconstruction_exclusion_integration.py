@@ -22,14 +22,17 @@ from snn.accel_reconstruction_eval.io import (
 
 
 def _manifest() -> pd.DataFrame:
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, object]] = []
     for user in ("user_0", "user_1", "user_2", "user_3"):
-        for label in ("a", "b"):
+        package_index = int(user.removeprefix("user_"))
+        for segment_index, label in enumerate(("a", "b", "unselected")):
             rows.append(
                 {
                     "sample_id": f"{user}/sample_{label}",
                     "user": user,
                     "label": label,
+                    "package_index": package_index,
+                    "segment_index": segment_index,
                 }
             )
     return pd.DataFrame(rows)
@@ -52,7 +55,7 @@ def _embedding_bundle(sample_manifest: pd.DataFrame) -> EmbeddingBundle:
     )
 
 
-def test_a_checkpoint_and_bcd_split_preparation_preserve_exclusion_boundary(
+def test_a_checkpoint_and_bcd_split_preparation_preserve_selected_cohort_identity(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -153,6 +156,7 @@ def test_a_checkpoint_and_bcd_split_preparation_preserve_exclusion_boundary(
             explicit_val_users=("user_1",),
             explicit_test_users=("user_2",),
             excluded_users=("3",),
+            included_labels=("a", "b"),
         ),
     )
     result_a = runner_a.run_experiment_a(
@@ -164,11 +168,21 @@ def test_a_checkpoint_and_bcd_split_preparation_preserve_exclusion_boundary(
     )
 
     checkpoint = load_checkpoint(result_a.checkpoint_path)
-    expected_excluded_ids = {"user_3/sample_a", "user_3/sample_b"}
+    expected_labels = {"a", "b"}
+    expected_excluded_ids = {
+        f"user_3/sample_{label}"
+        for label in ("a", "b", "unselected")
+    }
     expected_eligible_ids = {
         f"user_{user}/sample_{label}"
         for user in range(3)
-        for label in ("a", "b")
+        for label in expected_labels
+    }
+    expected_eligible_identity = {
+        (user, segment_index)
+        for user in range(3)
+        for segment_index, label in enumerate(("a", "b", "unselected"))
+        if label in expected_labels
     }
 
     assert result_a.artifact_paths["checkpoint"].is_file()
@@ -176,9 +190,14 @@ def test_a_checkpoint_and_bcd_split_preparation_preserve_exclusion_boundary(
     assert result_a.artifact_paths["cohort"].is_file()
     assert checkpoint["excluded_users"] == ["user_3"]
     assert checkpoint["eligible_users"] == ["user_0", "user_1", "user_2"]
+    assert checkpoint["class_to_idx"] == {"a": 0, "b": 1}
     assert len(loader_manifests) == 1
     assert not set(loader_manifests[0]["sample_id"]).intersection(expected_excluded_ids)
     assert set(loader_manifests[0]["sample_id"]) == expected_eligible_ids
+    assert set(loader_manifests[0]["label"]) == expected_labels
+    assert set(
+        zip(loader_manifests[0]["package_index"], loader_manifests[0]["segment_index"])
+    ) == expected_eligible_identity
     assert embedding_sample_ids
     assert all(not ids.intersection(expected_excluded_ids) for ids in embedding_sample_ids.values())
     assert all(ids.issubset(expected_eligible_ids) for ids in embedding_sample_ids.values())
@@ -201,6 +220,14 @@ def test_a_checkpoint_and_bcd_split_preparation_preserve_exclusion_boundary(
         assert split.val_users == ("user_1",)
         assert split.test_users == ("user_2",)
         assert set(split.sample_manifest["sample_id"]) == expected_eligible_ids
+        assert set(split.sample_manifest["label"]) == expected_labels
+        assert split.class_to_idx == checkpoint["class_to_idx"]
+        assert set(
+            zip(
+                split.sample_manifest["package_index"],
+                split.sample_manifest["segment_index"],
+            )
+        ) == expected_eligible_identity
         assert not set(split.sample_manifest["sample_id"]).intersection(
             expected_excluded_ids
         )

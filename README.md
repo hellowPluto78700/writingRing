@@ -83,6 +83,22 @@ by the acceleration experiments. Notebooks and scripts should compose these
 modules and focus on experiment configuration, presentation, and
 interpretation.
 
+Experiment A defines the cohort for the acceleration-CNN experiments. Its
+split configuration accepts `excluded_users` and `included_labels`: packages
+are fully loaded and validated first, then users are excluded and labels are
+selected before the user-disjoint split and training normalization are built.
+`included_labels=None` retains every available label; when labels are named,
+each must remain after user exclusion or the run fails explicitly. The
+Experiment A notebook exposes these controls as `EXCLUDED_USERS` and
+`INCLUDED_LABELS`.
+
+Experiments B, C, and D inherit Experiment A's checkpointed train/validation/
+test users and `class_to_idx` mapping. They do not accept separate user or
+label cohort overrides; regenerate Experiment A before running them whenever
+its cohort selection changes. A downstream run fails if its input cannot
+satisfy the checkpointed cohort, rather than silently dropping users or
+labels.
+
 ## Setup
 
 Use the `writingring-viz` Conda environment with Python 3.11:
@@ -194,9 +210,10 @@ The helper package defines the following common protocols:
 | D2 | mixed raw + reconstruction | mixed | raw and reconstruction separately | mixed train |
 
 For B, the raw-trained checkpoint, its user split, class mapping, and
-normalization are authoritative. The same metric and artifact conventions are
-used across the protocols; D2 reuses one trained checkpoint for both test
-domains.
+normalization are authoritative. For C and D2, the checkpoint's user split and
+class mapping are authoritative while each protocol retains its own training
+and normalization behavior. The same metric and artifact conventions are used
+across the protocols; D2 reuses one trained checkpoint for both test domains.
 
 ## Documentation
 
