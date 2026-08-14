@@ -34,44 +34,114 @@ PRIMARY may directly inspect code and tests. Do not spawn Probe just to answer a
 
 # Task routing
 
-Use the cheapest safe workflow.
+## Routing priority
+
+FAST_FIX is the default workflow.
+
+PRIMARY MUST use FAST_FIX when:
+
+* the requested behavior is explicit;
+* the change is localized;
+* no unresolved repository fact blocks implementation;
+* no schema/file-format/public-API/persistent-artifact contract must change.
+
+When these conditions hold:
+
+* MUST NOT spawn luna_probe;
+* MUST NOT create or freeze a TaskSpec;
+* MUST NOT spawn luna_verifier.
+
+The fact that code has callers or consumers does NOT by itself require STANDARD.
+
+Use STANDARD only when PRIMARY can name a concrete cross-module contract
+that may change or a concrete unknown that must be resolved before implementation.
+
+Do not Probe merely to increase confidence.
 
 ## FAST_FIX
 
-Use for localized, low-risk changes with clear behavior and no durable contract change.
+Use FAST_FIX when all of the following are true:
+
+* requested behavior is explicit;
+* the change is localized;
+* no unresolved repository fact blocks implementation;
+* no schema, file-format, public API, persistent artifact, timestamp,
+  channel, or other durable contract must change;
+* no project-level architecture decision is required.
 
 ```text
 PRIMARY -> worker -> done
 ```
 
-No Probe, frozen TaskSpec, Verifier, WORKBOARD update, or full pytest by default.
+When these conditions hold:
+
+MUST NOT spawn luna_probe;
+MUST NOT create or freeze a TaskSpec;
+MUST NOT spawn luna_verifier;
+MUST NOT update WORKBOARD;
+MUST NOT run full pytest by default.
+
+The existence of callers, consumers, or multiple touched files/modules does
+NOT by itself require STANDARD.
 
 Run focused tests and relevant checks.
 
-Escalate if contract ambiguity, broader scope, or meaningful regression risk appears.
+Escalate only when PRIMARY or worker can name a concrete contract ambiguity,
+unresolved repository fact, broader scope requirement, or meaningful
+regression risk.
 
 ## STANDARD
 
-Use when multiple modules or producer/consumer contracts are involved.
+Use STANDARD only when at least one of the following is true:
+
+a concrete cross-module or producer/consumer contract may change;
+an unresolved repository fact must be established before safe implementation;
+the behavior crosses a durable interface whose invariant must be preserved;
+the implementation has material regression risk that justifies independent
+verification.
 
 ```text
-probe -> freeze -> worker -> verifier
+[probe only if a concrete unresolved fact exists] -> freeze -> worker -> verifier
 ```
 
-Freeze only behavior, contracts, allowed paths, acceptance criteria, validation, and replan triggers.
+Probe is not a mandatory workflow stage.
 
-Do not freeze unnecessary implementation details.
+PRIMARY may inspect code, tests, and documentation directly and freeze a task
+without Probe when the required repository facts are already established.
+
+Freeze WHAT must be true, not HOW to implement it.
+
+A STANDARD TaskSpec should contain only:
+
+Goal
+Context, only when necessary
+Required behavior
+Preserved contracts
+Allowed write scope
+Acceptance criteria
+Validation
+Dependencies, only when real
+Replan triggers
+
+Do not freeze helper names, internal class/function structure, algorithms,
+or exact modified files unless those details are themselves contractual.
 
 ## HIGH_RISK
 
-Use STANDARD plus stronger integration/full validation for changes involving:
+Use STANDARD plus stronger verification/integration validation for changes
+involving:
 
-* schemas or file formats;
-* public APIs;
-* pipeline contracts;
-* timestamps/channels;
-* artifacts;
-* broad architecture or migrations.
+schemas or file formats;
+public APIs;
+pipeline contracts;
+timestamps or channel semantics;
+persisted artifacts;
+broad architecture or migrations.
+
+HIGH_RISK always requires independent verification.
+
+Full pytest or E2E is still required only when justified by the affected
+risk surface.
 
 # Worker rules
 
@@ -130,6 +200,37 @@ Use:
 * `WORKBOARD.md` only when persistent multi-task state is useful.
 
 FAST_FIX normally requires none of these.
+
+## Plan quality
+
+Prefer 1-5 behavior-oriented tasks for substantial work.
+Use more only when the requested behavior genuinely contains more independent
+implementation units.
+
+Each task must be independently implementable and independently verifiable.
+
+Acceptance criteria must be objectively PASS/FAIL.
+
+Preserved contracts must name the invariants that actually matter to the task.
+Do not use vague requirements such as:
+
+* ensure correctness;
+* preserve semantics;
+* handle edge cases;
+* keep behavior robust.
+
+Instead state the concrete invariant, for example:
+
+* both test views contain identical sample identities and labels;
+* validation rejects mismatched cohorts rather than intersecting them;
+* existing artifact filenames and channel meanings remain unchanged.
+
+Allowed write scope should prevent scope creep without predicting every file
+the worker may need to touch.
+
+Ordinary implementation bugs, local refactors, test fixture changes, missed
+edge cases, and implementation choices inside the frozen behavior and write
+scope are NOT reasons to replan.
 
 # Continuous execution
 
