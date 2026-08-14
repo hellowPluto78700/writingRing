@@ -105,6 +105,25 @@ its cohort selection changes. A downstream run fails if its input cannot
 satisfy the checkpointed cohort, rather than silently dropping users or
 labels.
 
+All four acceleration-CNN experiments accept either one dataset root or an
+ordered list of Action 0 and Action 1 roots. The roots remain separate on disk;
+the shared loader validates each root and combines compatible packages only in
+memory. For example:
+
+```python
+DATASET_ROOTS = [
+    Path("outputs/action0_rectified/low-pass/aligned-board-events"),
+    Path("outputs/action1_rectified/low-pass/aligned-board-events"),
+]
+```
+
+The selected roots must have compatible padded producer metadata, including
+the same target length and sampling rate. Run A first for the chosen root set.
+B, C, and D must use that same root/action/sample cohort and its A checkpoint;
+they reject action or canonical sample-ID mismatches and never silently
+intersect packages. Legacy A checkpoints remain usable for a single root only;
+regenerate A before a two-root run.
+
 ## Setup
 
 Use the `writingring-viz` Conda environment with Python 3.11:

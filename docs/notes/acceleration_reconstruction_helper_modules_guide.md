@@ -160,16 +160,29 @@ config.validate()
 | **RECONSTRUCTION_SUFFIX**          | \*\_padded_reconstructed_accel_m_s2.npy                                   |
 | **RECONSTRUCTION_METADATA_SUFFIX** | \*\_padded_reconstructed_accel_metadata.json                              |
 | **NormalizationStats**             | 3-channel mean/std + valid_time_points + fitted_on provenance             |
-| **LoadedAccelerationData**         | padded_root + producer_metadata + packages + sample_manifest              |
+| **LoadedAccelerationData**         | one or more padded roots + metadata + packages + logical sample manifest  |
 | **SplitAssignment**                | manifest with split/label_idx plus users, class maps, and split summaries |
 
 ## 3.2 Main public interfaces
 
 **`load_acceleration_data(root, repository_root=None, require_reconstruction=False)`**
 
-> Resolves the segmentation_padded root, validates producer metadata and every padded package, memory-maps arrays, and builds the aligned sample manifest.
+> Resolves one padded root or a non-empty sequence of padded roots, validates
+> producer metadata and every padded package, memory-maps arrays, and builds
+> one aligned logical sample manifest. Multiple roots stay physically separate;
+> incompatible metadata, duplicate roots, duplicate `(user, action)` packages,
+> or duplicate sample IDs fail explicitly.
 >
 > **Returns:** LoadedAccelerationData
+
+For a two-action A/B/C/D run, pass the Action 0 and Action 1 combination roots
+as an ordered list. The loader requires identical fixed-length batching
+contracts, including target length, sampling rate, feature schema, channel
+count, and right-padding convention. Experiment A persists the selected action
+set and a path-independent canonical sample-ID digest in its checkpoint. B/C/D
+use that identity in addition to split/class metadata; changing roots or the
+selected sample cohort requires a new A checkpoint. A legacy checkpoint can
+only be used with one root.
 
 **`prepare_user_disjoint_splits(sample_manifest, ...)`**
 

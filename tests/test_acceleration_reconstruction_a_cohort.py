@@ -148,6 +148,8 @@ def test_cohort_artifacts_capture_source_cohort_and_post_split_manifest(
         key: checkpoint[key]
         for key in ("excluded_users", "eligible_users")
     } == expected_cohort
+    assert checkpoint["cohort_identity"]["selected_actions"] == ["0"]
+    assert checkpoint["cohort_identity"]["selected_sample_count"] == 6
 
     provenance = json.loads(
         (result.output_dir / "provenance.json").read_text(encoding="utf-8")
@@ -165,8 +167,12 @@ def test_cohort_artifacts_capture_source_cohort_and_post_split_manifest(
     cohort = json.loads(
         (result.output_dir / "cohort.json").read_text(encoding="utf-8")
     )
-    assert cohort == expected_cohort
-    assert set(cohort) == {"excluded_users", "eligible_users"}
+    assert {
+        key: cohort[key]
+        for key in ("excluded_users", "eligible_users")
+    } == expected_cohort
+    assert cohort["cohort_identity"]["selected_actions"] == ["0"]
+    assert cohort["cohort_identity"]["selected_sample_count"] == 6
 
     saved_manifest = pd.read_csv(result.output_dir / "sample_manifest.csv")
     assert set(saved_manifest["user"]) == {"user_1", "user_3", "user_4"}

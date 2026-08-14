@@ -23,7 +23,7 @@ import argparse
 import random
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -34,6 +34,7 @@ from snn.accel_reconstruction_eval import (
     MaskAwareAccelerationCNN,
     NormalizationStats,
     build_adam_optimizer,
+    build_cohort_identity,
     build_cross_entropy,
     build_experiment_checkpoint,
     build_split_loaders,
@@ -147,9 +148,33 @@ def _prepare_split(
     )
 
 
+def _dataset_provenance(data: object, root: str | Path | Sequence[str | Path]) -> dict[str, object]:
+    """Read multi-root provenance while keeping lightweight test doubles usable."""
+
+    sample_manifest = getattr(data, "sample_manifest")
+    actions = tuple(getattr(data, "selected_actions", ()))
+    if not actions and "action" in sample_manifest.columns:
+        actions = tuple(sorted({str(value) for value in sample_manifest["action"]}, key=natural_key))
+    if not actions:
+        actions = ("0",)
+    padded_root = getattr(data, "padded_root")
+    padded_roots = tuple(getattr(data, "padded_roots", (padded_root,)))
+    root_arguments = tuple(getattr(data, "root_arguments", (str(root),)))
+    producer_metadata = getattr(data, "producer_metadata")
+    producer_metadatas = tuple(
+        getattr(data, "producer_metadatas", (producer_metadata,))
+    )
+    return {
+        "root_arguments": [str(value) for value in root_arguments],
+        "resolved_padded_roots": [str(path) for path in padded_roots],
+        "selected_actions": list(actions),
+        "producer_metadatas": [metadata.to_dict() for metadata in producer_metadatas],
+    }
+
+
 def run_experiment_a(
     *,
-    root: str | Path = DEFAULT_DATASET_ROOT,
+    root: str | Path | Sequence[str | Path] = DEFAULT_DATASET_ROOT,
     repository_root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     config: ExperimentConfig | None = None,
@@ -204,6 +229,11 @@ def run_experiment_a(
     split = _prepare_split(
         sample_manifest=data.sample_manifest,
         config=config,
+    )
+    dataset_provenance = _dataset_provenance(data, root)
+    cohort_identity = build_cohort_identity(
+        split.sample_manifest,
+        selected_actions=dataset_provenance["selected_actions"],
     )
 
     normalization = fit_acceleration_normalization(
@@ -312,6 +342,8 @@ def run_experiment_a(
         extra={
             "experiment_protocol": "raw_train_to_raw_test",
             "baseline_role": "authoritative_experiment_a_reference",
+            "cohort_identity": cohort_identity.to_dict(),
+            "dataset_provenance": dataset_provenance,
             **cohort_payload,
         },
     )
@@ -377,6 +409,9 @@ def run_experiment_a(
             "repository_root": repository_root,
             "dataset_root_argument": str(root),
             "resolved_padded_root": data.padded_root,
+            "dataset_root_arguments": dataset_provenance["root_arguments"],
+            "resolved_padded_roots": dataset_provenance["resolved_padded_roots"],
+            "selected_actions": dataset_provenance["selected_actions"],
             "output_dir": output_dir,
             "device": torch_device,
             "config": config.to_dict(),
@@ -385,17 +420,19 @@ def run_experiment_a(
             "val_users": split.val_users,
             "test_users": split.test_users,
             "class_to_idx": split.class_to_idx,
+            "cohort_identity": cohort_identity.to_dict(),
             **cohort_payload,
             "best_epoch": best_epoch,
             "best_val_balanced_accuracy": best_val_ba,
             "producer_metadata": data.producer_metadata.to_dict(),
+            "producer_metadatas": dataset_provenance["producer_metadatas"],
         },
     )
     artifact_paths["provenance"] = provenance_path
 
     cohort_path = save_provenance(
         output_dir / "cohort.json",
-        cohort_payload,
+        {**cohort_payload, "cohort_identity": cohort_identity.to_dict()},
     )
     artifact_paths["cohort"] = cohort_path
 
@@ -420,7 +457,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--repository-root", type=Path, default=Path("."))
-    parser.add_argument("--root", type=Path, default=DEFAULT_DATASET_ROOT)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        help="Dataset root; repeat once to combine Action 0 and Action 1 in memory",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--epochs", type=int, default=30)
@@ -472,7 +514,7 @@ def main() -> None:
     config.validate()
 
     result = run_experiment_a(
-        root=args.root,
+        root=args.root or [DEFAULT_DATASET_ROOT],
         repository_root=repository_root,
         output_dir=args.output_dir,
         config=config,

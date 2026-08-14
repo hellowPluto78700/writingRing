@@ -12,11 +12,11 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "bash_script" / "action0_pipeline"
+PIPELINE_ROOT = PROJECT_ROOT / "scripts" / "bash_script" / "preprocessing_pipeline"
 COMMON_PATH = PIPELINE_ROOT / "_common.bash"
 
 
-def test_all_action0_entry_points_use_shared_padding_pipeline() -> None:
+def test_all_preprocessing_pipeline_entry_points_use_shared_padding_pipeline() -> None:
     entry_points = sorted(PIPELINE_ROOT.glob("[0-9][0-9]_*.sh"))
 
     assert len(entry_points) == 8
@@ -40,7 +40,7 @@ def test_all_action0_entry_points_use_shared_padding_pipeline() -> None:
     assert "pipeline_padding" in common
 
 
-def test_action0_transform_control_is_validated_and_wired(tmp_path: Path) -> None:
+def test_preprocessing_pipeline_transform_control_is_validated_and_wired(tmp_path: Path) -> None:
     common = COMMON_PATH.read_text(encoding="utf-8")
     assert 'POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"' in common
     assert 'none|AbsRectify)' in common

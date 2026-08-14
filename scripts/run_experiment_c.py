@@ -23,7 +23,7 @@ from collections.abc import Mapping as MappingABC
 from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -52,6 +52,7 @@ from snn.accel_reconstruction_eval import (
     save_embedding_bundle,
     save_provenance,
     save_representation_evaluation,
+    validate_checkpoint_cohort_identity,
 )
 from snn.accel_reconstruction_eval.datasets import (
     natural_key,
@@ -125,6 +126,24 @@ def _select_device(config: ExperimentConfig, requested: str | None) -> torch.dev
     return torch.device(
         "cuda" if config.use_gpu and torch.cuda.is_available() else "cpu"
     )
+
+
+def _dataset_context(data: object, root: str | Path | Sequence[str | Path]) -> dict[str, object]:
+    sample_manifest = getattr(data, "sample_manifest")
+    actions = tuple(getattr(data, "selected_actions", ()))
+    if not actions and "action" in sample_manifest.columns:
+        actions = tuple(sorted({str(value) for value in sample_manifest["action"]}, key=natural_key))
+    if not actions:
+        actions = ("0",)
+    padded_root = getattr(data, "padded_root")
+    padded_roots = tuple(getattr(data, "padded_roots", (padded_root,)))
+    root_arguments = tuple(getattr(data, "root_arguments", (str(root),)))
+    return {
+        "selected_actions": actions,
+        "selected_root_count": len(padded_roots),
+        "root_arguments": [str(value) for value in root_arguments],
+        "resolved_padded_roots": [str(path) for path in padded_roots],
+    }
 
 
 def _sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
@@ -412,7 +431,7 @@ def _prepare_split(
 
 def run_experiment_c(
     *,
-    root: str | Path = DEFAULT_DATASET_ROOT,
+    root: str | Path | Sequence[str | Path] = DEFAULT_DATASET_ROOT,
     repository_root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     reference_checkpoint: str | Path | None = DEFAULT_REFERENCE_CHECKPOINT,
@@ -511,6 +530,17 @@ def run_experiment_c(
             config,
             split,
         )
+    dataset_context = _dataset_context(data, root)
+    validated_cohort_identity = (
+        None
+        if reference is None
+        else validate_checkpoint_cohort_identity(
+            reference,
+            split.sample_manifest,
+            selected_actions=dataset_context["selected_actions"],
+            selected_root_count=int(dataset_context["selected_root_count"]),
+        )
+    )
 
     normalization = fit_acceleration_normalization(
         data.packages,
@@ -624,6 +654,16 @@ def run_experiment_c(
             "excluded_users": list(cohort.excluded_users),
             "eligible_users": list(cohort.eligible_users),
             "cohort_source": cohort.source,
+            "validated_a_cohort_identity": (
+                None
+                if validated_cohort_identity is None
+                else validated_cohort_identity.to_dict()
+            ),
+            "dataset_provenance": {
+                "root_arguments": dataset_context["root_arguments"],
+                "resolved_padded_roots": dataset_context["resolved_padded_roots"],
+                "selected_actions": list(dataset_context["selected_actions"]),
+            },
             "experiment_protocol": (
                 "reconstruction_train_to_reconstruction_test"
             ),
@@ -689,6 +729,14 @@ def run_experiment_c(
             "repository_root": repository_root,
             "dataset_root_argument": str(root),
             "resolved_padded_root": data.padded_root,
+            "dataset_root_arguments": dataset_context["root_arguments"],
+            "resolved_padded_roots": dataset_context["resolved_padded_roots"],
+            "selected_actions": list(dataset_context["selected_actions"]),
+            "validated_a_cohort_identity": (
+                None
+                if validated_cohort_identity is None
+                else validated_cohort_identity.to_dict()
+            ),
             "output_dir": output_dir,
             "reference_checkpoint": reference_path,
             "split_reference_only": reference is not None,
@@ -731,7 +779,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--repository-root", type=Path, default=Path("."))
-    parser.add_argument("--root", type=Path, default=DEFAULT_DATASET_ROOT)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        action="append",
+        help="Dataset root; repeat once to combine Action 0 and Action 1 in memory",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--reference-checkpoint",
@@ -795,7 +848,7 @@ def main() -> None:
     config.validate()
 
     result = run_experiment_c(
-        root=args.root,
+        root=args.root or [DEFAULT_DATASET_ROOT],
         repository_root=repository_root,
         output_dir=args.output_dir,
         reference_checkpoint=args.reference_checkpoint,

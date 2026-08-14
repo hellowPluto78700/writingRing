@@ -19,6 +19,7 @@ All normalization statistics are computed from valid time points only, and the
 invalid right-padding region is reset to exact zero after normalization.
 """
 
+import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -74,6 +75,7 @@ __all__ = [
     "AccelerationProducerMetadata",
     "AccelerationPackage",
     "LoadedAccelerationData",
+    "CohortIdentity",
     "SplitAssignment",
     "AccelerationSegmentDataset",
     "MixedAccelerationDataset",
@@ -83,7 +85,11 @@ __all__ = [
     "normalize_user_name",
     "restrict_manifest_to_cohort",
     "resolve_padded_root",
+    "normalize_dataset_roots",
     "load_acceleration_data",
+    "build_cohort_identity",
+    "parse_checkpoint_cohort_identity",
+    "validate_checkpoint_cohort_identity",
     "automatic_user_split",
     "prepare_user_disjoint_splits",
     "fit_acceleration_normalization",
@@ -211,6 +217,7 @@ class AccelerationPackage:
     action: str
     stem: str
     directory: Path
+    source_padded_root: Path
     padded_spike_imu_path: Path
     labels_path: Path
     valid_lengths_path: Path
@@ -240,10 +247,40 @@ class AccelerationPackage:
 
 @dataclass(frozen=True)
 class LoadedAccelerationData:
+    """Validated logical dataset assembled from one or more padded roots.
+
+    ``padded_root`` and ``producer_metadata`` retain the single-root surface
+    used by existing callers.  The plural fields are authoritative for new
+    multi-root provenance and compatibility checks.
+    """
+
     padded_root: Path
     producer_metadata: AccelerationProducerMetadata
+    padded_roots: tuple[Path, ...]
+    producer_metadatas: tuple[AccelerationProducerMetadata, ...]
+    root_arguments: tuple[str, ...]
     packages: tuple[AccelerationPackage, ...]
     sample_manifest: pd.DataFrame
+
+    @property
+    def selected_actions(self) -> tuple[str, ...]:
+        return tuple(sorted({package.action for package in self.packages}, key=natural_key))
+
+
+@dataclass(frozen=True)
+class CohortIdentity:
+    """Path-independent identity of the logical cohort authorized by A."""
+
+    selected_actions: tuple[str, ...]
+    selected_sample_count: int
+    canonical_sample_id_digest: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "selected_actions": list(self.selected_actions),
+            "selected_sample_count": self.selected_sample_count,
+            "canonical_sample_id_digest": self.canonical_sample_id_digest,
+        }
 
 
 @dataclass(frozen=True)
@@ -288,6 +325,46 @@ def resolve_padded_root(
         "ROOT resolves to multiple padded datasets; select one exact root:\n"
         + candidate_text
     )
+
+
+def _root_arguments(root: str | Path | Sequence[str | Path]) -> tuple[str | Path, ...]:
+    if isinstance(root, (str, Path)):
+        return (root,)
+    if not isinstance(root, Sequence):
+        raise TypeError("dataset roots must be a path or a non-string sequence of paths")
+    roots = tuple(root)
+    if not roots:
+        raise ValueError("At least one dataset root must be selected")
+    if any(not isinstance(value, (str, Path)) for value in roots):
+        raise TypeError("dataset root selections must contain only str or pathlib.Path values")
+    return roots
+
+
+def normalize_dataset_roots(
+    root: str | Path | Sequence[str | Path],
+    *,
+    repository_root: str | Path | None = None,
+) -> tuple[Path, ...]:
+    """Resolve one or more roots and reject duplicate physical datasets."""
+
+    requested = _root_arguments(root)
+    resolved = tuple(
+        resolve_padded_root(value, repository_root=repository_root)
+        for value in requested
+    )
+    seen: set[Path] = set()
+    duplicates: list[Path] = []
+    for padded_root in resolved:
+        if padded_root in seen:
+            duplicates.append(padded_root)
+        seen.add(padded_root)
+    if duplicates:
+        duplicate_text = ", ".join(str(path) for path in duplicates)
+        raise Action0DatasetError(
+            "Duplicate dataset roots resolve to the same padded dataset: "
+            f"{duplicate_text}"
+        )
+    return resolved
 
 
 def _load_producer_metadata(padded_root: Path) -> AccelerationProducerMetadata:
@@ -348,6 +425,40 @@ def _validate_producer_metadata(metadata: AccelerationProducerMetadata) -> None:
         raise Action0DatasetError("sampling_rate_hz must be positive and finite")
     if metadata.padding_side not in (None, "right"):
         raise Action0DatasetError("This evaluation requires canonical right padding")
+
+
+def _validate_compatible_producer_metadata(
+    padded_roots: Sequence[Path],
+    metadatas: Sequence[AccelerationProducerMetadata],
+) -> None:
+    """Reject selected roots that cannot share one fixed-shape batch contract."""
+
+    if len(padded_roots) != len(metadatas) or not padded_roots:
+        raise AssertionError("Each selected padded root must have one metadata record")
+    baseline = metadatas[0]
+    fields = (
+        "input_kind",
+        "feature_schema",
+        "channel_count",
+        "target_length",
+        "sampling_rate_hz",
+        "padding_side",
+    )
+    mismatches: list[str] = []
+    for padded_root, metadata in zip(padded_roots[1:], metadatas[1:], strict=True):
+        differences = [
+            f"{field}={getattr(metadata, field)!r} (expected {getattr(baseline, field)!r})"
+            for field in fields
+            if getattr(metadata, field) != getattr(baseline, field)
+        ]
+        if differences:
+            mismatches.append(f"{padded_root}: " + "; ".join(differences))
+    if mismatches:
+        raise Action0DatasetError(
+            "Incompatible producer metadata across selected padded roots. "
+            f"Baseline {padded_roots[0]}: "
+            + " | ".join(mismatches)
+        )
 
 
 def discover_padded_spike_paths(padded_root: Path) -> tuple[Path, ...]:
@@ -629,6 +740,7 @@ def _load_and_validate_package(
                 "label": str(labels[output_index]),
                 "valid_length": int(valid_lengths[output_index]),
                 "package_relative_dir": str(action_dir.relative_to(padded_root)),
+                "source_padded_root": str(padded_root),
                 "has_reconstruction": reconstructed is not None,
             }
         )
@@ -638,6 +750,7 @@ def _load_and_validate_package(
         action=action,
         stem=stem,
         directory=action_dir,
+        source_padded_root=padded_root,
         padded_spike_imu_path=padded_path,
         labels_path=labels_path,
         valid_lengths_path=valid_lengths_path,
@@ -656,33 +769,48 @@ def _load_and_validate_package(
 
 
 def load_acceleration_data(
-    root: str | Path,
+    root: str | Path | Sequence[str | Path],
     *,
     repository_root: str | Path | None = None,
     require_reconstruction: bool = False,
 ) -> LoadedAccelerationData:
-    padded_root = resolve_padded_root(root, repository_root=repository_root)
-    producer_metadata = _load_producer_metadata(padded_root)
-    _validate_producer_metadata(producer_metadata)
+    root_arguments = _root_arguments(root)
+    padded_roots = normalize_dataset_roots(
+        root_arguments,
+        repository_root=repository_root,
+    )
+    producer_metadatas = tuple(
+        _load_producer_metadata(padded_root) for padded_root in padded_roots
+    )
+    for producer_metadata in producer_metadatas:
+        _validate_producer_metadata(producer_metadata)
+    _validate_compatible_producer_metadata(padded_roots, producer_metadatas)
 
     packages: list[AccelerationPackage] = []
     manifest_parts: list[pd.DataFrame] = []
     seen_identity: set[tuple[str, str]] = set()
 
-    for padded_path in discover_padded_spike_paths(padded_root):
-        package, rows = _load_and_validate_package(
-            padded_path,
-            padded_root=padded_root,
-            root_target_length=producer_metadata.target_length,
-            require_reconstruction=require_reconstruction,
-        )
-        identity = (package.user, package.action)
-        if identity in seen_identity:
-            raise Action0DatasetError(f"Duplicate package identity: {identity}")
-        seen_identity.add(identity)
-        rows["package_index"] = len(packages)
-        packages.append(package)
-        manifest_parts.append(rows)
+    for root_index, (padded_root, producer_metadata) in enumerate(
+        zip(padded_roots, producer_metadatas, strict=True)
+    ):
+        for padded_path in discover_padded_spike_paths(padded_root):
+            package, rows = _load_and_validate_package(
+                padded_path,
+                padded_root=padded_root,
+                root_target_length=producer_metadata.target_length,
+                require_reconstruction=require_reconstruction,
+            )
+            identity = (package.user, package.action)
+            if identity in seen_identity:
+                raise Action0DatasetError(
+                    "Duplicate package identity across selected roots: "
+                    f"{identity}"
+                )
+            seen_identity.add(identity)
+            rows["source_root_index"] = root_index
+            rows["package_index"] = len(packages)
+            packages.append(package)
+            manifest_parts.append(rows)
 
     sample_manifest = pd.concat(manifest_parts, ignore_index=True)
     if sample_manifest["sample_id"].duplicated().any():
@@ -691,11 +819,145 @@ def load_acceleration_data(
         raise Action0DatasetError("At least one package lacks reconstruction")
 
     return LoadedAccelerationData(
-        padded_root=padded_root,
-        producer_metadata=producer_metadata,
+        padded_root=padded_roots[0],
+        producer_metadata=producer_metadatas[0],
+        padded_roots=padded_roots,
+        producer_metadatas=producer_metadatas,
+        root_arguments=tuple(str(value) for value in root_arguments),
         packages=tuple(packages),
         sample_manifest=sample_manifest,
     )
+
+
+def build_cohort_identity(
+    sample_manifest: pd.DataFrame,
+    *,
+    selected_actions: Sequence[object],
+) -> CohortIdentity:
+    """Return a deterministic, path-independent A cohort identity.
+
+    The digest contains only canonical logical sample IDs.  Root paths remain
+    provenance, never cohort identity, so relocating an unchanged dataset does
+    not invalidate its A checkpoint.
+    """
+
+    if "sample_id" not in sample_manifest.columns:
+        raise ValueError("sample_manifest is missing the sample_id column")
+    sample_ids = [str(value) for value in sample_manifest["sample_id"]]
+    if not sample_ids:
+        raise ValueError("Cannot build a cohort identity for an empty sample manifest")
+    if len(sample_ids) != len(set(sample_ids)):
+        raise ValueError("Cannot build a cohort identity with duplicate sample IDs")
+    actions = tuple(sorted({str(value) for value in selected_actions}, key=natural_key))
+    if not actions:
+        raise ValueError("Cohort identity requires at least one selected action")
+    canonical_ids = sorted(sample_ids)
+    digest = hashlib.sha256(
+        json.dumps(canonical_ids, ensure_ascii=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return CohortIdentity(
+        selected_actions=actions,
+        selected_sample_count=len(canonical_ids),
+        canonical_sample_id_digest=digest,
+    )
+
+
+def parse_checkpoint_cohort_identity(
+    checkpoint: Mapping[str, object],
+) -> CohortIdentity | None:
+    """Read modern A cohort metadata, leaving legacy single-root checkpoints usable."""
+
+    value = checkpoint.get("cohort_identity")
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("Checkpoint cohort_identity must be a mapping")
+    required = {
+        "selected_actions",
+        "selected_sample_count",
+        "canonical_sample_id_digest",
+    }
+    missing = required.difference(value)
+    if missing:
+        raise ValueError(
+            "Checkpoint cohort_identity is incomplete; missing "
+            f"{sorted(missing)}"
+        )
+    actions_value = value["selected_actions"]
+    if isinstance(actions_value, (str, bytes, bytearray)) or not isinstance(
+        actions_value, Sequence
+    ):
+        raise ValueError("Checkpoint cohort_identity.selected_actions must be a sequence")
+    actions = tuple(sorted({str(item) for item in actions_value}, key=natural_key))
+    if not actions or len(actions) != len(actions_value):
+        raise ValueError(
+            "Checkpoint cohort_identity.selected_actions must be non-empty and unique"
+        )
+    try:
+        count = int(value["selected_sample_count"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "Checkpoint cohort_identity.selected_sample_count must be an integer"
+        ) from error
+    digest = str(value["canonical_sample_id_digest"])
+    if count <= 0 or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("Checkpoint cohort_identity has an invalid sample digest")
+    return CohortIdentity(
+        selected_actions=actions,
+        selected_sample_count=count,
+        canonical_sample_id_digest=digest,
+    )
+
+
+def validate_checkpoint_cohort_identity(
+    checkpoint: Mapping[str, object],
+    sample_manifest: pd.DataFrame,
+    *,
+    selected_actions: Sequence[object],
+    selected_root_count: int,
+) -> CohortIdentity | None:
+    """Validate a B/C/D candidate against A's exact action/sample cohort.
+
+    Legacy checkpoints have no path-independent sample identity.  They stay
+    available only for one-root compatibility; selecting two roots requires a
+    newly generated Experiment A checkpoint.
+    """
+
+    persisted = parse_checkpoint_cohort_identity(checkpoint)
+    if persisted is None:
+        if selected_root_count > 1:
+            raise ValueError(
+                "Legacy Experiment A checkpoint cannot authorize a multi-root run. "
+                "Regenerate Experiment A for the selected dataset roots."
+            )
+        return None
+
+    candidate = build_cohort_identity(
+        sample_manifest,
+        selected_actions=selected_actions,
+    )
+    mismatches: list[str] = []
+    if candidate.selected_actions != persisted.selected_actions:
+        mismatches.append(
+            "selected actions "
+            f"{list(candidate.selected_actions)} != {list(persisted.selected_actions)}"
+        )
+    if candidate.selected_sample_count != persisted.selected_sample_count:
+        mismatches.append(
+            "selected sample count "
+            f"{candidate.selected_sample_count} != {persisted.selected_sample_count}"
+        )
+    if candidate.canonical_sample_id_digest != persisted.canonical_sample_id_digest:
+        mismatches.append("canonical sample-ID digest differs")
+    if mismatches:
+        raise ValueError(
+            "Selected dataset does not match the authoritative Experiment A cohort: "
+            + "; ".join(mismatches)
+            + ". Regenerate Experiment A for this action/sample cohort."
+        )
+    return persisted
 
 
 def normalize_user_name(value: object) -> str:
