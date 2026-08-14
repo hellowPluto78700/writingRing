@@ -17,17 +17,21 @@ Examples:
     python scripts/plot_board_segment_trajectories.py \
         --data-root data
 
-Defaults are tailored to the Action-0 low-pass aligned-Board pipeline:
+By default, the segmentation and plotting roots are derived from the selected
+action. For `--action 0`:
 
     segmentation root:
         outputs/action0_rectified/low-pass/aligned-board-events/segmentation
 
     plotting output root:
-        outputs/plotting_verification
+        outputs/plotting_verification/action0
 
 For user_0 / recording 0, images are written under:
 
-    outputs/plotting_verification/user_0/recording_0/
+    outputs/plotting_verification/action0/user_0/recording_0/
+
+For `--action 1`, the corresponding roots are `action1_rectified` and
+`outputs/plotting_verification/action1`.
 
 Each filename uses the exported segment's elapsed Ring-relative start/end time,
 rounded to one decimal place, plus the label, for example:
@@ -64,9 +68,6 @@ from writingring.discovery import DiscoveryError, Recording, discover_recordings
 from writingring.ring_loader import RingLoadError, load_ring
 
 
-DEFAULT_SEGMENTATION_ROOT = Path(
-    "outputs/action0_rectified/low-pass/aligned-board-events/segmentation"
-)
 DEFAULT_OUTPUT_ROOT = Path("outputs/plotting_verification")
 SCRIPT_VERSION = "2.2"
 
@@ -117,17 +118,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--segmentation-root",
         type=Path,
-        default=DEFAULT_SEGMENTATION_ROOT,
+        default=None,
         help=(
             "Root containing user/action Board-assisted segmentation packages "
-            f"(default: {DEFAULT_SEGMENTATION_ROOT})."
+            "(default: derived from --action as "
+            "outputs/action{action}_rectified/low-pass/aligned-board-events/segmentation)."
         ),
     )
     parser.add_argument(
         "--output-root",
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
-        help=f"Plot output root (default: {DEFAULT_OUTPUT_ROOT}).",
+        help=(
+            "Base plot output root; action{action} is appended "
+            f"(default: {DEFAULT_OUTPUT_ROOT}/action{{action}})."
+        ),
     )
     parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument(
@@ -136,6 +141,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace existing trajectory PNGs with the same generated names.",
     )
     return parser
+
+
+def default_segmentation_root(action: str) -> Path:
+    """Return the default aligned-Board segmentation root for ``action``."""
+
+    return (
+        Path("outputs")
+        / f"action{action}_rectified"
+        / "low-pass"
+        / "aligned-board-events"
+        / "segmentation"
+    )
+
+
+def action_output_root(output_root: Path, action: str) -> Path:
+    """Return the action-isolated plotting root under ``output_root``."""
+
+    return output_root / f"action{action}"
 
 
 def normalize_user(value: str) -> str:
@@ -732,6 +755,12 @@ def main() -> int:
 
         selected_user = normalize_user(args.user) if args.user is not None else None
         action = str(args.action)
+        segmentation_root = (
+            args.segmentation_root
+            if args.segmentation_root is not None
+            else default_segmentation_root(action)
+        )
+        output_root = action_output_root(args.output_root, action)
         strict_single_recording = (
             selected_user is not None and args.dataset_id is not None
         )
@@ -764,7 +793,7 @@ def main() -> int:
 
         for user, user_recordings in recordings_by_user.items():
             manifest_path = segmentation_manifest_path(
-                args.segmentation_root, user=user, action=action
+                segmentation_root, user=user, action=action
             )
 
             if not manifest_path.is_file():
@@ -810,7 +839,7 @@ def main() -> int:
                     recording=recording,
                     segments=segments,
                     manifest_path=manifest_path,
-                    output_root=args.output_root,
+                    output_root=output_root,
                     dpi=args.dpi,
                     overwrite=args.overwrite,
                 )
@@ -860,9 +889,9 @@ def main() -> int:
         print(f"Total plotted Board contact samples: {totals['contact_samples']}")
         print(f"Total plotted trajectory tracks: {totals['tracks']}")
         output_summary = (
-            args.output_root
+            output_root
             if selected_user is None
-            else args.output_root / selected_user
+            else output_root / selected_user
         )
         print(f"Output root: {output_summary}")
         return 0

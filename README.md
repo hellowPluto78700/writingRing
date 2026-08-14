@@ -33,6 +33,12 @@ The first two entries are source-label corrections for
 changes only the serialized contents of the specified Board chunk. None of
 these changes alter the Ring binary format or the IMU samples.
 
+`user_17` data is considered unreliable. It may be skipped during processing
+or removed from the dataset before running experiments. For the acceleration-
+CNN experiments, use the `excluded_users` configuration (exposed as
+`EXCLUDED_USERS` in the Experiment A notebook) when keeping the files but
+excluding this user from the cohort.
+
 ## Current workflow
 
 ```text
@@ -64,7 +70,7 @@ The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
 `python -m snn.train_action0` is a separate optional training entry point that
 consumes those padded packages.
 
-The wrappers under `scripts/Bash_Script/action0_pipeline/` resolve their
+The wrappers under `scripts/bash_script/action0_pipeline/` resolve their
 relative data, configuration, and output paths from the repository root, so
 the Action-0 commands can be launched using their repository path. The
 low-pass aligned-Board wrapper currently uses `data` as its data root, action
@@ -142,12 +148,12 @@ scripts/reconstruct_segmented_spike_accel.py
 scripts/reconstruct_padded_spike_accel.py
 scripts/analyze_segment_lengths.py
 scripts/pad_segmented_imu.py
-scripts/Bash_Script/action0_pipeline/*.sh
+scripts/bash_script/action0_pipeline/*.sh
 scripts/plot_board_segment_trajectories.py
 scripts/plot_board_trajectory_window.py
-scripts/Bash_Script/branch_board_trajectory_plot.bash
-scripts/Bash_Script/single_board_trajectory_plot.bash
-scripts/Bash_Script/Encoder_Evaluation_related/reconstruct_spike_sequence.bash
+scripts/bash_script/Encoder_Evaluation_related/branch_board_trajectory_plot.bash
+scripts/bash_script/Encoder_Evaluation_related/single_board_trajectory_plot.bash
+scripts/bash_script/Encoder_Evaluation_related/reconstruct_spike_sequence.bash
 python -m snn.train_action0
 notebooks/action0_snn_training.ipynb
 notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb
@@ -160,7 +166,7 @@ For example, run the current low-pass aligned-Board pipeline from the
 repository root with:
 
 ```bash
-bash scripts/Bash_Script/action0_pipeline/04_lowpass_aligned_board.sh
+bash scripts/bash_script/action0_pipeline/04_lowpass_aligned_board.sh
 ```
 
 Board trajectory visualization is available at two levels. To plot one PNG
@@ -169,14 +175,17 @@ manifest (the script does not re-segment the recording):
 
 ```bash
 python scripts/plot_board_segment_trajectories.py \
-  --data-root data --user user_0 --recording 0 --overwrite
+  --data-root data --user user_0 --action 0 --recording 0 --overwrite
 ```
 
 Omit `--recording` to process every discovered recording for the selected
-user/action. By default, these images are written under
-`outputs/plotting_verification/<user>/recording_<id>/` and the script reads
-the low-pass aligned-Board segmentation under
+user/action. For `--action 0`, these images are written under
+`outputs/plotting_verification/action0/<user>/recording_<id>/` and the script
+reads the low-pass aligned-Board segmentation under
 `outputs/action0_rectified/low-pass/aligned-board-events/segmentation`.
+For `--action 1`, it uses the corresponding `action1` output directory and
+`outputs/action1_rectified` segmentation root. An explicit `--output-root`
+is treated as a base directory and also receives the selected action folder.
 
 To inspect a selected Board trajectory window directly:
 
