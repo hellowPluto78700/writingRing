@@ -1,11 +1,12 @@
 # Workboard
 
-## Active plan
+## Most recently completed plan
 
-- **Plan:** `docs/plans/TODO/10_spike_user_exlude_refine_plan.md`
-- **TaskSpec:** frozen incrementally after each dependency-ready `luna_probe`
-  investigation.
-- **State:** ACTIVE — restoring the user-exclusion experiment workflow.
+- **Plan:** `docs/plans/Done/10_spike_user_exlude_refine_plan.md`
+- **TaskSpec:** `docs/plans/Done/10_spike_user_exlude_refine_TASKS.md`, frozen
+  incrementally after each dependency-ready `luna_probe` investigation.
+- **State:** COMPLETE — fixed user-exclusion experiment workflow restored and
+  independently verified.
 
 ## Current DAG state
 
@@ -19,8 +20,8 @@
 | T6 | T4 | VERIFIED PASS | C cohort inheritance independently verified. |
 | T7 | T4 | VERIFIED PASS | D cohort inheritance independently verified. |
 | T8 | T5, T6, T7 | VERIFIED PASS | Notebook controls independently verified. |
-| T9 | T8 | DRAFT / PROBE NEXT | Run cross-experiment and regression validation. |
+| T9 | T8 | VERIFIED PASS | 61 acceleration-reconstruction tests passed; fresh independent verifier PASS. |
 
-Each dependency-ready task follows `luna_probe → PRIMARY frozen TaskSpec → execution → luna_verifier`.
+Each dependency-ready task followed `luna_probe → PRIMARY frozen TaskSpec → execution → luna_verifier`.
 PRIMARY owns this workboard and all project-documentation edits. Documentation-only
 tasks are implemented by PRIMARY; only implementation tasks use `luna_worker`.

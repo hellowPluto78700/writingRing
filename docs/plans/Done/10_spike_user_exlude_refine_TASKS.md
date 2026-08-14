@@ -1,13 +1,13 @@
 # Fixed User Exclusion for Acceleration Reconstruction — Frozen TaskSpecs
 
-**Lifecycle:** ACTIVE.  The plan in
-`10_spike_user_exlude_refine_plan.md` remains the source of task ordering.
-Each dependency-ready task is probed, frozen by PRIMARY, implemented only
-within its allowed scope, and independently verified before dependents start.
+**Lifecycle:** COMPLETE.  The plan in
+`10_spike_user_exlude_refine_plan.md` supplied the task ordering. Each
+dependency-ready task was probed, frozen by PRIMARY, implemented only within
+its allowed scope, and independently verified before dependents started.
 
 ## T1 — Config contract
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** none.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `snn/accel_reconstruction_eval/config.py` and a new
@@ -40,7 +40,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T2 — Split-layer exclusion
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T1 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `snn/accel_reconstruction_eval/datasets.py` and one new
@@ -74,7 +74,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T3 — Experiment A runner integration
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T2 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `scripts/run_experiment_a.py` and one new focused A-runner
@@ -98,7 +98,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T4 — A checkpoint and provenance cohort contract
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T3 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `scripts/run_experiment_a.py` and one new focused
@@ -133,7 +133,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T5 — Experiment B cohort inheritance
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T4 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `scripts/run_experiment_b.py` and one new focused B
@@ -173,7 +173,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T6 — Experiment C cohort inheritance
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T4 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `scripts/run_experiment_c.py` and one new focused C
@@ -201,7 +201,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T7 — Experiment D cohort inheritance
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T4 independently verified.
 - **Executor:** `luna_worker` (implementation task).
 - **Allowed writes:** `scripts/run_experiment_d.py` and one new focused D
@@ -230,7 +230,7 @@ within its allowed scope, and independently verified before dependents start.
 
 ## T8 — Notebook controls
 
-- **Status:** FROZEN
+- **Status:** VERIFIED PASS
 - **Dependencies:** T5, T6, and T7 independently verified.
 - **Executor:** `luna_worker` (notebook implementation task).
 - **Allowed writes:**
@@ -262,6 +262,65 @@ within its allowed scope, and independently verified before dependents start.
 
 ## Pending TaskSpec slots
 
-T9 remains **UNFROZEN** until T8 independently passes. Its intended outcome is
-recorded in the Plan and WORKBOARD; PRIMARY will add the frozen contract at the
-dependency boundary.
+## T9 — Cross-experiment and regression validation
+
+- **Status:** VERIFIED PASS
+- **Dependencies:** T8 independently verified.
+- **Executor:** `luna_worker` (focused regression test), then PRIMARY
+  validation and plan closure.
+- **Goal:** Independently validate the complete fixed-user-exclusion workflow
+  across configuration, split construction, Experiment A artifacts, and
+  Experiment B/C/D cohort inheritance.
+- **Required behavior:** The validation matrix must establish that exclusions
+  are canonicalized and applied before split assignment; excluded users are
+  absent from assignments and manifests; Experiment A persists the complete
+  cohort contract; and B/C/D inherit that contract without local cohort
+  overrides. It must also exercise empty-exclusion compatibility, explicit
+  overlap/insufficient-cohort failures, legacy fallback, and provenance
+  reporting. Add one focused synthetic integration regression that creates an
+  actual A checkpoint and artifact set through the A runner's existing
+  lightweight test seam, then supplies the loaded checkpoint to B, C, and D's
+  split preparation paths. The regression must also observe the manifest passed
+  to A's loader construction and the sample identities supplied to its embedding
+  artifact writer, proving excluded-user samples cannot cross either boundary.
+  No production behavior is introduced by this task.
+- **Preserved contracts:** User-disjoint split behavior; A as B/C/D's cohort
+  authority; B's frozen-A weights and normalization; C's from-scratch,
+  reconstruction-normalized protocol; D's mixed-training protocol; existing
+  checkpoint and CSV schemas other than the already-verified additive cohort
+  fields.
+- **Allowed writes:** One new focused regression test module under `tests/`,
+  this TaskSpec, `docs/plans/WORKBOARD.md`, and plan lifecycle relocation only
+  after the frozen validation passes. Do not modify production code, notebooks,
+  data, or vendor content unless a failing result is routed to the applicable
+  prior task for repair.
+- **Acceptance criteria:** The new integration regression proves the A-produced
+  checkpoint is accepted as the same exclusion/split authority by B/C/D and
+  that excluded sample IDs are absent from A loader and embedding-artifact
+  inputs. The expanded focused pytest matrix passes with no failures;
+  `git diff --check` passes; and a fresh independent verifier reports PASS for
+  the frozen T9 scope. If the matrix reveals a real defect, route it to the
+  owning prior task rather than broadening T9.
+- **Validation:**
+  `conda run --no-capture-output -n writingring-gpu python -m pytest -q
+  tests/test_acceleration_reconstruction_config.py
+  tests/test_acceleration_reconstruction_splits.py
+  tests/test_acceleration_reconstruction_a_runner.py
+  tests/test_acceleration_reconstruction_a_cohort.py
+  tests/test_acceleration_reconstruction_b_cohort.py
+  tests/test_acceleration_reconstruction_c_cohort.py
+  tests/test_acceleration_reconstruction_d_cohort.py <new-focused-integration-
+  test-module>`; then `git diff --check`.
+  Use `writingring-viz` only if the preferred environment is unavailable.
+- **Dependencies:** No external data or model-training artifacts are required;
+  the frozen matrix uses synthetic fixtures.
+- **Replan triggers:** A failing result requires a change to the established
+  cohort, checkpoint, notebook, or experiment-protocol contract; or resolving
+  it requires edits outside the owning prior task's allowed scope.
+
+**Execution record:** The new synthetic A→B/C/D integration regression creates
+and reloads a real A checkpoint, observes A's loader and embedding-artifact
+boundaries, and verifies that B/C/D reuse its cohort authority. The expanded
+`tests/test_acceleration_reconstruction_*.py` suite passed with **61 passed**
+in the preferred `writingring-gpu` environment. `git diff --check` passed, and
+a fresh independent verifier returned **PASS**.
