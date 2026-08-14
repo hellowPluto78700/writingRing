@@ -4,9 +4,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATA_ROOT="data"
-ACTION=0
+ACTION=1
 POST_ENCODE_TRANSFORM="none"  #none, AbsRectify
-OUTPUT_BASE="outputs/action0_rectified"
+OUTPUT_BASE="outputs/action1_rectified"
 PIPELINE_MODE="overwrite"  # "continue" or "overwrite"
 
 export DATA_ROOT
