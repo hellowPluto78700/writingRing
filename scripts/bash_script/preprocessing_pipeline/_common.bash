@@ -243,6 +243,23 @@ pipeline_init() {
     fi
     PYTHON_CMD=(conda run --no-capture-output -n "$CONDA_ENV" python)
 
+    PIPELINE_BATCH_ORCHESTRATION="${PIPELINE_BATCH_ORCHESTRATION:-1}"
+    case "$PIPELINE_BATCH_ORCHESTRATION" in
+        0|1) ;;
+        *) pipeline_die "PIPELINE_BATCH_ORCHESTRATION must be 0 or 1" ;;
+    esac
+
+    PIPELINE_BATCH_QA="${PIPELINE_BATCH_QA:-1}"
+    case "$PIPELINE_BATCH_QA" in
+        0|1) ;;
+        *) pipeline_die "PIPELINE_BATCH_QA must be 0 or 1" ;;
+    esac
+
+    SEGMENT_VERIFICATION_DPI="${SEGMENT_VERIFICATION_DPI:-200}"
+    if [[ ! "$SEGMENT_VERIFICATION_DPI" =~ ^[1-9][0-9]*$ ]]; then
+        pipeline_die "SEGMENT_VERIFICATION_DPI must be a positive integer"
+    fi
+
     pipeline_configure_overwrite_args
 }
 
@@ -328,7 +345,7 @@ pipeline_discover() {
     fi
 }
 
-pipeline_preprocess() {
+pipeline_preprocess_legacy() {
     local index record_user record_action dataset_id log_path
     local -a command_args=()
     for index in "${!RECORD_USERS[@]}"; do
@@ -407,7 +424,7 @@ pipeline_encode() {
     done
 }
 
-pipeline_align() {
+pipeline_align_legacy() {
     local index record_user record_action dataset_id log_path
     local -a command_args=()
     for index in "${!RECORD_USERS[@]}"; do
@@ -605,7 +622,7 @@ else:
     esac
 }
 
-pipeline_successful_segmentation_user_count() {
+pipeline_successful_segmentation_user_count_legacy() {
     local record_user count=0
     if [[ "$BOUNDARY_MODE" != "aligned-board-events" ]]; then
         printf '%s\n' "${#PIPELINE_USERS[@]}"
@@ -706,7 +723,7 @@ print(f"published segmentation recording-error report: {json_path}")
     pipeline_run_logged "${QA_LOG:-/dev/null}" "${command_args[@]}"
 }
 
-pipeline_segment() {
+pipeline_segment_legacy() {
     local index record_user record_action log_path
     local -a command_args=()
     for record_user in "${PIPELINE_USERS[@]}"; do
@@ -751,7 +768,7 @@ pipeline_segment() {
     fi
 }
 
-pipeline_padding() {
+pipeline_padding_legacy() {
     local analysis_report="$PADDING_ANALYSIS_DIR/segment_length_analysis.json"
     local successful_user_action_count
     if ! successful_user_action_count="$(pipeline_successful_segmentation_user_count)"; then
@@ -1612,7 +1629,7 @@ pipeline_execute_from_stage() {
     esac
 }
 
-pipeline_qa() {
+pipeline_qa_legacy() {
     local ring_count="${#RING_FILES[@]}"
     local preprocessing_count spike_count summary_count padded_summary_count
     local successful_user_action_count="${#PIPELINE_USERS[@]}"
@@ -1797,6 +1814,1096 @@ pipeline_qa() {
     printf 'Padded output root: %s\n' "$PADDING_OUTPUT_ROOT"
     printf 'Logs: %s\n' "$LOG_ROOT"
 }
+
+
+# >>> BEGIN CHATGPT_COMMON_ONLY_PERFORMANCE_OVERRIDES >>>
+# Long-lived Python stage drivers.  These override the legacy Bash functions
+# above without changing any Python source file or numerical implementation.
+
+pipeline_batch_python_logged() {
+    local log_path="$1"
+    shift
+    pipeline_log_command "$log_path" "${PYTHON_CMD[@]}" - "$@"
+    "${PYTHON_CMD[@]}" - "$@" 2>&1 | tee -a "$log_path"
+}
+
+pipeline_batch_python_capture() {
+    local log_path="$1"
+    shift
+    pipeline_log_command "$log_path" "${PYTHON_CMD[@]}" - "$@"
+    "${PYTHON_CMD[@]}" - "$@" 2>>"$log_path"
+}
+
+pipeline_preprocess() {
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+        pipeline_preprocess_legacy
+        return
+    fi
+    pipeline_note "batched preprocess: one Python process for ${#RECORD_USERS[@]} recordings"
+    local -a batch_args=(
+        "$DATA_ROOT" "$PREPROCESS_ROOT" "$GRAVITY_METHOD" "$SAMPLING_RATE"
+        "$LOW_PASS_CUTOFF_HZ" "$MADGWICK_BETA" "$MADGWICK_PROVISIONAL" "$OVERWRITE"
+        "$LOG_ROOT/preprocess"
+    )
+    local index
+    for index in "${!RECORD_USERS[@]}"; do
+        batch_args+=(
+            "${RECORD_USERS[$index]}"
+            "${RECORD_ACTIONS[$index]}"
+            "${RECORD_DATASET_IDS[$index]}"
+        )
+    done
+    pipeline_batch_python_logged "$LOG_ROOT/preprocess/batch.log" "${batch_args[@]}" <<'PY_BATCH_PREPROCESS'
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+import sys
+
+from writingring.discovery import discover_recordings
+from writingring.gravity import GravityRemovalConfig
+from writingring.preprocessing_export import export_recording_preprocessing
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, value):
+        for stream in self.streams:
+            stream.write(value)
+        return len(value)
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+if len(sys.argv) < 10 or (len(sys.argv) - 10) % 3:
+    raise SystemExit("internal batched preprocess argument error")
+
+data_root = Path(sys.argv[1])
+output_root = Path(sys.argv[2])
+method = sys.argv[3]
+sampling_rate = float(sys.argv[4])
+cutoff = float(sys.argv[5])
+beta = float(sys.argv[6])
+provisional = bool(int(sys.argv[7]))
+overwrite = bool(int(sys.argv[8]))
+log_root = Path(sys.argv[9])
+record_keys = [
+    (sys.argv[index], sys.argv[index + 1], int(sys.argv[index + 2]))
+    for index in range(10, len(sys.argv), 3)
+]
+
+recordings = discover_recordings(data_root)
+by_key = {(r.user, r.action, r.dataset_id): r for r in recordings}
+missing = [key for key in record_keys if key not in by_key]
+if missing:
+    raise SystemExit(f"batched preprocess could not resolve recordings: {missing[:5]}")
+
+config = GravityRemovalConfig(
+    sampling_rate_hz=sampling_rate,
+    gravity_removal_method=method,
+    low_pass_cutoff_hz=cutoff,
+    madgwick_beta=beta,
+    strict_calibration=(method == "madgwick" and not provisional),
+)
+log_root.mkdir(parents=True, exist_ok=True)
+base_stdout = sys.stdout
+base_stderr = sys.stderr
+for number, key in enumerate(record_keys, start=1):
+    user, action, dataset_id = key
+    log_path = log_root / f"{user}_session_{dataset_id}.log"
+    with log_path.open("a", encoding="utf-8") as log_stream:
+        with redirect_stdout(Tee(base_stdout, log_stream)), redirect_stderr(Tee(base_stderr, log_stream)):
+            print(f"[preprocess] {number}/{len(record_keys)} {user}/{action}/{dataset_id}", flush=True)
+            result = export_recording_preprocessing(
+                by_key[key],
+                output_root=output_root,
+                gravity_config=config,
+                output_dtype="float32",
+                overwrite=overwrite,
+            )
+            print(f"Exported {user}/{action}/{dataset_id}: {len(result.imu)} samples", flush=True)
+print(f"[preprocess] completed {len(record_keys)} recording(s) in one Python process", flush=True)
+PY_BATCH_PREPROCESS
+
+    local record_user record_action dataset_id
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        pipeline_require_file "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_preprocessedIMU.npy" "preprocessed IMU artifact"
+        pipeline_require_file "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy" "preprocessing timestamp sidecar"
+        pipeline_require_file "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_preprocessing.json" "preprocessing summary"
+    done
+}
+
+pipeline_align() {
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+        pipeline_align_legacy
+        return
+    fi
+    pipeline_note "batched alignment: one Python process for ${#RECORD_USERS[@]} recordings"
+    local -a batch_args=(
+        "$PIPELINE_PROJECT_ROOT/scripts/align_ring_board.py"
+        "$DATA_ROOT" "$SPIKE_ROOT" "$OFFSET_ROOT" "$ALIGNMENT_REPORT_ROOT"
+        "$ALIGNMENT_VERIFICATION_ROOT" "$OVERWRITE" "$LOG_ROOT/alignment" "$ACTION"
+    )
+    local index
+    for index in "${!RECORD_USERS[@]}"; do
+        batch_args+=(
+            "${RECORD_USERS[$index]}"
+            "${RECORD_ACTIONS[$index]}"
+            "${RECORD_DATASET_IDS[$index]}"
+        )
+    done
+    pipeline_batch_python_logged "$LOG_ROOT/alignment/batch.log" "${batch_args[@]}" <<'PY_BATCH_ALIGN'
+from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+import sys
+
+import writingring.board_loader as board_loader_module
+import writingring.discovery as discovery_module
+import writingring.recording_features as feature_module
+from writingring.alignment_io import (
+    build_alignment_input_provenance,
+    build_board_chunk_provenance,
+    validate_alignment_outcome,
+)
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, value):
+        for stream in self.streams:
+            stream.write(value)
+        return len(value)
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+if len(sys.argv) < 10 or (len(sys.argv) - 10) % 3:
+    raise SystemExit("internal batched alignment argument error")
+
+script_path = Path(sys.argv[1])
+data_root = Path(sys.argv[2])
+spike_root = Path(sys.argv[3])
+offset_root = Path(sys.argv[4])
+report_root = Path(sys.argv[5])
+verification_root = Path(sys.argv[6])
+overwrite = bool(int(sys.argv[7]))
+log_root = Path(sys.argv[8])
+action_expected = sys.argv[9]
+record_keys = [
+    (sys.argv[index], sys.argv[index + 1], int(sys.argv[index + 2]))
+    for index in range(10, len(sys.argv), 3)
+]
+if any(action != action_expected for _, action, _ in record_keys):
+    raise SystemExit("batched alignment received a recording from the wrong action")
+
+original_discover = discovery_module.discover_recordings
+recordings = original_discover(data_root)
+by_key = {(r.user, r.action, r.dataset_id): r for r in recordings}
+missing = [key for key in record_keys if key not in by_key]
+if missing:
+    raise SystemExit(f"batched alignment could not resolve recordings: {missing[:5]}")
+
+# Reuse discovery inside every CLI main() call. This removes repeated directory scans
+# while preserving align_ring_board.py as the producer implementation.
+def cached_discover(root):
+    if Path(root).resolve() == data_root.resolve():
+        return recordings
+    return original_discover(root)
+discovery_module.discover_recordings = cached_discover
+
+original_load_board = board_loader_module.load_board
+board_cache = {}
+def cached_load_board(source):
+    key = (
+        getattr(source, "user", None),
+        getattr(source, "action", None),
+        getattr(source, "dataset_id", None),
+    )
+    if None in key:
+        return original_load_board(source)
+    if key not in board_cache:
+        board_cache[key] = original_load_board(source)
+    return board_cache[key]
+board_loader_module.load_board = cached_load_board
+
+original_load_feature = feature_module.load_recording_features
+feature_cache = {}
+def cached_load_feature(recording, *args, **kwargs):
+    input_kind = kwargs.get("input_kind", "raw-ring")
+    requested_spike_root = kwargs.get("spike_root")
+    key = (
+        recording.user,
+        recording.action,
+        recording.dataset_id,
+        input_kind,
+        None if requested_spike_root is None else str(Path(requested_spike_root).resolve()),
+    )
+    if key not in feature_cache:
+        feature_cache[key] = original_load_feature(recording, *args, **kwargs)
+    return feature_cache[key]
+feature_module.load_recording_features = cached_load_feature
+
+spec = spec_from_file_location("writingring_align_batch_cli", script_path)
+if spec is None or spec.loader is None:
+    raise SystemExit(f"could not load alignment CLI: {script_path}")
+align_cli = module_from_spec(spec)
+spec.loader.exec_module(align_cli)
+
+log_root.mkdir(parents=True, exist_ok=True)
+base_stdout = sys.stdout
+base_stderr = sys.stderr
+for number, key in enumerate(record_keys, start=1):
+    user, action, dataset_id = key
+    recording = by_key[key]
+    log_path = log_root / f"{user}_session_{dataset_id}.log"
+    argv = [
+        "--data-root", str(data_root),
+        "--user", user,
+        "--action", action,
+        "--dataset-id", str(dataset_id),
+        "--input-kind", "spike-imu",
+        "--spike-root", str(spike_root),
+        "--offset-output-root", str(offset_root),
+        "--report-output-root", str(report_root),
+        "--verification-output-root", str(verification_root),
+        "--initial-interval-policy", "skip",
+        "--unalignable-recording-policy", "skip",
+    ]
+    if overwrite:
+        argv.extend([
+            "--overwrite-offset",
+            "--overwrite-report",
+            "--overwrite-verification",
+            "--overwrite-outcome",
+        ])
+    with log_path.open("a", encoding="utf-8") as log_stream:
+        with redirect_stdout(Tee(base_stdout, log_stream)), redirect_stderr(Tee(base_stderr, log_stream)):
+            print(f"[align] {number}/{len(record_keys)} {user}/{action}/{dataset_id}", flush=True)
+            status_code = align_cli.main(argv)
+            if status_code != 0:
+                raise SystemExit(
+                    f"alignment producer failed for {user}/{action}/{dataset_id} with status {status_code}"
+                )
+            feature_input = cached_load_feature(
+                recording,
+                input_kind="spike-imu",
+                spike_root=spike_root,
+            )
+            board_data = cached_load_board(recording)
+            input_provenance = build_alignment_input_provenance(feature_input)
+            board_provenance = build_board_chunk_provenance(board_data)
+            outcome = validate_alignment_outcome(
+                offset_root,
+                verification_root,
+                report_root,
+                expected_recording={
+                    "user": user,
+                    "action": action,
+                    "dataset_id": dataset_id,
+                },
+                expected_input_provenance=input_provenance,
+                expected_board_provenance=board_provenance,
+            )
+            if outcome.status_name not in {"SUCCESS", "SKIPPED"}:
+                raise SystemExit(
+                    f"alignment outcome returned unsupported status {outcome.status_name}: "
+                    f"{user}/{action}/{dataset_id}"
+                )
+            print(
+                f"[align] validated outcome={outcome.status_name} "
+                f"for {user}/{action}/{dataset_id}",
+                flush=True,
+            )
+    # The cache exists only to reuse producer inputs for immediate validation.
+    # Release the potentially large Board/feature arrays before the next recording.
+    board_cache.pop((user, action, dataset_id), None)
+    for cache_key in list(feature_cache):
+        if cache_key[:3] == (user, action, dataset_id):
+            feature_cache.pop(cache_key, None)
+print(f"[align] completed {len(record_keys)} recording(s) in one Python process", flush=True)
+PY_BATCH_ALIGN
+}
+
+pipeline_segment() {
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+        pipeline_segment_legacy
+        return
+    fi
+    local effective_overwrite="$OVERWRITE"
+    if (( ${#PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS[@]} > 0 )); then
+        effective_overwrite=1
+    fi
+    pipeline_note "batched segmentation: one Python process for ${#PIPELINE_USERS[@]} users"
+    pipeline_batch_python_logged "$LOG_ROOT/segmentation/batch.log" \
+        "$PIPELINE_PROJECT_ROOT/scripts/segment_ring_imu.py" \
+        "$DATA_ROOT" "$SPIKE_ROOT" "$BOUNDARY_MODE" "$SAMPLING_RATE" \
+        "$SEGMENT_ROOT" "$OFFSET_ROOT" "$effective_overwrite" "$SEGMENT_VERIFICATION_DPI" \
+        "$LOG_ROOT/segmentation" "$ACTION" "${PIPELINE_USERS[@]}" <<'PY_BATCH_SEGMENT'
+from contextlib import redirect_stderr, redirect_stdout
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+import csv
+import json
+import os
+import sys
+import tempfile
+
+import writingring.discovery as discovery_module
+
+class Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, value):
+        for stream in self.streams:
+            stream.write(value)
+        return len(value)
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+if len(sys.argv) < 13:
+    raise SystemExit("internal batched segmentation argument error")
+script_path = Path(sys.argv[1])
+data_root = Path(sys.argv[2])
+spike_root = Path(sys.argv[3])
+boundary_mode = sys.argv[4]
+sampling_rate = sys.argv[5]
+output_root = Path(sys.argv[6])
+offset_root = Path(sys.argv[7])
+overwrite = bool(int(sys.argv[8]))
+verification_dpi = sys.argv[9]
+log_root = Path(sys.argv[10])
+action = sys.argv[11]
+users = sys.argv[12:]
+if not users:
+    raise SystemExit("batched segmentation requires at least one user")
+
+original_discover = discovery_module.discover_recordings
+recordings = original_discover(data_root)
+def cached_discover(root):
+    if Path(root).resolve() == data_root.resolve():
+        return recordings
+    return original_discover(root)
+discovery_module.discover_recordings = cached_discover
+
+spec = spec_from_file_location("writingring_segment_batch_cli", script_path)
+if spec is None or spec.loader is None:
+    raise SystemExit(f"could not load segmentation CLI: {script_path}")
+segment_cli = module_from_spec(spec)
+spec.loader.exec_module(segment_cli)
+
+log_root.mkdir(parents=True, exist_ok=True)
+base_stdout = sys.stdout
+base_stderr = sys.stderr
+for number, user in enumerate(users, start=1):
+    argv = [
+        "--data-root", str(data_root),
+        "--user", user,
+        "--action", action,
+        "--input-kind", "spike-imu",
+        "--spike-root", str(spike_root),
+        "--boundary-mode", boundary_mode,
+        "--sampling-rate", sampling_rate,
+        "--output-root", str(output_root),
+    ]
+    if boundary_mode == "aligned-board-events":
+        argv.extend([
+            "--alignment-offset-root", str(offset_root),
+            "--pre-press-context-seconds", "0.2",
+            "--post-lift-context-seconds", "0.2",
+            "--maximum-segment-duration-seconds", "5.0",
+            "--carry-in-press-lookback-seconds", "0.2",
+            "--missing-event-policy", "skip",
+            "--crossing-touch-policy", "accept_until_next_press",
+            "--recording-error-policy", "skip",
+            "--verification-panel-seconds", "10",
+            "--verification-dpi", verification_dpi,
+        ])
+    if overwrite:
+        argv.append("--overwrite")
+    log_path = log_root / f"{user}.log"
+    with log_path.open("a", encoding="utf-8") as log_stream:
+        with redirect_stdout(Tee(base_stdout, log_stream)), redirect_stderr(Tee(base_stderr, log_stream)):
+            print(f"[segment] {number}/{len(users)} {user}/{action}", flush=True)
+            status_code = segment_cli.main(argv)
+            if status_code != 0:
+                raise SystemExit(
+                    f"segmentation failed for {user}/{action} with status {status_code}"
+                )
+
+if boundary_mode == "aligned-board-events":
+    states = []
+    errors = []
+    for user in users:
+        stem = f"{user}_action_{action}"
+        summary_path = output_root / user / f"action_{action}" / f"{stem}_segmentation_summary.json"
+        error_path = output_root / "recording_errors" / user / f"action_{action}" / f"{stem}_segmentation_recording_errors.json"
+        if summary_path.is_file():
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            state = "completed_with_recording_errors" if payload.get("segmentation_error_recording_count", 0) else "completed"
+        elif error_path.is_file():
+            payload = json.loads(error_path.read_text(encoding="utf-8"))
+            state = payload.get("terminal_state")
+        else:
+            raise SystemExit(f"missing terminal segmentation state for {user}/{action}")
+        states.append({
+            "user": user,
+            "action": action,
+            "terminal_state": state,
+            "source_recording_count": payload.get("source_recording_count"),
+            "processed_recording_count": payload.get("processed_recording_count"),
+            "alignment_skipped_recording_count": payload.get(
+                "alignment_skipped_recording_count", payload.get("skipped_recording_count")
+            ),
+            "segmentation_error_recording_count": payload.get("segmentation_error_recording_count"),
+        })
+        for error in payload.get("segmentation_errors", []):
+            identity = error.get("identity", {}) if isinstance(error, dict) else {}
+            errors.append({
+                "user": identity.get("user"),
+                "action": identity.get("action"),
+                "dataset_id": identity.get("dataset_id"),
+                "stage": error.get("stage") if isinstance(error, dict) else None,
+                "error_type": error.get("error_type") if isinstance(error, dict) else None,
+                "message": error.get("message") if isinstance(error, dict) else None,
+            })
+    report = {
+        "schema_version": 1,
+        "action": action,
+        "user_action_states": states,
+        "recording_error_count": len(errors),
+        "recording_errors": errors,
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    json_path = output_root / "segmentation_recording_error_report.json"
+    csv_path = output_root / "segmentation_recording_error_report.csv"
+    def atomic_text(path, text):
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+                stream.write(text)
+            os.replace(temporary, path)
+        except Exception:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+    atomic_text(json_path, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{csv_path.name}.", dir=csv_path.parent, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(
+                stream,
+                fieldnames=["user", "action", "dataset_id", "stage", "error_type", "message"],
+            )
+            writer.writeheader()
+            writer.writerows(errors)
+        os.replace(temporary, csv_path)
+    except Exception:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    print(f"published segmentation recording-error report: {json_path}", flush=True)
+print(f"[segment] completed {len(users)} user/action package(s) in one Python process", flush=True)
+PY_BATCH_SEGMENT
+}
+
+pipeline_successful_segmentation_user_count() {
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+        pipeline_successful_segmentation_user_count_legacy
+        return
+    fi
+    if [[ "$BOUNDARY_MODE" != "aligned-board-events" ]]; then
+        printf '%s\n' "${#PIPELINE_USERS[@]}"
+        return 0
+    fi
+    pipeline_batch_python_capture "${QA_LOG:-/dev/null}" \
+        "$SEGMENT_ROOT" "$ACTION" "${PIPELINE_USERS[@]}" <<'PY_BATCH_STATE_COUNT'
+from pathlib import Path
+import json
+import sys
+
+root = Path(sys.argv[1])
+action = sys.argv[2]
+users = sys.argv[3:]
+
+def load(path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"could not read {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise SystemExit(f"{path} is not a JSON object")
+    return value
+
+def nonnegative(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SystemExit(f"{name} must be a nonnegative integer")
+    return value
+
+def dep_key(value):
+    if not isinstance(value, dict):
+        raise SystemExit("alignment dependency identity is malformed")
+    identity = value.get("identity", value)
+    if not isinstance(identity, dict):
+        raise SystemExit("alignment dependency identity is malformed")
+    return identity.get("user"), identity.get("action"), identity.get("dataset_id")
+
+def validate_dependency(value):
+    if not isinstance(value, dict):
+        raise SystemExit("alignment_outcome_dependency must be an object")
+    source = value.get("source_recording_ids")
+    outcomes = value.get("outcomes_by_status")
+    if not isinstance(source, list) or not isinstance(outcomes, dict):
+        raise SystemExit("alignment outcome dependency is malformed")
+    success = outcomes.get("SUCCESS")
+    skipped = outcomes.get("SKIPPED")
+    if not isinstance(success, list) or not isinstance(skipped, list):
+        raise SystemExit("alignment outcome dependency statuses are malformed")
+    source_keys = [dep_key(entry) for entry in source]
+    outcome_keys = [dep_key(entry) for entry in success + skipped]
+    try:
+        sorted_keys = sorted(source_keys, key=lambda item: item[2])
+    except TypeError as error:
+        raise SystemExit("alignment dependency dataset ids are malformed") from error
+    if (
+        len(set(source_keys)) != len(source_keys)
+        or len(set(outcome_keys)) != len(outcome_keys)
+        or source_keys != sorted_keys
+        or set(source_keys) != set(outcome_keys)
+    ):
+        raise SystemExit("alignment outcome dependency does not reconcile")
+    return {dep_key(entry)[2] for entry in success}
+
+def validate(payload, user):
+    if payload.get("input_kind") != "spike-imu":
+        raise SystemExit("segmentation state is not SpikeIMU")
+    if payload.get("boundary_mode") != "aligned_board_events":
+        raise SystemExit("segmentation state is not aligned Board mode")
+    source = nonnegative(payload.get("source_recording_count"), "source_recording_count")
+    processed = nonnegative(payload.get("processed_recording_count"), "processed_recording_count")
+    skipped = nonnegative(payload.get("skipped_recording_count"), "skipped_recording_count")
+    errors = nonnegative(
+        payload.get("segmentation_error_recording_count"),
+        "segmentation_error_recording_count",
+    )
+    entries = payload.get("segmentation_errors")
+    if not isinstance(entries, list) or len(entries) != errors:
+        raise SystemExit("segmentation error entries do not reconcile")
+    if source != processed + skipped + errors:
+        raise SystemExit("source recording counts do not reconcile")
+    success_ids = validate_dependency(payload.get("alignment_outcome_dependency"))
+    error_ids = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SystemExit("segmentation error entry is malformed")
+        identity = entry.get("identity")
+        if not isinstance(identity, dict):
+            raise SystemExit("segmentation error identity is malformed")
+        dataset_id = identity.get("dataset_id")
+        if (
+            identity.get("user") != user
+            or identity.get("action") != action
+            or isinstance(dataset_id, bool)
+            or not isinstance(dataset_id, int)
+            or dataset_id < 0
+            or not isinstance(entry.get("stage"), str)
+            or not entry["stage"]
+            or not isinstance(entry.get("error_type"), str)
+            or not entry["error_type"]
+            or not isinstance(entry.get("message"), str)
+        ):
+            raise SystemExit("segmentation error fields are malformed")
+        error_ids.add(dataset_id)
+    if len(error_ids) != errors or not error_ids <= success_ids:
+        raise SystemExit("segmentation errors must retain alignment SUCCESS")
+    return processed, errors
+
+successful = 0
+for user in users:
+    stem = f"{user}_action_{action}"
+    summary_path = root / user / f"action_{action}" / f"{stem}_segmentation_summary.json"
+    error_path = root / "recording_errors" / user / f"action_{action}" / f"{stem}_segmentation_recording_errors.json"
+    if summary_path.is_file():
+        summary = load(summary_path)
+        processed, errors = validate(summary, user)
+        if processed <= 0:
+            raise SystemExit("segmentation summary has no processed recording")
+        if errors == 0:
+            if error_path.is_file():
+                raise SystemExit("stale recording-error report accompanies a clean package")
+        else:
+            if not error_path.is_file():
+                raise SystemExit("segmentation errors are missing their report")
+            report = load(error_path)
+            if report.get("terminal_state") != "completed_with_recording_errors":
+                raise SystemExit("mixed segmentation error report has wrong terminal state")
+            validate(report, user)
+            if (
+                report.get("segmentation_errors") != summary.get("segmentation_errors")
+                or report.get("alignment_outcome_dependency")
+                != summary.get("alignment_outcome_dependency")
+            ):
+                raise SystemExit("segmentation error report differs from package summary")
+        successful += 1
+    elif error_path.is_file():
+        report = load(error_path)
+        if report.get("terminal_state") != "all_recordings_error":
+            raise SystemExit("report-only segmentation state has wrong terminal state")
+        processed, errors = validate(report, user)
+        if processed != 0 or errors == 0:
+            raise SystemExit("report-only segmentation state does not describe all-recording errors")
+    else:
+        raise SystemExit(f"missing terminal segmentation state for {user}/{action}")
+sys.stdout.write(str(successful))
+PY_BATCH_STATE_COUNT
+}
+
+pipeline_padding() {
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+        pipeline_padding_legacy
+        return
+    fi
+    local successful_user_action_count
+    if ! successful_user_action_count="$(pipeline_successful_segmentation_user_count)"; then
+        pipeline_die "could not validate segmentation states before padding"
+    fi
+    if [[ "$successful_user_action_count" -eq 0 ]]; then
+        if pipeline_padding_has_any_output; then
+            pipeline_die "no successful segmentation package is available, but padding outputs exist"
+        fi
+        pipeline_note "no successful segmentation package; skipping length analysis and padding"
+        return 0
+    fi
+    local effective_overwrite="$OVERWRITE"
+    if (( ${#PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS[@]} > 0 )); then
+        effective_overwrite=1
+    fi
+    pipeline_note "batched padding: validate/load segmented packages once, then analyze and pad"
+    pipeline_batch_python_logged "$PADDING_LOG" \
+        "$SEGMENT_ROOT" "$PADDING_ANALYSIS_DIR" "$PADDING_OUTPUT_ROOT" \
+        "$SAMPLING_RATE" "$PADDING_COVERAGE" "$PADDING_ROUND_TO" \
+        "$PADDING_RECOMMENDATION" "$PADDING_VALUE" "$effective_overwrite" <<'PY_BATCH_PADDING'
+from pathlib import Path
+import sys
+
+from writingring.segment_padding import (
+    DEFAULT_CANDIDATE_LENGTHS,
+    analyze_segment_lengths,
+    publish_padded_root,
+    resolve_target_length,
+    validate_segmented_root,
+    write_segment_length_analysis,
+)
+
+if len(sys.argv) != 10:
+    raise SystemExit("internal batched padding argument error")
+input_root = Path(sys.argv[1])
+analysis_dir = Path(sys.argv[2])
+output_root = Path(sys.argv[3])
+sampling_rate = float(sys.argv[4])
+minimum_coverage = float(sys.argv[5])
+round_to = int(sys.argv[6])
+recommendation = sys.argv[7]
+padding_value = float(sys.argv[8])
+overwrite = bool(int(sys.argv[9]))
+
+print("[padding] loading and validating segmented packages once", flush=True)
+datasets = validate_segmented_root(input_root)
+analysis = analyze_segment_lengths(
+    datasets,
+    sampling_rate_hz=sampling_rate,
+    candidate_lengths=DEFAULT_CANDIDATE_LENGTHS,
+    minimum_coverage=minimum_coverage,
+    round_to=round_to,
+)
+paths = write_segment_length_analysis(
+    analysis,
+    input_root=input_root,
+    output_dir=analysis_dir,
+    datasets=datasets,
+    overwrite=overwrite,
+)
+stats = analysis["length_statistics"]
+pure = analysis["recommendations"]["pure_padding"]
+print(
+    f"Analyzed {analysis['segment_count']} segments in {analysis['user_action_count']} "
+    f"user/action packages. Range: {stats['minimum']}–{stats['maximum']} samples.",
+    flush=True,
+)
+print(
+    f"Pure-padding target: {pure['target_length']} samples "
+    f"({pure['target_length'] / sampling_rate:.3f} seconds).",
+    flush=True,
+)
+print(f"Analysis report: {paths['json']}", flush=True)
+
+target = resolve_target_length(
+    target_length=None,
+    analysis_report=paths["json"],
+    recommendation=recommendation,
+    datasets=datasets,
+    input_root=input_root,
+)
+summary = publish_padded_root(
+    datasets,
+    input_root=input_root,
+    output_root=output_root,
+    target_length=target,
+    sampling_rate_hz=sampling_rate,
+    padding_value=padding_value,
+    overwrite=overwrite,
+)
+print(
+    f"Published {summary['segment_count']} padded segments in "
+    f"{summary['processed_user_action_count']} user/action packages at target length {target}; "
+    f"skipped {summary['skipped_segment_count']} overlong segments.",
+    flush=True,
+)
+print(f"Output root: {output_root}", flush=True)
+PY_BATCH_PADDING
+    pipeline_require_file "$PADDING_ANALYSIS_DIR/segment_length_analysis.json" "segment-length analysis report"
+    pipeline_require_file "$PADDING_OUTPUT_ROOT/padding_dataset_summary.json" "padded dataset summary"
+    pipeline_require_file "$PADDING_OUTPUT_ROOT/padding_dataset_manifest.csv" "padded dataset manifest"
+}
+
+pipeline_qa() {
+    if [[ "${PIPELINE_BATCH_QA:-1}" == "0" ]]; then
+        pipeline_qa_legacy
+        return
+    fi
+    pipeline_note "running batched final QA in one Python process"
+    pipeline_log_command "$QA_LOG" "${PYTHON_CMD[@]}" - \
+        --data-root "$DATA_ROOT" \
+        --preprocess-root "$PREPROCESS_ROOT" \
+        --spike-root "$SPIKE_ROOT" \
+        --offset-root "$OFFSET_ROOT" \
+        --alignment-verification-root "$ALIGNMENT_VERIFICATION_ROOT" \
+        --alignment-report-root "$ALIGNMENT_REPORT_ROOT" \
+        --segmentation-root "$SEGMENT_ROOT" \
+        --padding-output-root "$PADDING_OUTPUT_ROOT" \
+        --combination-root "$COMBINATION_ROOT" \
+        --log-root "$LOG_ROOT" \
+        --action "$ACTION" \
+        --boundary-mode "$BOUNDARY_MODE" \
+        --post-encode-transform "$POST_ENCODE_TRANSFORM" \
+        --expected-ring-count "${#RING_FILES[@]}" \
+        --expected-user-count "${#PIPELINE_USERS[@]}"
+    "${PYTHON_CMD[@]}" - \
+        --data-root "$DATA_ROOT" \
+        --preprocess-root "$PREPROCESS_ROOT" \
+        --spike-root "$SPIKE_ROOT" \
+        --offset-root "$OFFSET_ROOT" \
+        --alignment-verification-root "$ALIGNMENT_VERIFICATION_ROOT" \
+        --alignment-report-root "$ALIGNMENT_REPORT_ROOT" \
+        --segmentation-root "$SEGMENT_ROOT" \
+        --padding-output-root "$PADDING_OUTPUT_ROOT" \
+        --combination-root "$COMBINATION_ROOT" \
+        --log-root "$LOG_ROOT" \
+        --action "$ACTION" \
+        --boundary-mode "$BOUNDARY_MODE" \
+        --post-encode-transform "$POST_ENCODE_TRANSFORM" \
+        --expected-ring-count "${#RING_FILES[@]}" \
+        --expected-user-count "${#PIPELINE_USERS[@]}" <<'PY_BATCH_QA' 2>&1 | tee -a "$QA_LOG"
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from contextlib import redirect_stdout
+from io import StringIO
+import json
+from pathlib import Path
+import sys
+
+import numpy as np
+
+from writingring.alignment_io import (
+    build_alignment_input_provenance,
+    build_board_chunk_provenance,
+    read_alignment_skip_artifact,
+    validate_alignment_outcome,
+)
+from writingring.board_loader import load_board
+from writingring.discovery import discover_recordings
+from writingring.preprocessing_io import sha256_file
+from writingring.recording_features import load_recording_features
+
+
+class QAError(RuntimeError):
+    pass
+
+
+def args_parser():
+    p = argparse.ArgumentParser()
+    p.add_argument('--data-root', type=Path, required=True)
+    p.add_argument('--preprocess-root', type=Path, required=True)
+    p.add_argument('--spike-root', type=Path, required=True)
+    p.add_argument('--offset-root', type=Path, required=True)
+    p.add_argument('--alignment-verification-root', type=Path, required=True)
+    p.add_argument('--alignment-report-root', type=Path, required=True)
+    p.add_argument('--segmentation-root', type=Path, required=True)
+    p.add_argument('--padding-output-root', type=Path, required=True)
+    p.add_argument('--combination-root', type=Path, required=True)
+    p.add_argument('--log-root', type=Path, required=True)
+    p.add_argument('--action', required=True)
+    p.add_argument('--boundary-mode', choices=('label','aligned-board-events'), required=True)
+    p.add_argument('--post-encode-transform', choices=('none','AbsRectify'), required=True)
+    p.add_argument('--expected-ring-count', type=int, required=True)
+    p.add_argument('--expected-user-count', type=int, required=True)
+    return p.parse_args()
+
+
+def load_json(path: Path):
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except Exception as e:
+        raise QAError(f'could not read JSON {path}: {e}') from e
+    if not isinstance(value, dict):
+        raise QAError(f'JSON is not an object: {path}')
+    return value
+
+
+def require(path: Path, what: str):
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise QAError(f'missing or empty {what}: {path}')
+
+
+def count(root: Path, pattern: str):
+    if not root.is_dir():
+        return 0
+    return sum(1 for p in root.rglob(pattern) if p.is_file())
+
+
+def progress(label: str, i: int, n: int, detail: str = ''):
+    stride = 5 if n >= 10 else 1
+    if i == 1 or i == n or i % stride == 0:
+        print(f'[qa] {label}: {i}/{n}' + (f' {detail}' if detail else ''), flush=True)
+
+
+def validate_transform(metadata_path: Path, requested: str):
+    metadata = load_json(metadata_path)
+    spike = metadata.get('spike_imu') or {}
+    if not isinstance(spike, dict) or spike.get('channel_count') != 21:
+        raise QAError(f'metadata does not declare 21 SpikeIMU channels: {metadata_path}')
+    settings = metadata.get('settings') or {}
+    if not isinstance(settings, dict):
+        raise QAError(f'invalid settings object: {metadata_path}')
+    expected = None if requested == 'none' else requested
+    actual = settings.get('post_encode_transform')
+    if actual != expected:
+        raise QAError(f'SpikeIMU post_encode_transform mismatch: expected={expected!r}, actual={actual!r}: {metadata_path}')
+
+
+def seg_state_paths(root: Path, user: str, action: str):
+    stem = f'{user}_action_{action}'
+    summary = root / user / f'action_{action}' / f'{stem}_segmentation_summary.json'
+    error = root / 'recording_errors' / user / f'action_{action}' / f'{stem}_segmentation_recording_errors.json'
+    return summary, error
+
+
+def validate_seg_dependency(root: Path, user: str, action: str, expected):
+    summary, error = seg_state_paths(root, user, action)
+    path = summary if summary.is_file() else error
+    if not path.is_file():
+        raise QAError(f'missing segmentation terminal state for {user}/{action}')
+    payload = load_json(path)
+    if payload.get('alignment_outcome_dependency') != expected:
+        raise QAError(f'alignment outcome dependency is missing, malformed, or stale: {user}/{action}')
+    processed = payload.get('processed_recording_count')
+    errors = payload.get('segmentation_error_recording_count')
+    if not isinstance(processed, int) or processed < 0 or not isinstance(errors, int) or errors < 0:
+        raise QAError(f'invalid segmentation counts for {user}/{action}')
+    if summary.is_file():
+        state = 'PACKAGE_WITH_ERRORS' if errors else 'PACKAGE_NO_ERRORS'
+        if errors and not error.is_file():
+            raise QAError(f'segmentation errors are missing their report for {user}/{action}')
+        if not errors and error.is_file():
+            raise QAError(f'stale recording-error report for clean package {user}/{action}')
+    else:
+        if payload.get('terminal_state') != 'all_recordings_error' or processed != 0 or errors <= 0:
+            raise QAError(f'invalid all-recordings-error state for {user}/{action}')
+        state = 'ALL_RECORDINGS_ERROR'
+    return state, errors
+
+
+def validate_segment_package(root: Path, user: str, action: str, board_mode: bool):
+    d = root / user / f'action_{action}'
+    stem = f'{user}_action_{action}'
+    values_path = d / f'{stem}_spikeIMU.npy'
+    labels_path = d / f'{stem}_labels.npy'
+    offsets_path = d / f'{stem}_segment_offsets.npy'
+    lengths_path = d / f'{stem}_segment_lengths.npy'
+    summary_path = d / f'{stem}_segmentation_summary.json'
+    manifest_path = d / f'{stem}_segments.csv'
+    for p, what in ((values_path,'segmented SpikeIMU'),(labels_path,'labels'),(offsets_path,'offsets'),(lengths_path,'lengths'),(summary_path,'summary'),(manifest_path,'manifest')):
+        require(p, what)
+    values = np.load(values_path, allow_pickle=False)
+    labels = np.load(labels_path, allow_pickle=False)
+    offsets = np.load(offsets_path, allow_pickle=False)
+    lengths = np.load(lengths_path, allow_pickle=False)
+    if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+        raise QAError(f'invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}')
+    if labels.ndim != 1 or lengths.ndim != 1 or len(labels) != len(lengths):
+        raise QAError(f'segment labels/lengths mismatch under {d}')
+    if offsets.ndim != 1 or len(offsets) != len(lengths) + 1 or int(offsets[0]) != 0 or int(offsets[-1]) != len(values):
+        raise QAError(f'invalid segment offsets under {d}')
+    if np.any(lengths < 0) or not np.array_equal(np.diff(offsets), lengths):
+        raise QAError(f'segment lengths do not match offsets under {d}')
+    if board_mode:
+        targets_path = d / f'{stem}_board_event_targets.npy'
+        events_path = d / f'{stem}_board_events.csv'
+        require(targets_path, 'Board targets')
+        require(events_path, 'Board audit')
+        targets = np.load(targets_path, allow_pickle=False)
+        if targets.shape != (len(values), 4) or targets.dtype != np.dtype(bool):
+            raise QAError(f'invalid Board target matrix: {targets_path}')
+
+
+def validate_padding(summary_path: Path, segment_root: Path, expected_users: int):
+    require(summary_path, 'padded dataset summary')
+    s = load_json(summary_path)
+    if s.get('input_root') != str(segment_root.resolve()):
+        raise QAError('padded summary input root mismatch')
+    if s.get('input_kind') != 'spike-imu' or s.get('feature_schema') != 'signed_wavelet_events_plus_imu_v1' or s.get('channel_count') != 21:
+        raise QAError('padded summary schema mismatch')
+    if s.get('processed_user_action_count') != expected_users:
+        raise QAError(f"padded package count {s.get('processed_user_action_count')} != user count {expected_users}")
+    source, exported, skipped = s.get('source_segment_count'), s.get('segment_count'), s.get('skipped_segment_count')
+    if not all(isinstance(v, int) and v >= 0 for v in (source, exported, skipped)) or exported + skipped != source:
+        raise QAError('invalid padded segment counts')
+    print(f"validated padded output segments={exported} skipped={skipped} target={s.get('target_length')}: {summary_path}", flush=True)
+
+
+def run(a):
+    recordings = [r for r in discover_recordings(a.data_root) if r.action == a.action]
+    recordings.sort(key=lambda r: (r.user, r.dataset_id))
+    users = list(dict.fromkeys(r.user for r in recordings))
+    if len(recordings) != a.expected_ring_count:
+        raise QAError(f'discovered recording count {len(recordings)} != ring_0 count {a.expected_ring_count}')
+    if len(users) != a.expected_user_count:
+        raise QAError(f'discovered user count {len(users)} != expected user count {a.expected_user_count}')
+
+    n = len(recordings)
+    pre_count = count(a.preprocess_root, '*_preprocessing.json')
+    spike_count = count(a.spike_root, 'spikeIMU.npy')
+    seg_count = count(a.segmentation_root, '*_segmentation_summary.json')
+    padded_count = count(a.padding_output_root, 'padding_dataset_summary.json')
+    print(f'[qa] batched QA started: recordings={n} users={len(users)} boundary={a.boundary_mode}', flush=True)
+    print(f'ring_0_recordings={n}\npreprocessing_summaries={pre_count}\nspikeIMU_matrices={spike_count}\nsegmentation_summaries={seg_count}\npadded_dataset_summaries={padded_count}')
+    if pre_count != n or spike_count != n:
+        raise QAError('preprocess/spike artifact count does not match recording count')
+
+    deps = {u: {'source_recording_ids': [], 'outcomes_by_status': {'SUCCESS': [], 'SKIPPED': []}} for u in users}
+    success = skipped = invalid = 0
+
+    for i, r in enumerate(recordings, 1):
+        progress('recording validation', i, n, f'{r.user}/{r.action}/{r.dataset_id}')
+        pre_dir = a.preprocess_root / r.user / r.action / str(r.dataset_id)
+        spike_dir = a.spike_root / r.user / r.action / str(r.dataset_id)
+        timestamps = pre_dir / f'{r.dataset_id}_timestamps_us.npy'
+        metadata = spike_dir / 'metadata.json'
+        require(pre_dir / f'{r.dataset_id}_preprocessing.json', 'preprocessing metadata')
+        require(timestamps, 'timestamp sidecar')
+        require(spike_dir / 'spikeIMU.npy', 'SpikeIMU')
+        require(metadata, 'SpikeIMU metadata')
+        validate_transform(metadata, a.post_encode_transform)
+
+        if a.boundary_mode == 'label':
+            values = np.load(spike_dir / 'spikeIMU.npy', allow_pickle=False)
+            ts = np.load(timestamps, allow_pickle=False)
+            if values.ndim != 2 or values.shape[1] != 21 or len(ts) != len(values) or not np.isfinite(values).all():
+                raise QAError(f'invalid SpikeIMU/timestamp artifact for {r.user}/{r.dataset_id}')
+            continue
+
+        ident = {'user': r.user, 'action': r.action, 'dataset_id': r.dataset_id}
+        deps[r.user]['source_recording_ids'].append(ident)
+        try:
+            with redirect_stdout(StringIO()):
+                feature = load_recording_features(r, input_kind='spike-imu', spike_root=a.spike_root)
+                board = load_board(r)
+                input_prov = build_alignment_input_provenance(feature)
+                board_prov = build_board_chunk_provenance(board)
+                outcome = validate_alignment_outcome(
+                    a.offset_root, a.alignment_verification_root, a.alignment_report_root,
+                    expected_recording=ident,
+                    expected_input_provenance=input_prov,
+                    expected_board_provenance=board_prov,
+                )
+            status = outcome.status_name
+            if status not in {'SUCCESS','SKIPPED'}:
+                raise ValueError(status)
+            entry = {'identity': ident, 'report_sha256': sha256_file(outcome.paths.report_path)}
+            if status == 'SKIPPED':
+                with redirect_stdout(StringIO()):
+                    skip = read_alignment_skip_artifact(
+                        outcome.paths.skip_json_path,
+                        expected_user=r.user,
+                        expected_action=r.action,
+                        expected_dataset_id=r.dataset_id,
+                        expected_input_provenance=input_prov,
+                        expected_board_provenance=board_prov,
+                    )
+                entry['reason'] = skip.reason
+                skipped += 1
+            else:
+                success += 1
+            deps[r.user]['outcomes_by_status'][status].append(entry)
+        except Exception as e:
+            invalid += 1
+            print(f'[qa] alignment validation failed {r.user}/{r.action}/{r.dataset_id}: {e}', file=sys.stderr, flush=True)
+
+    if a.boundary_mode == 'aligned-board-events':
+        print(f'Alignment outcomes: total={n} success={success} skipped={skipped} invalid={invalid}', flush=True)
+        if invalid:
+            raise QAError(f'alignment outcome validation failed for {invalid} recording(s)')
+        successful_users = []
+        seg_errors = 0
+        for i, u in enumerate(users, 1):
+            progress('segmentation state validation', i, len(users), u)
+            state, errors = validate_seg_dependency(a.segmentation_root, u, a.action, deps[u])
+            seg_errors += errors
+            if state != 'ALL_RECORDINGS_ERROR':
+                successful_users.append(u)
+    else:
+        successful_users = users
+        seg_errors = 0
+
+    if seg_count != len(successful_users):
+        raise QAError(f'segmentation summary count {seg_count} != successful user/action count {len(successful_users)}')
+    if successful_users and padded_count != 1:
+        raise QAError(f'padded dataset summary count {padded_count} != 1')
+    if not successful_users and padded_count != 0:
+        raise QAError('padded output exists without successful segmentation packages')
+
+    for i, u in enumerate(successful_users, 1):
+        progress('segmented package validation', i, len(successful_users), u)
+        validate_segment_package(a.segmentation_root, u, a.action, a.boundary_mode == 'aligned-board-events')
+
+    if successful_users:
+        validate_padding(a.padding_output_root / 'padding_dataset_summary.json', a.segmentation_root, len(successful_users))
+
+    print(f'QA passed for {n} ring_0 recording(s), {len(users)} user(s), {len(successful_users)} successful packages, and {seg_errors} segmentation recording error(s).')
+    print(f'Output root: {a.combination_root}')
+    print(f'Padded output root: {a.padding_output_root}')
+    print(f'Logs: {a.log_root}')
+
+
+def main():
+    try:
+        run(args_parser())
+    except QAError as e:
+        print(f'error: {e}', file=sys.stderr, flush=True)
+        return 1
+    except Exception as e:
+        print(f'error: unexpected batched QA failure: {e}', file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
+PY_BATCH_QA
+}
+# <<< END CHATGPT_COMMON_ONLY_PERFORMANCE_OVERRIDES <<<
 
 run_action0_pipeline() {
     local method="$1"
