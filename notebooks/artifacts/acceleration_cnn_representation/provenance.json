@@ -8,10 +8,22 @@
     "model_initialization": "from_scratch",
     "checkpoint_role": "authoritative split/class/normalization/model reference for Experiment B"
   },
-  "repository_root": "/home/ted/project/writingRing",
-  "dataset_root_argument": "outputs/action0_rectified/low-pass/aligned-board-events",
-  "resolved_padded_root": "/home/ted/project/writingRing/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
-  "output_dir": "/home/ted/project/writingRing/notebooks/artifacts/acceleration_cnn_representation",
+  "repository_root": "/home/ted/project/writingring-viz",
+  "dataset_root_argument": "[PosixPath('outputs/action0_rectified/low-pass/aligned-board-events'), PosixPath('outputs/action1_rectified/low-pass/aligned-board-events')]",
+  "resolved_padded_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+  "dataset_root_arguments": [
+    "outputs/action0_rectified/low-pass/aligned-board-events",
+    "outputs/action1_rectified/low-pass/aligned-board-events"
+  ],
+  "resolved_padded_roots": [
+    "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+    "/home/ted/project/writingring-viz/outputs/action1_rectified/low-pass/aligned-board-events/segmentation_padded"
+  ],
+  "selected_actions": [
+    "0",
+    "1"
+  ],
+  "output_dir": "/home/ted/project/writingring-viz/notebooks/artifacts/acceleration_cnn_representation",
   "device": "cuda",
   "config": {
     "name": "A_raw",
@@ -31,9 +43,7 @@
       "explicit_test_users": null,
       "require_all_users_assigned": true,
       "require_all_labels_in_all_splits": true,
-      "excluded_users": [
-        "user_17"
-      ],
+      "excluded_users": [],
       "included_labels": [
         "A",
         "B",
@@ -98,20 +108,20 @@
       "verbose": true
     },
     "baseline_checkpoint": null,
-    "output_dir": "/home/ted/project/writingRing/notebooks/artifacts/acceleration_cnn_representation"
+    "output_dir": "/home/ted/project/writingring-viz/notebooks/artifacts/acceleration_cnn_representation"
   },
   "normalization": {
     "mean": [
-      -0.7586552650072653,
-      0.2239775184532932,
-      0.22867939789818886
+      -0.6925367682204643,
+      0.17328122946673183,
+      0.20207705258219044
     ],
     "std": [
-      2.102968449130765,
-      1.8990777267719465,
-      1.8446666564769558
+      2.0387931422168903,
+      1.8355763930001863,
+      1.8307248153854747
     ],
-    "valid_time_points": 100140,
+    "valid_time_points": 202358,
     "fitted_on": "raw:train"
   },
   "train_users": [
@@ -154,9 +164,15 @@
     "L": 10,
     "X": 11
   },
-  "excluded_users": [
-    "user_17"
-  ],
+  "cohort_identity": {
+    "selected_actions": [
+      "0",
+      "1"
+    ],
+    "selected_sample_count": 911,
+    "canonical_sample_id_digest": "4d95ac16d55c9e8a1f12bc6cdc99ef05a9d31397befe1c9712c21d8bb4bbdd40"
+  },
+  "excluded_users": [],
   "eligible_users": [
     "user_0",
     "user_1",
@@ -179,8 +195,8 @@
     "user_19",
     "user_20"
   ],
-  "best_epoch": 21,
-  "best_val_balanced_accuracy": 0.5583333333333333,
+  "best_epoch": 24,
+  "best_val_balanced_accuracy": 0.5142225829725829,
   "producer_metadata": {
     "input_kind": "spike-imu",
     "feature_schema": "signed_wavelet_events_plus_imu_v1",
@@ -189,8 +205,8 @@
     "sampling_rate_hz": 200.0,
     "padding_side": "right",
     "raw": {
-      "input_root": "/home/ted/project/writingRing/outputs/action0_rectified/low-pass/aligned-board-events/segmentation",
-      "output_root": "/home/ted/project/writingRing/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+      "input_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation",
+      "output_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
       "target_length": 600,
       "sampling_rate_hz": 200.0,
       "channel_count": 21,
@@ -276,18 +292,238 @@
         "rad/s",
         "rad/s"
       ],
-      "processed_user_action_count": 21,
-      "source_segment_count": 1989,
-      "segment_count": 1973,
+      "processed_user_action_count": 20,
+      "source_segment_count": 1956,
+      "segment_count": 1940,
       "skipped_segment_count": 16,
-      "total_valid_samples": 566645,
-      "total_padding_samples": 617155,
-      "global_valid_sample_ratio": 0.47866615982429467,
-      "board_assisted_package_count": 21,
+      "total_valid_samples": 559276,
+      "total_padding_samples": 604724,
+      "global_valid_sample_ratio": 0.48047766323024055,
+      "board_assisted_package_count": 20,
       "label_only_package_count": 0,
       "failed_package_count": 0,
       "padding_side": "right",
       "overflow_policy": "skip"
     }
-  }
+  },
+  "producer_metadatas": [
+    {
+      "input_kind": "spike-imu",
+      "feature_schema": "signed_wavelet_events_plus_imu_v1",
+      "channel_count": 21,
+      "target_length": 600,
+      "sampling_rate_hz": 200.0,
+      "padding_side": "right",
+      "raw": {
+        "input_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation",
+        "output_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+        "target_length": 600,
+        "sampling_rate_hz": 200.0,
+        "channel_count": 21,
+        "input_kind": "spike-imu",
+        "feature_schema": "signed_wavelet_events_plus_imu_v1",
+        "channel_names": [
+          "event_x_0p5_hz",
+          "event_x_1_hz",
+          "event_x_2_hz",
+          "event_x_4_hz",
+          "event_x_8_hz",
+          "event_y_0p5_hz",
+          "event_y_1_hz",
+          "event_y_2_hz",
+          "event_y_4_hz",
+          "event_y_8_hz",
+          "event_z_0p5_hz",
+          "event_z_1_hz",
+          "event_z_2_hz",
+          "event_z_4_hz",
+          "event_z_8_hz",
+          "acceleration_x_m_s2",
+          "acceleration_y_m_s2",
+          "acceleration_z_m_s2",
+          "gyro_x_rad_s",
+          "gyro_y_rad_s",
+          "gyro_z_rad_s"
+        ],
+        "units": {
+          "channel_units": [
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "m/s^2",
+            "m/s^2",
+            "m/s^2",
+            "rad/s",
+            "rad/s",
+            "rad/s"
+          ],
+          "acceleration_x_g": null,
+          "acceleration_y_g": null,
+          "acceleration_z_g": null,
+          "acceleration_x": "m/s^2",
+          "acceleration_y": "m/s^2",
+          "acceleration_z": "m/s^2",
+          "gyro_x": "rad/s",
+          "gyro_y": "rad/s",
+          "gyro_z": "rad/s"
+        },
+        "channel_units": [
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "m/s^2",
+          "m/s^2",
+          "m/s^2",
+          "rad/s",
+          "rad/s",
+          "rad/s"
+        ],
+        "processed_user_action_count": 20,
+        "source_segment_count": 1956,
+        "segment_count": 1940,
+        "skipped_segment_count": 16,
+        "total_valid_samples": 559276,
+        "total_padding_samples": 604724,
+        "global_valid_sample_ratio": 0.48047766323024055,
+        "board_assisted_package_count": 20,
+        "label_only_package_count": 0,
+        "failed_package_count": 0,
+        "padding_side": "right",
+        "overflow_policy": "skip"
+      }
+    },
+    {
+      "input_kind": "spike-imu",
+      "feature_schema": "signed_wavelet_events_plus_imu_v1",
+      "channel_count": 21,
+      "target_length": 600,
+      "sampling_rate_hz": 200.0,
+      "padding_side": "right",
+      "raw": {
+        "input_root": "/home/ted/project/writingring-viz/outputs/action1_rectified/low-pass/aligned-board-events/segmentation",
+        "output_root": "/home/ted/project/writingring-viz/outputs/action1_rectified/low-pass/aligned-board-events/segmentation_padded",
+        "target_length": 600,
+        "sampling_rate_hz": 200.0,
+        "channel_count": 21,
+        "input_kind": "spike-imu",
+        "feature_schema": "signed_wavelet_events_plus_imu_v1",
+        "channel_names": [
+          "event_x_0p5_hz",
+          "event_x_1_hz",
+          "event_x_2_hz",
+          "event_x_4_hz",
+          "event_x_8_hz",
+          "event_y_0p5_hz",
+          "event_y_1_hz",
+          "event_y_2_hz",
+          "event_y_4_hz",
+          "event_y_8_hz",
+          "event_z_0p5_hz",
+          "event_z_1_hz",
+          "event_z_2_hz",
+          "event_z_4_hz",
+          "event_z_8_hz",
+          "acceleration_x_m_s2",
+          "acceleration_y_m_s2",
+          "acceleration_z_m_s2",
+          "gyro_x_rad_s",
+          "gyro_y_rad_s",
+          "gyro_z_rad_s"
+        ],
+        "units": {
+          "channel_units": [
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "event",
+            "m/s^2",
+            "m/s^2",
+            "m/s^2",
+            "rad/s",
+            "rad/s",
+            "rad/s"
+          ],
+          "acceleration_x_g": null,
+          "acceleration_y_g": null,
+          "acceleration_z_g": null,
+          "acceleration_x": "m/s^2",
+          "acceleration_y": "m/s^2",
+          "acceleration_z": "m/s^2",
+          "gyro_x": "rad/s",
+          "gyro_y": "rad/s",
+          "gyro_z": "rad/s"
+        },
+        "channel_units": [
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "event",
+          "m/s^2",
+          "m/s^2",
+          "m/s^2",
+          "rad/s",
+          "rad/s",
+          "rad/s"
+        ],
+        "processed_user_action_count": 20,
+        "source_segment_count": 1923,
+        "segment_count": 1921,
+        "skipped_segment_count": 2,
+        "total_valid_samples": 536206,
+        "total_padding_samples": 616394,
+        "global_valid_sample_ratio": 0.46521429810862397,
+        "board_assisted_package_count": 20,
+        "label_only_package_count": 0,
+        "failed_package_count": 0,
+        "padding_side": "right",
+        "overflow_policy": "skip"
+      }
+    }
+  ]
 }
