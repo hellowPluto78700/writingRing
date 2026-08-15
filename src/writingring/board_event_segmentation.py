@@ -76,6 +76,7 @@ from writingring.recording_features import (
     RecordingFeatureInput,
     load_recording_features,
     validate_common_feature_sampling_rate,
+    validate_common_feature_encoder_identity,
 )
 from writingring.preprocessing_io import sha256_file
 from writingring.segmentation import (
@@ -2154,10 +2155,13 @@ def _aligned_summary(
             common_sampling_rate_hz = validate_common_feature_sampling_rate(
                 feature_inputs
             )
+            encoder_spec, encoder_hash = validate_common_feature_encoder_identity(feature_inputs)
         except RecordingFeatureError as error:
             raise BoardEventSegmentationError(str(error)) from error
     else:
         common_sampling_rate_hz = first_feature.sampling_rate_hz
+        encoder_spec = None
+        encoder_hash = None
     skip_counts: dict[str, int] = {}
     boundary_counts: dict[str, int] = {}
     for artifact in artifacts:
@@ -2189,12 +2193,17 @@ def _aligned_summary(
                 else str(artifact.feature_input.timestamps_path)
             ),
             "sampling_rate_hz": artifact.feature_input.sampling_rate_hz,
+            "encoder_spec_sha256": artifact.feature_input.encoder_spec_sha256,
         }
         for artifact in artifacts
     ]
     alignment_outcome_dependency = _alignment_outcome_dependency(recording_artifacts)
     return {
         "input_kind": input_kind,
+        "spike_encoder": None if encoder_spec is None else dict(encoder_spec),
+        "spike_encoder_spec_sha256": encoder_hash,
+        "encoder_spec": None if encoder_spec is None else dict(encoder_spec),
+        "encoder_spec_sha256": encoder_hash,
         "boundary_mode": "aligned_board_events",
         "boundary_source": "aligned_board_events",
         "time_mapping": "ring_timestamp_us = board_timestamp_us + offset_us",

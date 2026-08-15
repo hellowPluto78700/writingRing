@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
@@ -423,6 +424,8 @@ def build_padding_package(
         "channel_count": channel_count,
         "input_kind": "spike-imu",
         "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "spike_encoder": dataset.segmentation_summary["spike_encoder"],
+        "spike_encoder_spec_sha256": dataset.segmentation_summary["spike_encoder_spec_sha256"],
         "channel_names": dataset.segmentation_summary["channel_names"],
         "units": dataset.segmentation_summary.get("units"),
         "channel_units": dataset.segmentation_summary.get("channel_units"),
@@ -611,6 +614,19 @@ def _load_segmentation_summary(paths: SegmentedDatasetPaths) -> dict[str, object
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
             f"expected channel_count={SPIKE_IMU_CHANNEL_COUNT}"
         )
+    spec = summary.get("spike_encoder")
+    digest = summary.get("spike_encoder_spec_sha256")
+    if not isinstance(spec, Mapping) or not isinstance(digest, str) or len(digest) != 64:
+        raise SegmentPaddingError(
+            f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
+            "segmentation summary must contain spike_encoder and spike_encoder_spec_sha256"
+        )
+    try:
+        encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError) as error:
+        raise SegmentPaddingError("segmentation summary encoder_spec is not canonical JSON") from error
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise SegmentPaddingError("segmentation summary encoder_spec_sha256 does not match encoder_spec")
     channel_names = summary.get("channel_names")
     if not isinstance(channel_names, list) or len(channel_names) != SPIKE_IMU_CHANNEL_COUNT:
         raise SegmentPaddingError(
@@ -715,6 +731,8 @@ def _package_fingerprints(datasets: Sequence[ValidatedSegmentedDataset], *, inpu
         "maximum_length": int(np.max(dataset.segment_lengths)),
         "channel_count": SPIKE_IMU_CHANNEL_COUNT,
         "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "spike_encoder": dataset.segmentation_summary["spike_encoder"],
+        "spike_encoder_spec_sha256": dataset.segmentation_summary["spike_encoder_spec_sha256"],
     } for dataset in datasets]
 
 
@@ -820,6 +838,19 @@ def _write_padding_package(directory: Path, result: PaddingPackageResult) -> Non
 
 
 def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root: Path, output_root: Path, target_length: int, sampling_rate_hz: float) -> dict[str, object]:
+    if not results:
+        raise SegmentPaddingError("cannot publish an empty padding root")
+    reference_hash = results[0].summary.get("spike_encoder_spec_sha256")
+    reference_spec = results[0].summary.get("spike_encoder")
+    for result in results[1:]:
+        if (
+            result.summary.get("spike_encoder_spec_sha256") != reference_hash
+            or result.summary.get("spike_encoder") != reference_spec
+        ):
+            raise SegmentPaddingError(
+                "padding packages contain mismatched encoder specifications: "
+                f"{reference_hash!r} != {result.summary.get('spike_encoder_spec_sha256')!r}"
+            )
     valid = sum(int(result.summary["total_valid_samples"]) for result in results)
     padding = sum(int(result.summary["total_padding_samples"]) for result in results)
     source_segments = sum(int(result.summary["source_segment_count"]) for result in results)
@@ -831,6 +862,8 @@ def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root
         "channel_count": results[0].padded_spike_imu.shape[2],
         "input_kind": "spike-imu",
         "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "spike_encoder": reference_spec,
+        "spike_encoder_spec_sha256": reference_hash,
         "channel_names": results[0].summary["channel_names"],
         "units": results[0].summary.get("units"),
         "channel_units": results[0].summary.get("channel_units"),

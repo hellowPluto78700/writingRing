@@ -39,6 +39,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--encoder", required=True)
     parser.add_argument("--encoder-settings", type=Path, required=True)
     parser.add_argument(
+        "--encoder-frequencies-hz",
+        nargs=5,
+        type=float,
+        metavar=("F0", "F1", "F2", "F3", "F4"),
+        help="override the five Custom Wavelet frequency bands (Hz)",
+    )
+    parser.add_argument(
         "--post-encode-transform",
         choices=("none", "AbsRectify"),
         default=None,
@@ -180,6 +187,8 @@ def _run_one(
     )
 
     settings = load_encoder_settings(args.encoder_settings)
+    if args.encoder_frequencies_hz is not None:
+        settings["frequencies_hz"] = list(args.encoder_frequencies_hz)
     if args.post_encode_transform is not None:
         settings["post_encode_transform"] = (
             None
@@ -506,6 +515,10 @@ def _validate_custom_wavelet_arguments(args: argparse.Namespace) -> None:
             "--post-encode-transform is only supported with encoder 'custom-wavelet'"
         )
     if args.encoder != "custom-wavelet":
+        if args.encoder_frequencies_hz is not None:
+            raise ValueError(
+                "--encoder-frequencies-hz is only supported with encoder 'custom-wavelet'"
+            )
         return
     disallowed = {
         "--sequence-mode": args.sequence_mode,

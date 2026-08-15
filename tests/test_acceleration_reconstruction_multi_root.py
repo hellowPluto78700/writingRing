@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,8 @@ def _write_root(
     action: str,
     target_length: int = 4,
     sampling_rate_hz: float = 200.0,
+    encoder_spec: dict[str, object] | None = None,
+    include_encoder_identity: bool = True,
 ) -> Path:
     root.mkdir(parents=True)
     root_summary = {
@@ -36,6 +39,17 @@ def _write_root(
         "sampling_rate_hz": sampling_rate_hz,
         "padding_side": "right",
     }
+    if include_encoder_identity:
+        encoder_spec = encoder_spec or {
+            "schema": "custom_wavelet_encoder_spec_v1",
+            "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0],
+            "wavelet_widths_samples": [400, 200, 100, 50, 25],
+            "post_encode_transform": "none",
+        }
+        root_summary["spike_encoder"] = encoder_spec
+        root_summary["spike_encoder_spec_sha256"] = hashlib.sha256(
+            json.dumps(encoder_spec, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
     (root / "padding_dataset_summary.json").write_text(
         json.dumps(root_summary), encoding="utf-8"
     )
@@ -133,6 +147,53 @@ def test_multi_root_loader_rejects_incompatible_target_length(tmp_path: Path) ->
 
     with pytest.raises(Action0DatasetError, match="Incompatible producer metadata"):
         load_acceleration_data([action0, action1])
+
+
+def test_multi_root_loader_accepts_same_encoder_spec_across_actions(tmp_path: Path) -> None:
+    spec = {
+        "schema": "custom_wavelet_encoder_spec_v1",
+        "frequencies_hz": [1.0, 2.0, 4.0, 8.0, 16.0],
+        "wavelet_widths_samples": [200, 100, 50, 25, 12],
+        "post_encode_transform": "none",
+    }
+    data = load_acceleration_data([
+        _write_root(tmp_path / "action0", action="0", encoder_spec=spec),
+        _write_root(tmp_path / "action1", action="1", encoder_spec=spec),
+    ])
+    assert len(data.packages) == 6
+
+
+@pytest.mark.parametrize(
+    "spec_a,spec_b,match",
+    [
+        (
+            {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1, 2, 4, 8], "wavelet_widths_samples": [400, 200, 100, 50, 25], "post_encode_transform": "none"},
+            {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [1, 2, 4, 8, 16], "wavelet_widths_samples": [200, 100, 50, 25, 12], "post_encode_transform": "none"},
+            "Incompatible spike encoder identity.*hash",
+        ),
+        (
+            {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [1, 2, 4, 8, 16], "wavelet_widths_samples": [200, 100, 50, 25, 12], "post_encode_transform": "none"},
+            {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [1, 2, 4, 8, 16], "wavelet_widths_samples": [200, 100, 50, 25, 12], "post_encode_transform": "AbsRectify"},
+            "spec_differences",
+        ),
+    ],
+)
+def test_multi_root_loader_rejects_different_encoder_specs(
+    tmp_path: Path, spec_a: dict[str, object], spec_b: dict[str, object], match: str
+) -> None:
+    with pytest.raises(Action0DatasetError, match=match):
+        load_acceleration_data([
+            _write_root(tmp_path / "action0", action="0", encoder_spec=spec_a),
+            _write_root(tmp_path / "action1", action="1", encoder_spec=spec_b),
+        ])
+
+
+def test_multi_root_loader_rejects_missing_encoder_identity(tmp_path: Path) -> None:
+    with pytest.raises(Action0DatasetError, match="Missing spike encoder identity"):
+        load_acceleration_data([
+            _write_root(tmp_path / "action0", action="0", include_encoder_identity=False),
+            _write_root(tmp_path / "action1", action="1"),
+        ])
 
 
 def test_cohort_identity_is_path_independent_and_detects_mismatch() -> None:

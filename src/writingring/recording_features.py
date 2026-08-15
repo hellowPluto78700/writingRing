@@ -14,6 +14,7 @@ import json
 import math
 from pathlib import Path
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 
 import numpy as np
 
@@ -74,6 +75,8 @@ class RecordingFeatureInput:
     timestamps_sha256: str
 
     sampling_rate_hz: float
+    encoder_spec: Mapping[str, object] | None
+    encoder_spec_sha256: str | None
 
     @property
     def sample_count(self) -> int:
@@ -130,6 +133,29 @@ def validate_common_feature_sampling_rate(
     return reference_rate
 
 
+def validate_common_feature_encoder_identity(
+    features: Sequence[RecordingFeatureInput],
+) -> tuple[Mapping[str, object], str]:
+    """Require identical immutable encoder identity for SpikeIMU aggregation."""
+    if not features or features[0].input_kind != "spike-imu":
+        raise RecordingFeatureError("encoder identity validation requires SpikeIMU inputs")
+    reference = features[0]
+    if reference.encoder_spec is None or reference.encoder_spec_sha256 is None:
+        raise RecordingFeatureError("SpikeIMU feature input is missing encoder spec identity")
+    for feature in features[1:]:
+        if feature.encoder_spec is None or feature.encoder_spec_sha256 is None:
+            raise RecordingFeatureError(f"dataset {feature.dataset_id} is missing encoder spec identity")
+        if feature.encoder_spec_sha256 != reference.encoder_spec_sha256:
+            differences = _encoder_spec_diff(reference.encoder_spec, feature.encoder_spec)
+            raise RecordingFeatureError(
+                "inconsistent SpikeIMU encoder specifications: "
+                f"dataset {reference.dataset_id} ({reference.encoder_spec_sha256}) vs "
+                f"dataset {feature.dataset_id} ({feature.encoder_spec_sha256}); "
+                f"differences: {differences}"
+            )
+    return reference.encoder_spec, reference.encoder_spec_sha256
+
+
 def load_raw_ring_features(
     recording: Recording,
     *,
@@ -170,6 +196,8 @@ def load_raw_ring_features(
         metadata_sha256=None,
         timestamps_sha256=_sha256_array(timestamps),
         sampling_rate_hz=sampling_rate_hz,
+        encoder_spec=None,
+        encoder_spec_sha256=None,
     )
 
 
@@ -260,6 +288,7 @@ def load_spike_imu_features(
             "SpikeIMU metadata timestamp_unit must be 'microseconds'"
         )
     sampling_rate_hz = _metadata_sampling_rate(metadata)
+    encoder_spec, encoder_hash = _load_encoder_identity(metadata)
     if expected_sampling_rate_hz is not None:
         expected_rate = _finite_positive(
             expected_sampling_rate_hz,
@@ -291,6 +320,8 @@ def load_spike_imu_features(
         metadata_sha256=sha256_file(metadata_path),
         timestamps_sha256=timestamps_hash,
         sampling_rate_hz=sampling_rate_hz,
+        encoder_spec=encoder_spec,
+        encoder_spec_sha256=encoder_hash,
     )
 
 
@@ -363,6 +394,8 @@ def _feature_input(
     metadata_sha256: str | None,
     timestamps_sha256: str,
     sampling_rate_hz: float,
+    encoder_spec: Mapping[str, object] | None,
+    encoder_spec_sha256: str | None,
 ) -> RecordingFeatureInput:
     _validate_feature_arrays(values, timestamps_us, name="recording features")
     if len(channel_names) != values.shape[1] or len(units) != values.shape[1]:
@@ -396,6 +429,8 @@ def _feature_input(
         metadata_sha256=metadata_sha256,
         timestamps_sha256=timestamps_sha256,
         sampling_rate_hz=rate,
+        encoder_spec=(None if encoder_spec is None else _deep_freeze_mapping(encoder_spec)),
+        encoder_spec_sha256=encoder_spec_sha256,
     )
 
 
@@ -462,6 +497,47 @@ def _load_metadata(path: Path) -> dict[str, object]:
     if not isinstance(payload, dict):
         raise RecordingFeatureError("SpikeIMU metadata must be a JSON object")
     return payload
+
+
+def _load_encoder_identity(metadata: Mapping[str, object]) -> tuple[Mapping[str, object], str]:
+    encoder = metadata.get("encoder")
+    if not isinstance(encoder, Mapping):
+        raise RecordingFeatureError("SpikeIMU metadata must declare an encoder object")
+    spec = encoder.get("spike_encoder")
+    digest = encoder.get("spike_encoder_spec_sha256")
+    if not isinstance(spec, Mapping):
+        raise RecordingFeatureError("SpikeIMU metadata must declare encoder.spike_encoder")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise RecordingFeatureError("SpikeIMU metadata must declare encoder.spike_encoder_spec_sha256")
+    try:
+        payload = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError) as error:
+        raise RecordingFeatureError("SpikeIMU encoder spec is not canonical JSON") from error
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != digest:
+        raise RecordingFeatureError(
+            "SpikeIMU encoder spec hash does not match encoder.spike_encoder"
+        )
+    return dict(spec), digest
+
+
+def _deep_freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    """Return a recursively immutable encoder spec."""
+    def freeze(item: object) -> object:
+        if isinstance(item, Mapping):
+            return MappingProxyType({str(key): freeze(child) for key, child in item.items()})
+        if isinstance(item, list) or isinstance(item, tuple):
+            return tuple(freeze(child) for child in item)
+        return item
+    frozen = freeze(value)
+    assert isinstance(frozen, Mapping)
+    return frozen
+
+
+def _encoder_spec_diff(left: Mapping[str, object], right: Mapping[str, object]) -> str:
+    keys = sorted(set(left) | set(right))
+    differences = [f"{key}: {left.get(key)!r} != {right.get(key)!r}" for key in keys if left.get(key) != right.get(key)]
+    return "; ".join(differences) or "canonical specs differ despite matching keys"
 
 
 def _validate_spike_metadata_identity(metadata: Mapping[str, object], recording: Recording) -> None:

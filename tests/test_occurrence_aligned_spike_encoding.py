@@ -36,11 +36,11 @@ def test_custom_wavelet_preserves_default_fifteen_channels_and_recording_reset()
     assert result.values.shape == (200, 15)
     assert len(result.channel_names) == 15
     assert result.channel_names[:5] == (
-        "event_x_0p5_hz",
-        "event_x_1_hz",
-        "event_x_2_hz",
-        "event_x_4_hz",
-        "event_x_8_hz",
+        "event_x_0",
+        "event_x_1",
+        "event_x_2",
+        "event_x_3",
+        "event_x_4",
     )
     np.testing.assert_array_equal(result.values[:100], result.values[100:])
     assert result.summary["state_reset_boundary"] == "recording"

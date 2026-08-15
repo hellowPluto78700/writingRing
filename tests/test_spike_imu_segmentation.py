@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -130,6 +131,14 @@ def _write_spike_artifact(
             "data_id": recording.dataset_id,
         },
         "sampling_rate_hz": sampling_rate_hz,
+        "encoder": {
+            "spike_encoder": {
+                "schema": "custom_wavelet_encoder_spec_v1",
+                "name": "custom-wavelet",
+                "sampling_rate_hz": sampling_rate_hz,
+                "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0],
+            },
+        },
         "timestamps_path": str(timestamps_path.resolve()),
         "timestamps_sha256": sha256_file(timestamps_path),
         "timestamp_unit": "microseconds",
@@ -148,6 +157,14 @@ def _write_spike_artifact(
             "sha256": sha256_file(values_path),
         },
     }
+    payload["encoder"]["spike_encoder_spec_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload["encoder"]["spike_encoder"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
     metadata_path.write_text(json.dumps(payload), encoding="utf-8")
     return tmp_path / "spike", values
 

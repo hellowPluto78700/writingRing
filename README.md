@@ -124,6 +124,15 @@ they reject action or canonical sample-ID mismatches and never silently
 intersect packages. Legacy A checkpoints remain usable for a single root only;
 regenerate A before a two-root run.
 
+Custom Wavelet keeps five bands, with frequencies configurable per pipeline
+run. Use `ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` in the bash pipeline or
+`--encoder-frequencies-hz 1 2 4 8 16` on the CLI. Event channels are indexed by
+axis and band; the published encoder spec/hash supplies their frequencies and
+wavelet widths. Segmentation, padding, and multi-root consumers reject mixed
+specifications (or old artifacts missing the identity), so regenerate those
+artifacts before combining roots or reconstructing acceleration. At 200 Hz,
+the 16 Hz band has encoder width 12.
+
 The acceleration-CNN protocol supports three matched feature-extraction
 probes: `cnn_s`, `cnn_m`, and `cnn_l`. A/B/C/D notebooks expose this as the
 single `PROBE_VARIANT` configuration and pass it to the shared runners; model,

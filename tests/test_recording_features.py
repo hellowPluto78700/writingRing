@@ -76,6 +76,10 @@ def _spike_artifact(
             "data_id": recording.dataset_id,
         },
         "sampling_rate_hz": 200.0,
+        "encoder": {
+            "spike_encoder": {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0]},
+            "spike_encoder_spec_sha256": hashlib.sha256(json.dumps({"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0]}, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+        },
         "timestamps_path": str(timestamps_path.resolve()),
         "timestamps_sha256": sha256_file(timestamps_path),
         "timestamp_unit": "microseconds",
@@ -136,6 +140,10 @@ def test_spike_loader_validates_identity_hashes_and_accepts_duplicate_timestamps
     )
 
     loaded = load_spike_imu_features(recording, spike_root=spike_root)
+    assert loaded.encoder_spec_sha256
+    assert isinstance(loaded.encoder_spec, dict) or loaded.encoder_spec is not None
+    with pytest.raises(TypeError):
+        loaded.encoder_spec["frequencies_hz"] = [99.0]  # type: ignore[index]
 
     assert loaded.input_kind == "spike-imu"
     assert loaded.feature_schema == SPIKE_IMU_FEATURE_SCHEMA

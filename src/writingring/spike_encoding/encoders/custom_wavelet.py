@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
+import hashlib
+import json
 import math
 
 import numpy as np
@@ -65,6 +66,10 @@ class CustomWaveletSettings:
                 f"unknown wavelet_name {self.wavelet_name!r}; available wavelets: {available}"
             )
         frequencies = _validated_frequencies(self.frequencies_hz, self.sampling_rate_hz)
+        if len(frequencies) != 5:
+            raise CustomWaveletSettingsError(
+                "frequencies_hz must contain exactly five bands"
+            )
         object.__setattr__(self, "frequencies_hz", frequencies)
         object.__setattr__(self, "sampling_rate_hz", _positive_finite_float("sampling_rate_hz", self.sampling_rate_hz))
         _positive_integer("prony_denominator_order", self.prony_denominator_order)
@@ -146,9 +151,9 @@ class CustomWaveletEncoder:
         _validate_iir_bank(self._b, self._a)
         self._output_dtype = np.dtype(self.settings.output_dtype)
         self._channel_names = tuple(
-            f"event_{axis}_{_frequency_name(frequency)}_hz"
+            f"event_{axis}_{band_index}"
             for axis in ("x", "y", "z")
-            for frequency in self.settings.frequencies_hz
+            for band_index in range(5)
         )
         self._time_window_samples = _odd_window(
             self.settings.max_filter_time_s * self.settings.sampling_rate_hz
@@ -192,6 +197,45 @@ class CustomWaveletEncoder:
             "post_encode_transform": self.settings.post_encode_transform,
             "event_representation": self.representation,
         }
+
+    @property
+    def canonical_encoder_spec(self) -> dict[str, object]:
+        """Return the stable, semantic identity of this encoder configuration."""
+
+        return {
+            "schema": "custom_wavelet_encoder_spec_v1",
+            "name": self.name,
+            "wavelet_name": self.settings.wavelet_name,
+            "sampling_rate_hz": self.settings.sampling_rate_hz,
+            "frequency_band_count": 5,
+            "frequencies_hz": list(self.settings.frequencies_hz),
+            "wavelet_widths_samples": list(self._wavelet_widths),
+            "prony_denominator_order": self.settings.prony_denominator_order,
+            "prony_numerator_order": self.settings.prony_numerator_order,
+            "max_filter_time_s": self.settings.max_filter_time_s,
+            "max_filter_time_samples": self._time_window_samples,
+            "max_filter_frequency_decades": self.settings.max_filter_frequency_decades,
+            "max_filter_frequency_bands": self._frequency_window_bands,
+            "boundary_padding_mode": "reflect",
+            "event_index_semantics": "occurrence",
+            "channel_order": "axis_major_frequency_minor",
+            "event_channel_names": list(self._channel_names),
+            "post_encode_transform": self.settings.post_encode_transform,
+            "event_representation": self.representation,
+        }
+
+    @property
+    def canonical_encoder_spec_sha256(self) -> str:
+        """Return the deterministic fingerprint of :attr:`canonical_encoder_spec`."""
+
+        payload = json.dumps(
+            self.canonical_encoder_spec,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
     @property
     def wavelet_widths_samples(self) -> tuple[int, ...]:
@@ -285,6 +329,8 @@ class CustomWaveletEncoder:
             "output_dtype": self.settings.output_dtype,
             "post_encode_transform": self.settings.post_encode_transform,
             "event_representation": self.representation,
+            "spike_encoder": self.canonical_encoder_spec,
+            "spike_encoder_spec_sha256": self.canonical_encoder_spec_sha256,
         }
 
     def reset(self) -> None:
@@ -527,13 +573,6 @@ def _frequency_window_bands(frequencies_hz: tuple[float, ...], decades: float) -
         return 1
     mean_spacing = float(np.diff(np.log10(frequencies_hz)).mean())
     return _odd_window(decades / mean_spacing)
-
-
-def _frequency_name(value: float) -> str:
-    text = format(Decimal(str(value)).normalize(), "f")
-    if "." in text:
-        text = text.rstrip("0").rstrip(".")
-    return text.replace(".", "p")
 
 
 def _positive_finite_float(name: str, value: object) -> float:

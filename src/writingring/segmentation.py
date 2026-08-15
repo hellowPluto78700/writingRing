@@ -14,7 +14,7 @@ import math
 import os
 from pathlib import Path
 import tempfile
-from typing import Final, Sequence
+from typing import Final, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -40,6 +40,7 @@ from writingring.recording_features import (
     RecordingFeatureInput,
     load_recording_features,
     validate_common_feature_sampling_rate,
+    validate_common_feature_encoder_identity,
 )
 
 
@@ -366,10 +367,13 @@ def segment_user_action(
             common_sampling_rate_hz = validate_common_feature_sampling_rate(
                 feature_inputs
             )
+            encoder_spec, encoder_hash = validate_common_feature_encoder_identity(feature_inputs)
         except RecordingFeatureError as error:
             raise SegmentationError(str(error)) from error
     else:
         common_sampling_rate_hz = feature_inputs[0].sampling_rate_hz
+        encoder_spec = None
+        encoder_hash = None
 
     all_samples: list[SegmentedSample] = []
     manifest_rows: list[dict[str, object]] = []
@@ -437,6 +441,8 @@ def segment_user_action(
         feature_inputs=feature_inputs,
         sampling_rate_hz=common_sampling_rate_hz,
         label_overlay_requested=label_overlay_requested,
+        encoder_spec=encoder_spec,
+        encoder_hash=encoder_hash,
     )
     paths = build_segmentation_output_paths(
         output_root,
@@ -607,6 +613,8 @@ def _summary(
     feature_inputs: Sequence[RecordingFeatureInput],
     sampling_rate_hz: float,
     label_overlay_requested: bool,
+    encoder_spec: Mapping[str, object] | None,
+    encoder_hash: str | None,
 ) -> dict[str, object]:
     lengths = np.asarray([sample.sample_count for sample in samples], dtype=np.int64)
     if not feature_inputs:
@@ -639,6 +647,10 @@ def _summary(
         },
         "input_kind": feature_input_kind,
         "feature_schema": first_feature.feature_schema,
+        "spike_encoder": None if encoder_spec is None else dict(encoder_spec),
+        "spike_encoder_spec_sha256": encoder_hash,
+        "encoder_spec": None if encoder_spec is None else dict(encoder_spec),
+        "encoder_spec_sha256": encoder_hash,
         "user": user,
         "action": action,
         "recording_count": len(recordings),
@@ -699,6 +711,7 @@ def _summary(
                 ),
                 "timestamps_sha256": feature.timestamps_sha256,
                 "sampling_rate_hz": feature.sampling_rate_hz,
+                "encoder_spec_sha256": feature.encoder_spec_sha256,
             }
             for feature in feature_inputs
         ],

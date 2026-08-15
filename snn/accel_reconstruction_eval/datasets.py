@@ -197,6 +197,8 @@ class AccelerationProducerMetadata:
     target_length: int
     sampling_rate_hz: float
     padding_side: str | None
+    spike_encoder_spec: dict[str, object] | None
+    spike_encoder_spec_sha256: str | None
     raw: dict[str, object]
 
     def to_dict(self) -> dict[str, object]:
@@ -207,6 +209,8 @@ class AccelerationProducerMetadata:
             "target_length": self.target_length,
             "sampling_rate_hz": self.sampling_rate_hz,
             "padding_side": self.padding_side,
+            "spike_encoder": self.spike_encoder_spec,
+            "spike_encoder_spec_sha256": self.spike_encoder_spec_sha256,
             "raw": self.raw,
         }
 
@@ -401,6 +405,16 @@ def _load_producer_metadata(padded_root: Path) -> AccelerationProducerMetadata:
         target_length=target_length,
         sampling_rate_hz=sampling_rate_hz,
         padding_side=None if padding_side is None else str(padding_side),
+        spike_encoder_spec=(
+            raw.get("spike_encoder")
+            if isinstance(raw.get("spike_encoder"), dict)
+            else None
+        ),
+        spike_encoder_spec_sha256=(
+            str(raw.get("spike_encoder_spec_sha256"))
+            if raw.get("spike_encoder_spec_sha256") is not None
+            else None
+        ),
         raw=raw,
     )
 
@@ -459,6 +473,39 @@ def _validate_compatible_producer_metadata(
             f"Baseline {padded_roots[0]}: "
             + " | ".join(mismatches)
         )
+    if len(padded_roots) > 1:
+        missing = [
+            f"{root} (action roots selected together)"
+            for root, metadata in zip(padded_roots, metadatas, strict=True)
+            if not metadata.spike_encoder_spec_sha256
+            or not metadata.spike_encoder_spec
+        ]
+        if missing:
+            raise Action0DatasetError(
+                "Missing spike encoder identity for multi-root combination; "
+                "regenerate the affected padded roots before combining: "
+                + ", ".join(missing)
+            )
+        if any(
+            metadata.spike_encoder_spec_sha256 != baseline.spike_encoder_spec_sha256
+            for metadata in metadatas[1:]
+        ):
+            details = []
+            for root, metadata in zip(padded_roots, metadatas, strict=True):
+                differences = {
+                    key: (baseline.spike_encoder_spec.get(key), metadata.spike_encoder_spec.get(key))
+                    for key in sorted(set(baseline.spike_encoder_spec) | set(metadata.spike_encoder_spec))
+                    if baseline.spike_encoder_spec.get(key) != metadata.spike_encoder_spec.get(key)
+                }
+                details.append(
+                    f"{root}: hash={metadata.spike_encoder_spec_sha256!r}, "
+                    f"spec_differences={differences or 'none'}"
+                )
+            raise Action0DatasetError(
+                "Incompatible spike encoder identity across selected roots; "
+                f"expected hash={baseline.spike_encoder_spec_sha256!r}. "
+                + " | ".join(details)
+            )
 
 
 def discover_padded_spike_paths(padded_root: Path) -> tuple[Path, ...]:

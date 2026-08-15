@@ -163,7 +163,9 @@ def test_cli_publishes_custom_wavelet_with_summary_and_dynamic_channels(
     assert events.dtype == np.float32
     assert published["source"]["gravity_removal_method"] == "low-pass"
     assert published["settings"]["wavelet_widths_samples"] == [400, 200, 100, 50, 25]
-    assert published["output"]["channel_names"][-1] == "event_z_8_hz"
+    assert published["output"]["channel_names"][-1] == "event_z_4"
+    assert published["spike_encoder"]["wavelet_widths_samples"] == [400, 200, 100, 50, 25]
+    assert len(published["spike_encoder_spec_sha256"]) == 64
     assert published["output"]["channel_order"] == "axis_major_frequency_minor"
     assert published["sequence_processing"]["state_reset_boundary"] == "recording"
     assert published["sequence_processing"]["offset_semantics"] == "recording"

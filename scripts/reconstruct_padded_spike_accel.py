@@ -51,7 +51,6 @@ from scipy import signal
 SPIKE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
 EVENT_CHANNEL_COUNT = 15
 EVENTS_PER_AXIS = 5
-DEFAULT_FREQUENCIES_HZ = (0.5, 1.0, 2.0, 4.0, 8.0)
 DEFAULT_SCALE_DIVISOR = 2.5
 STANDARD_GRAVITY_M_S2 = 9.80665
 OUTPUT_SUFFIX = "_padded_reconstructed_accel_m_s2.npy"
@@ -185,26 +184,19 @@ def acceleration_wavelet_numpy(M: int, s: float) -> np.ndarray:
     return np.sqrt(1.0 / s) * wavelet
 
 
-def validate_reconstruction_rate(sampling_rate_hz: float) -> None:
-    for frequency_hz in DEFAULT_FREQUENCIES_HZ:
-        ratio = sampling_rate_hz / frequency_hz
-        rounded = int(round(ratio))
-        if rounded <= 0 or not np.isclose(ratio, rounded, rtol=0.0, atol=1e-12):
-            raise ReconstructionError(
-                "Reconstruction requires integer sample widths; "
-                f"sampling_rate/frequency={ratio!r} for {frequency_hz:g} Hz"
-            )
-
-
-def reconstruction_kernels(sampling_rate_hz: float) -> tuple[np.ndarray, ...]:
-    validate_reconstruction_rate(sampling_rate_hz)
-    widths = np.asarray(
-        [int(round(sampling_rate_hz / f)) for f in DEFAULT_FREQUENCIES_HZ],
-        dtype=np.int64,
-    )
+def reconstruction_kernels(
+    wavelet_widths_samples: Sequence[int],
+    frequencies_hz: Sequence[float] | None = None,
+) -> tuple[np.ndarray, ...]:
+    widths = np.asarray(wavelet_widths_samples, dtype=np.int64)
+    if widths.shape != (EVENTS_PER_AXIS,) or np.any(widths <= 0):
+        raise ReconstructionError("Exactly five positive wavelet widths are required")
+    frequencies = tuple(frequencies_hz) if frequencies_hz is not None else tuple(widths)
+    if len(frequencies) != EVENTS_PER_AXIS:
+        raise ReconstructionError("Exactly five reconstruction frequencies are required")
     max_kernel_length = 2 * int(widths.max())
     kernels: list[np.ndarray] = []
-    for frequency_hz, width in zip(DEFAULT_FREQUENCIES_HZ, widths, strict=True):
+    for frequency_hz, width in zip(frequencies, widths, strict=True):
         impulse_index = max_kernel_length // 2 - int(width) // 2
         if not 0 <= impulse_index < max_kernel_length:
             raise ReconstructionError(
@@ -214,6 +206,35 @@ def reconstruction_kernels(sampling_rate_hz: float) -> tuple[np.ndarray, ...]:
         wavelet = acceleration_wavelet_numpy(int(width), int(width))[::-1]
         kernels.append(signal.convolve(impulse, wavelet, mode="same"))
     return tuple(kernels)
+
+
+def load_encoder_contract(summary: dict[str, object], *, path: Path) -> tuple[dict[str, object], str, tuple[float, ...], tuple[int, ...]]:
+    spec = summary.get("spike_encoder")
+    digest = summary.get("spike_encoder_spec_sha256")
+    if not isinstance(spec, dict) or not isinstance(digest, str) or len(digest) != 64:
+        raise ReconstructionError(f"{path}: missing spike_encoder identity and spec hash")
+    try:
+        encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError) as error:
+        raise ReconstructionError(f"{path}: spike_encoder is not canonical JSON") from error
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise ReconstructionError(f"{path}: spike_encoder_spec_sha256 does not match spike_encoder")
+    frequencies = spec.get("frequencies_hz")
+    widths = spec.get("wavelet_widths_samples")
+    if not isinstance(frequencies, list) or len(frequencies) != EVENTS_PER_AXIS:
+        raise ReconstructionError(f"{path}: spike_encoder frequencies_hz must contain exactly five values")
+    if not isinstance(widths, list) or len(widths) != EVENTS_PER_AXIS:
+        raise ReconstructionError(f"{path}: spike_encoder wavelet_widths_samples must contain exactly five values")
+    try:
+        parsed_frequencies = tuple(float(value) for value in frequencies)
+        parsed_widths = tuple(int(value) for value in widths)
+    except (TypeError, ValueError) as error:
+        raise ReconstructionError(f"{path}: invalid spike_encoder frequencies or widths") from error
+    if any(not math.isfinite(value) or value <= 0 for value in parsed_frequencies):
+        raise ReconstructionError(f"{path}: spike_encoder frequencies must be finite and positive")
+    if any(isinstance(value, bool) or int(value) != value or value <= 0 for value in widths):
+        raise ReconstructionError(f"{path}: spike_encoder widths must be positive integers")
+    return spec, digest, parsed_frequencies, parsed_widths
 
 
 def reconstruct_segment_events(
@@ -367,6 +388,9 @@ def process_package(
     source_summary = load_json(source_summary_path)
     padding_summary = load_json(padding_summary_path)
     manifest_rows = load_padding_manifest(padding_manifest_path)
+    encoder_spec, encoder_spec_sha256, frequencies_hz, wavelet_widths_samples = load_encoder_contract(
+        source_summary, path=source_summary_path
+    )
 
     if spike_imu.ndim != 2 or spike_imu.shape[1] != 21:
         raise ReconstructionError(f"{spike_path}: expected (N,21), got {spike_imu.shape}")
@@ -441,7 +465,10 @@ def process_package(
         if sampling_rate_override is not None
         else finite_positive(source_summary.get("sampling_rate_hz"), name="sampling_rate_hz")
     )
-    kernels = reconstruction_kernels(sampling_rate_hz)
+    kernels = reconstruction_kernels(
+        wavelet_widths_samples=wavelet_widths_samples,
+        frequencies_hz=frequencies_hz,
+    )
 
     reconstructed = np.zeros((retained_count, target_length, 3), dtype=np.float64)
     for source_index, output_index, original_length in exported_rows:
@@ -522,7 +549,10 @@ def process_package(
                 "event_channel_order": "axis-major_frequency-minor",
                 "method": "custom_wavelet_event_convolution_sum",
                 "wavelet": "accelerationWavelet",
-                "frequencies_hz": list(DEFAULT_FREQUENCIES_HZ),
+                "frequencies_hz": list(frequencies_hz),
+                "wavelet_widths_samples": list(wavelet_widths_samples),
+                "spike_encoder_spec_sha256": encoder_spec_sha256,
+                "source_spike_encoder_spec_sha256": encoder_spec_sha256,
                 "sampling_rate_hz": sampling_rate_hz,
                 "scale_divisor": DEFAULT_SCALE_DIVISOR,
                 "standard_gravity_m_s2": STANDARD_GRAVITY_M_S2,

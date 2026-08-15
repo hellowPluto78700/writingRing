@@ -113,21 +113,9 @@ def test_vendor_flatten_order_matches_axis_major_frequency_minor(
     encoder = CustomWaveletEncoder(_reference_settings(vendor_fixture))
 
     assert encoder.output_channel_names == (
-        "event_x_0p5_hz",
-        "event_x_1_hz",
-        "event_x_2_hz",
-        "event_x_4_hz",
-        "event_x_8_hz",
-        "event_y_0p5_hz",
-        "event_y_1_hz",
-        "event_y_2_hz",
-        "event_y_4_hz",
-        "event_y_8_hz",
-        "event_z_0p5_hz",
-        "event_z_1_hz",
-        "event_z_2_hz",
-        "event_z_4_hz",
-        "event_z_8_hz",
+        "event_x_0", "event_x_1", "event_x_2", "event_x_3", "event_x_4",
+        "event_y_0", "event_y_1", "event_y_2", "event_y_3", "event_y_4",
+        "event_z_0", "event_z_1", "event_z_2", "event_z_3", "event_z_4",
     )
     flattened = vendor_fixture["impulse_flattened"]
     assert flattened.shape == (96, 15)

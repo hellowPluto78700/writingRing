@@ -127,6 +127,11 @@ unrelated files is never removed.
 
 ## Custom Wavelet settings and outputs
 
+The Custom Wavelet encoder always has five configurable bands. The canonical
+pipeline override is `ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` (five whitespace-
+separated values, no brackets), or the equivalent CLI
+`--encoder-frequencies-hz 1 2 4 8 16`. The default is `0.5 1 2 4 8` Hz.
+
 The included `configs/spike_encoding/custom_wavelet.json` uses frequencies
 `[0.5, 1, 2, 4, 8]` Hz at 200 Hz, so the output has 15 channels in
 axis-major/frequency-minor order. Sampling rate is used to derive wavelet
@@ -178,6 +183,11 @@ columns 18:21  gyro x/y/z (rad/s)
 Alignment and Board-assisted segmentation use only `15:21` for transient
 detection and require the SpikeIMU values, metadata, and canonical timestamp
 hashes to match the saved alignment offset.
+
+Event channel names are stable axis-and-band indices (`event_x_0` through
+`event_z_4`); frequency and wavelet width are not channel identity. Consumers
+must use `spike_encoder` and `spike_encoder_spec_sha256` in metadata for the
+band-index-to-frequency/width mapping and feature compatibility.
 
 ## Legacy segmentation sources
 

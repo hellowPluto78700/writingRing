@@ -82,6 +82,14 @@ is staged, reloaded, verified, and atomically replaced only with `--overwrite`.
 Each recording is independent: encoder state resets once at `[0, N]`, and one
 bad or existing destination cannot silently merge with another recording.
 
+Custom Wavelet uses exactly five configurable frequencies. Set
+`ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` in the preprocessing shell pipeline, or
+pass `--encoder-frequencies-hz 1 2 4 8 16` to the encoder CLI. Published
+metadata contains the canonical encoder spec and
+`spike_encoder_spec_sha256`; that identity, not `(N, 21)` shape alone, defines
+compatible feature space. Old outputs without it must be regenerated before
+new multi-root downstream flows.
+
 The bottom-level Xylo rotation/gravity function returns `(N, 3)` acceleration.
 The handoff deliberately uses the wrapper's `(N, 9)` result so the consumer
 can preserve the m/s² and gyro channels and prove their semantics in metadata.

@@ -80,6 +80,14 @@ lengths remain the authoritative variable-length boundaries. The manifest and
 summary carry input kind, schema, units, timestamp provenance, and feature
 hashes.
 
+The five Custom Wavelet frequencies are configurable with
+`ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` (or CLI
+`--encoder-frequencies-hz 1 2 4 8 16`). Event channels remain index-based;
+their frequency/width mapping comes from `spike_encoder` metadata. Segmentation
+and padding propagate the encoder spec and hash, and reject mixed encoder
+identities before publishing or combining data. Artifacts missing that identity
+must be regenerated.
+
 Optional downstream reconstruction can derive a separate `(N, 3)` acceleration
 array from the first 15 event channels, or a `(S, T_pad, 3)` array after the
 completed package has been right-padded. Both forms reconstruct each source

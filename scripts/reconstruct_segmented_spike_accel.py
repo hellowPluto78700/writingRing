@@ -42,7 +42,6 @@ SPIKE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
 EVENT_CHANNEL_COUNT = 15
 EVENTS_PER_AXIS = 5
 AXIS_NAMES = ("x", "y", "z")
-DEFAULT_FREQUENCIES_HZ = (0.5, 1.0, 2.0, 4.0, 8.0)
 DEFAULT_SCALE_DIVISOR = 2.5
 STANDARD_GRAVITY_M_S2 = 9.80665
 OUTPUT_SUFFIX = "_reconstructed_accel_m_s2.npy"
@@ -77,6 +76,10 @@ class LoadedPackage:
     summary: dict[str, object]
     sampling_rate_hz: float
     sampling_rate_source: str
+    encoder_spec: dict[str, object]
+    encoder_spec_sha256: str
+    frequencies_hz: tuple[float, ...]
+    wavelet_widths_samples: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -273,6 +276,35 @@ def load_json(path: Path) -> dict[str, object]:
     return value
 
 
+def load_encoder_contract(summary: dict[str, object], *, path: Path) -> tuple[dict[str, object], str, tuple[float, ...], tuple[int, ...]]:
+    spec = summary.get("spike_encoder")
+    digest = summary.get("spike_encoder_spec_sha256")
+    if not isinstance(spec, dict) or not isinstance(digest, str) or len(digest) != 64:
+        raise ReconstructionError(f"{path}: missing spike_encoder identity and spec hash")
+    try:
+        encoded = json.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    except (TypeError, ValueError) as error:
+        raise ReconstructionError(f"{path}: spike_encoder is not canonical JSON") from error
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise ReconstructionError(f"{path}: spike_encoder_spec_sha256 does not match spike_encoder")
+    frequencies = spec.get("frequencies_hz")
+    widths = spec.get("wavelet_widths_samples")
+    if not isinstance(frequencies, list) or len(frequencies) != EVENTS_PER_AXIS:
+        raise ReconstructionError(f"{path}: spike_encoder frequencies_hz must contain exactly five values")
+    if not isinstance(widths, list) or len(widths) != EVENTS_PER_AXIS:
+        raise ReconstructionError(f"{path}: spike_encoder wavelet_widths_samples must contain exactly five values")
+    try:
+        parsed_frequencies = tuple(float(value) for value in frequencies)
+        parsed_widths = tuple(int(value) for value in widths)
+    except (TypeError, ValueError) as error:
+        raise ReconstructionError(f"{path}: invalid spike_encoder frequencies or widths") from error
+    if any(not math.isfinite(value) or value <= 0 for value in parsed_frequencies):
+        raise ReconstructionError(f"{path}: spike_encoder frequencies must be finite and positive")
+    if any(isinstance(value, bool) or int(value) != value or value <= 0 for value in widths):
+        raise ReconstructionError(f"{path}: spike_encoder widths must be positive integers")
+    return spec, digest, parsed_frequencies, parsed_widths
+
+
 def load_package(
     package: SegmentationPackage,
     *,
@@ -343,7 +375,9 @@ def load_package(
         )
         sampling_rate_source = "segmentation_summary"
 
-    validate_reconstruction_rate(sampling_rate_hz, DEFAULT_FREQUENCIES_HZ)
+    encoder_spec, encoder_hash, frequencies_hz, wavelet_widths_samples = load_encoder_contract(
+        summary, path=package.summary_path
+    )
 
     return LoadedPackage(
         package=package,
@@ -354,6 +388,10 @@ def load_package(
         summary=summary,
         sampling_rate_hz=sampling_rate_hz,
         sampling_rate_source=sampling_rate_source,
+        encoder_spec=encoder_spec,
+        encoder_spec_sha256=encoder_hash,
+        frequencies_hz=frequencies_hz,
+        wavelet_widths_samples=wavelet_widths_samples,
     )
 
 
@@ -367,20 +405,6 @@ def finite_positive(value: object, *, name: str) -> float:
     if not math.isfinite(number) or number <= 0.0:
         raise ReconstructionError(f"{name} must be a positive finite number")
     return number
-
-
-def validate_reconstruction_rate(
-    sampling_rate_hz: float,
-    frequencies_hz: Sequence[float],
-) -> None:
-    for frequency_hz in frequencies_hz:
-        ratio = float(sampling_rate_hz) / float(frequency_hz)
-        rounded = int(round(ratio))
-        if rounded <= 0 or not np.isclose(ratio, rounded, rtol=0.0, atol=1e-12):
-            raise ReconstructionError(
-                "This reconstruction requires integer sample widths. "
-                f"sampling_rate/frequency = {ratio!r} for {frequency_hz:g} Hz."
-            )
 
 
 def acceleration_wavelet_numpy(M: int, s: float) -> np.ndarray:
@@ -397,18 +421,15 @@ def acceleration_wavelet_numpy(M: int, s: float) -> np.ndarray:
 
 def reconstruction_kernels(
     *,
-    sampling_rate_hz: float,
-    frequencies_hz: Sequence[float] = DEFAULT_FREQUENCIES_HZ,
+    wavelet_widths_samples: Sequence[int],
+    frequencies_hz: Sequence[float] | None = None,
 ) -> tuple[np.ndarray, ...]:
-    frequencies = np.asarray(frequencies_hz, dtype=np.float64)
-    if frequencies.shape != (EVENTS_PER_AXIS,):
+    widths = np.asarray(wavelet_widths_samples, dtype=np.int64)
+    if widths.shape != (EVENTS_PER_AXIS,) or np.any(widths <= 0):
+        raise ReconstructionError("Exactly five positive wavelet widths are required")
+    frequencies = tuple(frequencies_hz) if frequencies_hz is not None else tuple(widths)
+    if len(frequencies) != EVENTS_PER_AXIS:
         raise ReconstructionError("Exactly five reconstruction frequencies are required")
-    validate_reconstruction_rate(sampling_rate_hz, frequencies.tolist())
-
-    widths = np.asarray(
-        [int(round(float(sampling_rate_hz) / float(frequency))) for frequency in frequencies],
-        dtype=np.int64,
-    )
     # Same adaptation as the notebook: use the full vendor-style 2*max(width)
     # kernel even for short label segments, and keep only the band si/2 delay
     # placement because current SpikeIMU events are already occurrence-aligned.
@@ -418,9 +439,7 @@ def reconstruction_kernels(
     for frequency_hz, width in zip(frequencies, widths, strict=True):
         impulse_index = max_kernel_length // 2 - int(width) // 2
         if impulse_index < 0 or impulse_index >= max_kernel_length:
-            raise ReconstructionError(
-                f"Kernel placement failed for {frequency_hz:g} Hz at {sampling_rate_hz:g} Hz"
-            )
+            raise ReconstructionError(f"Kernel placement failed for band {frequency_hz:g}")
         impulse = signal.unit_impulse(max_kernel_length, impulse_index)
         wavelet = acceleration_wavelet_numpy(int(width), int(width))[::-1]
         kernels.append(signal.convolve(impulse, wavelet, mode="same"))
@@ -457,7 +476,10 @@ def reconstruct_segment_events(
 
 
 def reconstruct_package(loaded: LoadedPackage) -> np.ndarray:
-    kernels = reconstruction_kernels(sampling_rate_hz=loaded.sampling_rate_hz)
+    kernels = reconstruction_kernels(
+        wavelet_widths_samples=loaded.wavelet_widths_samples,
+        frequencies_hz=loaded.frequencies_hz,
+    )
     reconstructed = np.zeros((len(loaded.spike_imu), 3), dtype=np.float64)
     for segment_index in range(len(loaded.labels)):
         start = int(loaded.offsets[segment_index])
@@ -678,7 +700,10 @@ def metadata_object(
         "reconstruction": {
             "method": "custom_wavelet_event_convolution_sum",
             "wavelet": "accelerationWavelet",
-            "frequencies_hz": [float(v) for v in DEFAULT_FREQUENCIES_HZ],
+            "frequencies_hz": list(loaded.frequencies_hz),
+            "wavelet_widths_samples": list(loaded.wavelet_widths_samples),
+            "spike_encoder_spec_sha256": loaded.encoder_spec_sha256,
+            "source_spike_encoder_spec_sha256": loaded.encoder_spec_sha256,
             "sampling_rate_hz": float(loaded.sampling_rate_hz),
             "sampling_rate_source": loaded.sampling_rate_source,
             "scale_divisor": float(DEFAULT_SCALE_DIVISOR),
@@ -790,6 +815,10 @@ def run(args: argparse.Namespace) -> int:
     for package in packages:
         print(f"\n[{package.user} / action {package.action}] {package.directory}")
         try:
+            loaded = load_package(
+                package,
+                sampling_rate_override=args.sampling_rate_hz,
+            )
             paths = output_paths(package)
             mode = check_existing_outputs(
                 paths,
@@ -803,10 +832,6 @@ def run(args: argparse.Namespace) -> int:
                 print(f"  SKIP complete output already exists: {paths.values.name}")
                 continue
 
-            loaded = load_package(
-                package,
-                sampling_rate_override=args.sampling_rate_hz,
-            )
             print(
                 f"  source: {loaded.spike_imu.shape[0]} rows, "
                 f"{len(loaded.labels)} segments, {loaded.sampling_rate_hz:g} Hz"

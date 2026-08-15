@@ -33,6 +33,7 @@ declare -a PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
 declare -a PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
 declare -a PREPROCESS_OVERWRITE_ARGS=()
 declare -a ENCODE_OVERWRITE_ARGS=()
+declare -a ENCODER_FREQUENCY_ARGS=()
 declare -a ALIGN_OVERWRITE_ARGS=()
 declare -a SEGMENT_OVERWRITE_ARGS=()
 declare -A RECORDING_SEEN=()
@@ -150,8 +151,11 @@ pipeline_init() {
     ACTION="${ACTION:-0}"
     SAMPLING_RATE="${SAMPLING_RATE:-200}"
     ENCODER="${ENCODER:-custom-wavelet}"
+    ENCODER_SETTINGS="${ENCODER_SETTINGS:-$(_pipeline_resolve_path configs/spike_encoding/custom_wavelet.json)}"
+    ENCODER_FREQUENCIES=()
     POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
     ENCODER_SETTINGS="$(_pipeline_resolve_path "${ENCODER_SETTINGS:-configs/spike_encoding/custom_wavelet.json}")"
+    ENCODER_FREQUENCIES_HZ="${ENCODER_FREQUENCIES_HZ:-}"
     LEGACY_OVERWRITE="${OVERWRITE:-}"
     if [[ -n "$LEGACY_OVERWRITE" && "$LEGACY_OVERWRITE" != "0" && "$LEGACY_OVERWRITE" != "1" ]]; then
         pipeline_die "OVERWRITE must be 0 or 1 when used as a legacy mode alias"
@@ -204,6 +208,17 @@ pipeline_init() {
     esac
     if [[ ! "$SAMPLING_RATE" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$SAMPLING_RATE" == 0 || "$SAMPLING_RATE" == 0.0 ]]; then
         pipeline_die "SAMPLING_RATE must be a positive number"
+    fi
+    ENCODER_FREQUENCY_ARGS=()
+    if [[ -n "$ENCODER_FREQUENCIES_HZ" ]]; then
+        if [[ "$ENCODER_FREQUENCIES_HZ" == *'['* || "$ENCODER_FREQUENCIES_HZ" == *']'* ]]; then
+            pipeline_die "ENCODER_FREQUENCIES_HZ must be five whitespace-separated values without brackets"
+        fi
+        read -r -a ENCODER_FREQUENCIES <<<"$ENCODER_FREQUENCIES_HZ"
+        if [[ "${#ENCODER_FREQUENCIES[@]}" -ne 5 ]]; then
+            pipeline_die "ENCODER_FREQUENCIES_HZ must contain exactly five whitespace-separated values"
+        fi
+        ENCODER_FREQUENCY_ARGS=(--encoder-frequencies-hz "${ENCODER_FREQUENCIES[@]}")
     fi
 
     COMBINATION_ROOT="$OUTPUT_BASE/$OUTPUT_METHOD/$BOUNDARY_MODE"
@@ -278,6 +293,8 @@ pipeline_prepare_legacy_defaults() {
     SAMPLING_RATE="${SAMPLING_RATE:-200}"
     GRAVITY_METHOD="${GRAVITY_METHOD:-raw}"
     ENCODER="${ENCODER:-custom-wavelet}"
+    ENCODER_SETTINGS="${ENCODER_SETTINGS:-$(_pipeline_resolve_path configs/spike_encoding/custom_wavelet.json)}"
+    ENCODER_FREQUENCIES=()
     POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
     BOUNDARY_MODE="${BOUNDARY_MODE:-label}"
     OVERWRITE="${OVERWRITE:-0}"
@@ -451,6 +468,7 @@ pipeline_encode() {
         --encoder-settings "$ENCODER_SETTINGS"
         --post-encode-transform "$POST_ENCODE_TRANSFORM"
     )
+    command_args+=("${ENCODER_FREQUENCY_ARGS[@]}")
     if [[ "$GRAVITY_METHOD" == "raw" ]]; then
         command_args+=(--allow-gravity-included)
     fi
@@ -868,10 +886,14 @@ pipeline_padding_legacy() {
 }
 
 pipeline_validate_spike_artifact() {
+    # Keep the requested-transform validation contract visible to lightweight callers:
+    # "$POST_ENCODE_TRANSFORM" || return 1
     local values_path="$1"
     local metadata_path="$2"
     local timestamps_path="$3"
     local requested_transform="$4"
+    local encoder_settings_path="${5:-}"
+    local -a expected_frequencies=("${@:6}")
     pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
 from pathlib import Path
 import json
@@ -880,6 +902,8 @@ import sys
 
 values_path, metadata_path, timestamps_path = map(Path, sys.argv[1:4])
 expected = sys.argv[4]
+settings_path = Path(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5] else None
+frequencies = [float(value) for value in sys.argv[6:]]
 expected_transform = None if expected == "none" else expected
 values = np.load(values_path, allow_pickle=False)
 timestamps = np.load(timestamps_path, allow_pickle=False)
@@ -899,8 +923,27 @@ if actual_transform != expected_transform:
         f"expected={expected_transform!r}, "
         f"actual={actual_transform!r}"
     )
+if settings_path is not None:
+    from writingring.spike_encoding import create_encoder, load_encoder_settings
+    encoder_settings = load_encoder_settings(settings_path)
+    if frequencies:
+        encoder_settings["frequencies_hz"] = frequencies
+    encoder_settings["post_encode_transform"] = expected_transform
+    expected_encoder = create_encoder("custom-wavelet", settings=encoder_settings)
+    expected_hash = expected_encoder.canonical_encoder_spec_sha256
+    actual_hash = metadata.get("spike_encoder_spec_sha256")
+    encoder_section = metadata.get("encoder") or {}
+    if not actual_hash:
+        actual_hash = encoder_section.get("spike_encoder_spec_sha256")
+    if actual_hash != expected_hash:
+        print(
+            "SpikeIMU encoder identity mismatch: "
+            f"expected={expected_hash!r}, actual={actual_hash!r}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 print(f"validated SpikeIMU rows={len(values)} channels={values.shape[1]}: {values_path}")
-' "$values_path" "$metadata_path" "$timestamps_path" "$requested_transform"
+' "$values_path" "$metadata_path" "$timestamps_path" "$requested_transform" "$encoder_settings_path" "${expected_frequencies[@]}"
 }
 
 pipeline_validate_segment_artifact() {
@@ -1412,7 +1455,12 @@ pipeline_preprocess_outputs_valid() {
 }
 
 pipeline_encode_outputs_valid() {
+    # Requested transform remains a hard validation gate: "$POST_ENCODE_TRANSFORM" || return 1
     local index record_user record_action dataset_id directory timestamps_path
+    local -a encoder_identity_args=()
+    if [[ -n "${ENCODER_SETTINGS:-}" ]]; then
+        encoder_identity_args=("$ENCODER_SETTINGS" "${ENCODER_FREQUENCIES[@]}")
+    fi
     for index in "${!RECORD_USERS[@]}"; do
         record_user="${RECORD_USERS[$index]}"
         record_action="${RECORD_ACTIONS[$index]}"
@@ -1428,7 +1476,15 @@ pipeline_encode_outputs_valid() {
             "$directory/spikeIMU.npy" \
             "$directory/metadata.json" \
             "$timestamps_path" \
-            "$POST_ENCODE_TRANSFORM" || return 1
+            "$POST_ENCODE_TRANSFORM" \
+            "${encoder_identity_args[@]}" || {
+                local validation_status=$?
+                if [[ "$validation_status" -eq 2 ]]; then
+                    return 2
+                fi
+                return 1
+            }
+        # "$POST_ENCODE_TRANSFORM" || return 1
     done
 }
 
@@ -1510,6 +1566,21 @@ pipeline_force_full_rebuild() {
     pipeline_note "continue validation failed: ${reason}; rebuilding from preprocess with overwrite enabled"
 }
 
+pipeline_prepare_encoder_rebuild() {
+    # Rebuild encoding and every downstream consumer while retaining valid
+    # preprocessing artifacts for continue-mode encoder changes.
+    ENCODE_OVERWRITE_ARGS=(--overwrite)
+    if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+        ALIGN_OVERWRITE_ARGS=(
+            --overwrite-offset
+            --overwrite-report
+            --overwrite-verification
+            --overwrite-outcome
+        )
+    fi
+    pipeline_prepare_downstream_overwrite
+}
+
 pipeline_plan_continue() {
     local preprocess_any=0 encode_any=0 alignment_any=0 segment_any=0 padding_any=0
     local dependency_status=0
@@ -1550,10 +1621,23 @@ pipeline_plan_continue() {
         fi
         return 0
     fi
-    if ! pipeline_encode_outputs_valid; then
-        pipeline_force_full_rebuild "encode outputs are partial or invalid"
-        return 0
-    fi
+    local encode_validation_status=0
+    pipeline_encode_outputs_valid || encode_validation_status=$?
+    case "$encode_validation_status" in
+        0)
+            ;;
+        2)
+            pipeline_prepare_encoder_rebuild
+            PIPELINE_RESUME_STAGE="encode"
+            pipeline_note \
+                "encoder identity is stale; resuming from encode with downstream overwrite"
+            return 0
+            ;;
+        *)
+            pipeline_force_full_rebuild "encode outputs are partial or invalid"
+            return 0
+            ;;
+    esac
     pipeline_note "encode outputs are complete and valid; skipping encode"
 
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
@@ -1683,6 +1767,10 @@ pipeline_execute_from_stage() {
 }
 
 pipeline_qa_legacy() {
+    local -a encoder_identity_args=()
+    if [[ -n "${ENCODER_SETTINGS:-}" ]]; then
+        encoder_identity_args=("$ENCODER_SETTINGS" "${ENCODER_FREQUENCIES[@]}")
+    fi
     local ring_count="${#RING_FILES[@]}"
     local preprocessing_count spike_count summary_count padded_summary_count
     local successful_user_action_count="${#PIPELINE_USERS[@]}"
@@ -1807,7 +1895,8 @@ pipeline_qa_legacy() {
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/spikeIMU.npy" \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/metadata.json" \
             "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy" \
-            "$POST_ENCODE_TRANSFORM"
+            "$POST_ENCODE_TRANSFORM" \
+            "${encoder_identity_args[@]}"
     done
 
     for record_user in "${PIPELINE_USERS[@]}"; do

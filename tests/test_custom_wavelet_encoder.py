@@ -13,8 +13,33 @@ from writingring.spike_encoding.registry import create_encoder
 from writingring.spike_encoding.runner import run_spike_encoder
 
 
+def test_canonical_encoder_identity_tracks_frequencies_widths_and_transform() -> None:
+    default = CustomWaveletEncoder()
+    alternate = CustomWaveletEncoder(
+        CustomWaveletSettings(frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0))
+    )
+    rectified = CustomWaveletEncoder(
+        CustomWaveletSettings(post_encode_transform="AbsRectify")
+    )
+
+    assert default.canonical_encoder_spec["frequencies_hz"] == [0.5, 1.0, 2.0, 4.0, 8.0]
+    assert alternate.canonical_encoder_spec["wavelet_widths_samples"] == [200, 100, 50, 25, 12]
+    assert default.output_channel_names == alternate.output_channel_names
+    assert default.canonical_encoder_spec_sha256 != alternate.canonical_encoder_spec_sha256
+    assert default.canonical_encoder_spec_sha256 != rectified.canonical_encoder_spec_sha256
+
+
+def test_canonical_encoder_identity_tracks_event_affecting_settings() -> None:
+    baseline = CustomWaveletEncoder()
+    changed = CustomWaveletEncoder(
+        CustomWaveletSettings(max_filter_frequency_decades=0.25)
+    )
+
+    assert baseline.canonical_encoder_spec_sha256 != changed.canonical_encoder_spec_sha256
+
+
 def test_prony_fit_returns_stable_second_order_coefficients() -> None:
-    settings = CustomWaveletSettings(frequencies_hz=(8.0,))
+    settings = CustomWaveletSettings(frequencies_hz=(0.5, 1.0, 2.0, 4.0, 8.0))
     encoder = CustomWaveletEncoder(settings)
     kernel = encoder.settings.wavelet_widths_samples[0]
     coefficients = prony_iir_coefficients(
@@ -30,10 +55,10 @@ def test_prony_fit_returns_stable_second_order_coefficients() -> None:
     assert np.isfinite(coefficients[1]).all()
 
 
-def test_encoder_emits_dynamic_axis_major_channel_count_and_names() -> None:
+def test_encoder_emits_fixed_axis_major_channel_count_and_stable_names() -> None:
     encoder = CustomWaveletEncoder(
         CustomWaveletSettings(
-            frequencies_hz=(1.0, 2.0, 5.0, 10.0),
+            frequencies_hz=(1.0, 2.0, 5.0, 10.0, 20.0),
             output_dtype="float64",
         )
     )
@@ -41,29 +66,20 @@ def test_encoder_emits_dynamic_axis_major_channel_count_and_names() -> None:
 
     result = encoder.encode_sequence(samples)
 
-    assert result.values.shape == (120, 12)
+    assert result.values.shape == (120, 15)
     assert result.values.dtype == np.float64
     assert result.representation == "signed_sparse_wavelet_extrema"
     assert result.channel_names == (
-        "event_x_1_hz",
-        "event_x_2_hz",
-        "event_x_5_hz",
-        "event_x_10_hz",
-        "event_y_1_hz",
-        "event_y_2_hz",
-        "event_y_5_hz",
-        "event_y_10_hz",
-        "event_z_1_hz",
-        "event_z_2_hz",
-        "event_z_5_hz",
-        "event_z_10_hz",
+        "event_x_0", "event_x_1", "event_x_2", "event_x_3", "event_x_4",
+        "event_y_0", "event_y_1", "event_y_2", "event_y_3", "event_y_4",
+        "event_z_0", "event_z_1", "event_z_2", "event_z_3", "event_z_4",
     )
     assert np.isfinite(result.values).all()
 
 
 def test_post_encode_abs_rectify_preserves_occurrences_and_signed_step() -> None:
     settings = dict(
-        frequencies_hz=(2.0, 4.0, 8.0),
+        frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0),
         max_filter_time_s=0.3,
         output_dtype="float64",
     )
@@ -92,7 +108,7 @@ def test_post_encode_abs_rectify_preserves_occurrences_and_signed_step() -> None
     assert rectified.representation == "abs_rectified_sparse_wavelet_extrema"
     np.testing.assert_array_equal(rectified.values, np.abs(signed.values))
     np.testing.assert_array_equal(rectified.values != 0.0, signed.values != 0.0)
-    assert rectified.values.shape == signed.values.shape == (160, 9)
+    assert rectified.values.shape == signed.values.shape == (160, 15)
     assert rectified.channel_names == signed.channel_names
     assert np.all(rectified.values >= 0.0)
     assert np.count_nonzero(signed.values < 0.0) > 0
@@ -106,7 +122,7 @@ def test_post_encode_abs_rectify_preserves_occurrences_and_signed_step() -> None
 
 def test_encoder_reset_reproduces_one_sequence_and_runner_resets_each_boundary() -> None:
     settings = {
-        "frequencies_hz": [2.0, 4.0],
+        "frequencies_hz": [1.0, 2.0, 4.0, 8.0, 16.0],
         "max_filter_time_s": 0.02,
         "output_dtype": "float32",
     }
@@ -124,11 +140,11 @@ def test_encoder_reset_reproduces_one_sequence_and_runner_resets_each_boundary()
 
     np.testing.assert_array_equal(first.values, second.values)
     np.testing.assert_array_equal(output.values[:20], output.values[20:])
-    assert output.summary["channel_count"] == 6
+    assert output.summary["channel_count"] == 15
 
 
 def test_sequence_occurrence_alignment_matches_padded_causal_detection_path() -> None:
-    settings = CustomWaveletSettings(frequencies_hz=(2.0, 4.0))
+    settings = CustomWaveletSettings(frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0))
     samples = np.column_stack((np.arange(80), -np.arange(80), np.ones(80)))
     detected_encoder = CustomWaveletEncoder(settings)
     encoded = CustomWaveletEncoder(settings)
@@ -147,7 +163,7 @@ def test_sequence_occurrence_alignment_matches_padded_causal_detection_path() ->
 def test_window_dimensions_follow_settings_and_keep_signed_extrema() -> None:
     encoder = CustomWaveletEncoder(
         CustomWaveletSettings(
-            frequencies_hz=(2.0, 4.0, 8.0),
+            frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0),
             max_filter_time_s=0.3,
             max_filter_frequency_decades=0.5,
         )
@@ -192,7 +208,7 @@ def test_padding_length_is_derived_from_the_odd_extrema_window() -> None:
         encoder = CustomWaveletEncoder(
             CustomWaveletSettings(
                 sampling_rate_hz=rate,
-                frequencies_hz=(2.0, 4.0, 8.0),
+                frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0),
             )
         )
 

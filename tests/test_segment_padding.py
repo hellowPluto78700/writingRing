@@ -49,6 +49,8 @@ def _write_package(
             "channel_count": channel_count,
             "channel_names": [f"channel_{index}" for index in range(channel_count)],
             "units": ["unit"] * channel_count,
+            "spike_encoder": {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0]},
+            "spike_encoder_spec_sha256": hashlib.sha256(json.dumps({"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0]}, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         }),
         encoding="utf-8",
     )
@@ -121,6 +123,8 @@ def test_padding_arrays_skip_overflow_and_preserve_board_targets(tmp_path: Path)
         for path in dataset.paths.input_dir.iterdir()
     }
     result = build_padding_package(dataset, target_length=4)
+    assert result.summary["spike_encoder"] == dataset.segmentation_summary["spike_encoder"]
+    assert result.summary["spike_encoder_spec_sha256"] == dataset.segmentation_summary["spike_encoder_spec_sha256"]
 
     assert result.padded_spike_imu.shape == (1, 4, 21)
     np.testing.assert_array_equal(result.labels, ["L0"])
@@ -145,6 +149,8 @@ def test_padding_arrays_skip_overflow_and_preserve_board_targets(tmp_path: Path)
 
     output = tmp_path / "padded"
     summary = publish_padded_root([dataset], input_root=root, output_root=output, target_length=4)
+    assert summary["spike_encoder"] == dataset.segmentation_summary["spike_encoder"]
+    assert summary["spike_encoder_spec_sha256"] == dataset.segmentation_summary["spike_encoder_spec_sha256"]
     assert summary["failed_package_count"] == 0
     assert summary["segment_count"] == 1
     assert summary["skipped_segment_count"] == 1

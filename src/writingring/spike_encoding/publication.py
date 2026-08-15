@@ -322,6 +322,18 @@ def _build_summary(
         settings["event_representation"] = event_representation
     nonzero = int(np.count_nonzero(values))
     output_metadata = _validated_output_metadata(getattr(encoder, "output_metadata", None))
+    canonical_encoder_spec = getattr(encoder, "canonical_encoder_spec", None)
+    canonical_encoder_hash = getattr(encoder, "canonical_encoder_spec_sha256", None)
+    if canonical_encoder_spec is not None:
+        if not isinstance(canonical_encoder_spec, Mapping):
+            raise SpikeEncodingPublishError("encoder canonical spec must be a mapping")
+        if not isinstance(canonical_encoder_hash, str) or len(canonical_encoder_hash) != 64:
+            raise SpikeEncodingPublishError("encoder canonical spec hash must be a SHA-256 digest")
+        declared_channels = canonical_encoder_spec.get("event_channel_names")
+        if list(output.channel_names) != declared_channels:
+            raise SpikeEncodingPublishError(
+                "encoder canonical spec event channels do not match encoded output"
+            )
     output_section: dict[str, object] = {
         "sample_count": len(values),
         "channel_count": values.shape[1],
@@ -423,6 +435,9 @@ def _build_summary(
         "representation": output.representation,
         "event_representation": event_representation,
     }
+    if canonical_encoder_spec is not None:
+        encoder_section["spike_encoder"] = dict(canonical_encoder_spec)
+        encoder_section["spike_encoder_spec_sha256"] = canonical_encoder_hash
     if has_post_encode_transform:
         encoder_section["post_encode_transform"] = post_encode_transform
     summary = {
@@ -456,6 +471,10 @@ def _build_summary(
             "sampling_rate_hz": effective_settings["sampling_rate_hz"],
         },
         "settings": settings,
+        **({
+            "spike_encoder": dict(canonical_encoder_spec),
+            "spike_encoder_spec_sha256": canonical_encoder_hash,
+        } if canonical_encoder_spec is not None else {}),
         "sequence_processing": {
             "mode": sequence_mode,
             "offset_semantics": offset_semantics,

@@ -25,6 +25,7 @@ set -Eeuo pipefail
 #   CONDA_ENV=writingring-gpu
 #   SAMPLING_RATE=200
 #   PADDING_VALUE=0.0
+#   ENCODER_FREQUENCIES_HZ="1 2 4 8 16"  # validates existing inputs only
 # ------------------------------------------------------------
 
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
@@ -36,6 +37,7 @@ ACTION1_ROOT="${2:-outputs/action1_rectified/low-pass/aligned-board-events}"
 CONDA_ENV="${CONDA_ENV:-writingring-gpu}"
 SAMPLING_RATE="${SAMPLING_RATE:-200}"
 PADDING_VALUE="${PADDING_VALUE:-0.0}"
+ENCODER_FREQUENCIES_HZ="${ENCODER_FREQUENCIES_HZ:-}"
 
 ACTION0_SEGMENT_ROOT="$ACTION0_ROOT/segmentation"
 ACTION1_SEGMENT_ROOT="$ACTION1_ROOT/segmentation"
@@ -79,7 +81,55 @@ PY
 }
 
 
+validate_encoder_identity() {
+    local summary_a="$1"
+    local summary_b="$2"
+    local requested_frequencies="$3"
+
+    python3 - "$summary_a" "$summary_b" "$requested_frequencies" <<'PY'
+import json
+import math
+import sys
+from pathlib import Path
+
+
+def identity(path: Path) -> tuple[dict[str, object], str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    spec = payload.get("spike_encoder")
+    fingerprint = payload.get("spike_encoder_spec_sha256")
+    if not isinstance(spec, dict) or not isinstance(fingerprint, str):
+        raise SystemExit(f"missing spike encoder identity in {path}; regenerate from encode")
+    return spec, fingerprint
+
+
+first_path, second_path = map(Path, sys.argv[1:3])
+requested = sys.argv[3]
+first_spec, first_hash = identity(first_path)
+second_spec, second_hash = identity(second_path)
+if first_hash != second_hash or first_spec != second_spec:
+    raise SystemExit(
+        "encoder identity mismatch between padding roots: "
+        f"{first_path}={first_hash}, {second_path}={second_hash}"
+    )
+if requested:
+    try:
+        values = [float(value) for value in requested.split()]
+    except ValueError as error:
+        raise SystemExit("ENCODER_FREQUENCIES_HZ must contain numeric values") from error
+    if len(values) != 5 or not all(math.isfinite(value) and value > 0 for value in values):
+        raise SystemExit("ENCODER_FREQUENCIES_HZ must contain exactly five positive finite values")
+    if values != first_spec.get("frequencies_hz"):
+        raise SystemExit(
+            "ENCODER_FREQUENCIES_HZ does not match existing encoded inputs; "
+            "repad does not re-encode data"
+        )
+PY
+}
+
+
 echo "Reading current padding targets..."
+
+validate_encoder_identity "$ACTION0_SUMMARY" "$ACTION1_SUMMARY" "$ENCODER_FREQUENCIES_HZ"
 
 ACTION0_TARGET="$(read_target_length "$ACTION0_SUMMARY")"
 ACTION1_TARGET="$(read_target_length "$ACTION1_SUMMARY")"
@@ -153,4 +203,3 @@ echo
 echo "Final common padding target: $NEW_TARGET"
 echo "Action 0: $NEW_TARGET"
 echo "Action 1: $NEW_TARGET"
-

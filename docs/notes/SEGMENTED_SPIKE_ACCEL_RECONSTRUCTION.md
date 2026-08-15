@@ -68,10 +68,13 @@ SpikeIMU identity fields, they must be `input_kind=spike-imu` and
 `feature_schema=signed_wavelet_events_plus_imu_v1`; other declared values are
 rejected.
 
-The reconstruction frequencies require an integer number of samples per band:
-`sampling_rate_hz / frequency_hz` must be integral for every configured
-frequency. `--sampling-rate-hz` changes that reconstruction rate only after
-this check; it does not resample the source artifact.
+The reconstruction uses the published `spike_encoder.wavelet_widths_samples`
+and frequencies, not hard-coded defaults or a newly inferred width. Under the
+current encoder rule, 200 Hz / 16 Hz is truncated to width 12, so the canonical
+five-band example `[1, 2, 4, 8, 16]` uses `[200, 100, 50, 25, 12]`. Artifacts
+without a verified encoder spec/hash must be regenerated. The encoder can be
+selected with `ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` or
+`--encoder-frequencies-hz 1 2 4 8 16`.
 
 ### Reconstruction semantics
 
