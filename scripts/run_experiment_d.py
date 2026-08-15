@@ -37,6 +37,9 @@ import torch
 from snn.accel_reconstruction_eval import (
     ExperimentConfig,
     MaskAwareAccelerationCNN,
+    ProbeVariant,
+    build_probe_model,
+    validate_probe_variant,
     NormalizationStats,
     SplitAssignment,
     build_adam_optimizer,
@@ -452,6 +455,7 @@ def run_experiment_d(
     config: ExperimentConfig | None = None,
     device: str | None = None,
     allow_new_split: bool = False,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentDRunResult:
     """Execute Experiment D end-to-end and save dual-domain artifacts.
 
@@ -471,7 +475,8 @@ def run_experiment_d(
         comparability.
     """
     repository_root = Path(repository_root).expanduser().resolve()
-    output_dir = _resolve_path(output_dir, repository_root)
+    probe_variant = validate_probe_variant(probe_variant)
+    output_dir = _resolve_path(output_dir, repository_root) / probe_variant
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if config is None:
@@ -479,8 +484,14 @@ def run_experiment_d(
             test_source="raw",
             output_dir=output_dir,
             random_seed=12345,
+            probe_variant=probe_variant,
         )
     else:
+        if config.probe_variant != probe_variant:
+            raise ValueError(
+                "Experiment D config/probe mismatch: "
+                f"config={config.probe_variant!r}, requested={probe_variant!r}"
+            )
         config = replace(config, output_dir=output_dir)
         config.validate()
 
@@ -507,6 +518,16 @@ def run_experiment_d(
                 "Reference Experiment A checkpoint was not found: "
                 f"{reference_path}. Supply the correct checkpoint or pass "
                 "allow_new_split=True only if a new split is intentional."
+            )
+    if reference is not None:
+        reference_variant = reference.get("architecture_variant")
+        if reference_variant is None and isinstance(reference.get("model_config"), MappingABC):
+            reference_variant = reference["model_config"].get("variant")
+        reference_variant = validate_probe_variant(reference_variant or "cnn_l")
+        if reference_variant != probe_variant:
+            raise ValueError(
+                "Experiment D probe/reference checkpoint mismatch: "
+                f"requested={probe_variant!r}, checkpoint={reference_variant!r}"
             )
     elif not allow_new_split:
         raise ValueError(
@@ -606,7 +627,11 @@ def run_experiment_d(
     )
 
     num_classes = len(split.class_to_idx)
-    model = MaskAwareAccelerationCNN(num_classes=num_classes).to(torch_device)
+    model = (
+        MaskAwareAccelerationCNN(num_classes=num_classes)
+        if probe_variant == "cnn_l"
+        else build_probe_model(probe_variant, num_classes)
+    ).to(torch_device)
 
     # Mixed duplicates every training example once per domain. Class-frequency
     # ratios are unchanged, so weights computed from the one-row-per-segment
@@ -838,6 +863,7 @@ def run_experiment_d(
                 "reference_checkpoint_role": (
                     "split_and_class_mapping_only" if reference is not None else None
                 ),
+                "probe_variant": probe_variant,
                 "evaluation_reference_domain": "mixed_train_and_mixed_validation",
             },
             "repository_root": repository_root,
@@ -868,6 +894,7 @@ def run_experiment_d(
             "best_epoch": best_epoch,
             "best_val_balanced_accuracy": best_val_ba,
             "producer_metadata": data.producer_metadata.to_dict(),
+            "probe_variant": probe_variant,
         },
     )
     artifact_paths["provenance"] = provenance_path
@@ -905,6 +932,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Dataset root; repeat once to combine Action 0 and Action 1 in memory",
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--probe-variant", choices=("cnn_s", "cnn_m", "cnn_l"), default="cnn_l")
     parser.add_argument(
         "--reference-checkpoint",
         type=Path,
@@ -942,6 +970,7 @@ def main() -> None:
     config = experiment_d_config(
         test_source="raw",
         output_dir=args.output_dir,
+        probe_variant=args.probe_variant,
         random_seed=12345,
     )
     config = replace(
@@ -974,6 +1003,7 @@ def main() -> None:
         repository_root=repository_root,
         output_dir=args.output_dir,
         reference_checkpoint=args.reference_checkpoint,
+        probe_variant=args.probe_variant,
         config=config,
         device="cpu" if args.cpu else None,
         allow_new_split=args.allow_new_split,

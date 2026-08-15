@@ -32,6 +32,9 @@ import torch
 from snn.accel_reconstruction_eval import (
     ExperimentConfig,
     MaskAwareAccelerationCNN,
+    ProbeVariant,
+    build_probe_model,
+    validate_probe_variant,
     NormalizationStats,
     build_adam_optimizer,
     build_cohort_identity,
@@ -179,6 +182,7 @@ def run_experiment_a(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     config: ExperimentConfig | None = None,
     device: str | None = None,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentARunResult:
     """Execute Experiment A end-to-end and save standardized artifacts.
 
@@ -188,15 +192,22 @@ def run_experiment_a(
     split/class mapping for cross-condition comparability.
     """
     repository_root = Path(repository_root).expanduser().resolve()
-    output_dir = _resolve_path(output_dir, repository_root)
+    probe_variant = validate_probe_variant(probe_variant)
+    output_dir = _resolve_path(output_dir, repository_root) / probe_variant
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if config is None:
         config = experiment_a_config(
             output_dir=output_dir,
             random_seed=12345,
+            probe_variant=probe_variant,
         )
     else:
+        if config.probe_variant != probe_variant:
+            raise ValueError(
+                "Experiment A config/probe mismatch: "
+                f"config={config.probe_variant!r}, requested={probe_variant!r}"
+            )
         config = replace(config, output_dir=output_dir)
         config.validate()
 
@@ -265,7 +276,11 @@ def run_experiment_a(
     )
 
     num_classes = len(split.class_to_idx)
-    model = MaskAwareAccelerationCNN(num_classes=num_classes).to(torch_device)
+    model = (
+        MaskAwareAccelerationCNN(num_classes=num_classes)
+        if probe_variant == "cnn_l"
+        else build_probe_model(probe_variant, num_classes)
+    ).to(torch_device)
 
     train_labels = split.sample_manifest.loc[
         split.sample_manifest["split"] == "train", "label_idx"
@@ -344,6 +359,7 @@ def run_experiment_a(
             "baseline_role": "authoritative_experiment_a_reference",
             "cohort_identity": cohort_identity.to_dict(),
             "dataset_provenance": dataset_provenance,
+            "probe_variant": probe_variant,
             **cohort_payload,
         },
     )
@@ -426,6 +442,7 @@ def run_experiment_a(
             "best_val_balanced_accuracy": best_val_ba,
             "producer_metadata": data.producer_metadata.to_dict(),
             "producer_metadatas": dataset_provenance["producer_metadatas"],
+            "probe_variant": probe_variant,
         },
     )
     artifact_paths["provenance"] = provenance_path
@@ -464,6 +481,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Dataset root; repeat once to combine Action 0 and Action 1 in memory",
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--probe-variant", choices=("cnn_s", "cnn_m", "cnn_l"), default="cnn_l")
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--patience", type=int, default=10)
@@ -485,6 +503,7 @@ def main() -> None:
 
     config = experiment_a_config(
         output_dir=args.output_dir,
+        probe_variant=args.probe_variant,
         random_seed=args.seed,
     )
     config = replace(
@@ -519,6 +538,7 @@ def main() -> None:
         output_dir=args.output_dir,
         config=config,
         device="cpu" if args.cpu else None,
+        probe_variant=args.probe_variant,
     )
 
     print(f"Output directory: {result.output_dir}")

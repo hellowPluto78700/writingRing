@@ -14,6 +14,7 @@ from .config import (
     DatasetSource,
     ExperimentConfig,
     NormalizationSource,
+    ProbeVariant,
     UserSplitConfig,
     experiment_a_config,
     experiment_b_config,
@@ -109,8 +110,11 @@ from .model import (
     EMBEDDING_DIM,
     INPUT_CHANNELS,
     MaskAwareAccelerationCNN,
+    ProbeVariant,
+    build_probe_model,
     conv1d_output_lengths,
     prefix_mask,
+    validate_probe_variant,
 )
 from .training import (
     build_adam_optimizer,
@@ -129,6 +133,7 @@ __all__ = [
     # Config
     "DatasetSource",
     "NormalizationSource",
+    "ProbeVariant",
     "UserSplitConfig",
     "DataLoaderConfig",
     "CNNTrainingConfig",
@@ -172,6 +177,9 @@ __all__ = [
     "conv1d_output_lengths",
     "prefix_mask",
     "MaskAwareAccelerationCNN",
+    "ProbeVariant",
+    "build_probe_model",
+    "validate_probe_variant",
     "classification_metrics",
     "compute_balanced_class_weights",
     "build_cross_entropy",

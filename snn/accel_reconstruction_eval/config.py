@@ -33,10 +33,12 @@ except ImportError:  # direct-module use in notebooks/tests
 
 DatasetSource = Literal["raw", "reconstruction", "mixed"]
 NormalizationSource = Literal["raw", "reconstruction", "mixed", "checkpoint"]
+ProbeVariant = Literal["cnn_s", "cnn_m", "cnn_l"]
 
 __all__ = [
     "DatasetSource",
     "NormalizationSource",
+    "ProbeVariant",
     "UserSplitConfig",
     "DataLoaderConfig",
     "CNNTrainingConfig",
@@ -163,6 +165,7 @@ class ExperimentConfig:
     val_source: DatasetSource
     test_source: DatasetSource
     normalization_source: NormalizationSource
+    probe_variant: ProbeVariant = "cnn_l"
 
     training_enabled: bool = True
     random_seed: int = 12345
@@ -180,6 +183,8 @@ class ExperimentConfig:
     output_dir: Path | None = None
 
     def validate(self) -> None:
+        if self.probe_variant not in {"cnn_s", "cnn_m", "cnn_l"}:
+            raise ValueError(f"Unknown probe_variant: {self.probe_variant!r}")
         if not self.name.strip():
             raise ValueError("Experiment name must be non-empty")
         if self.random_seed < 0:
@@ -249,6 +254,7 @@ def experiment_a_config(
     *,
     output_dir: str | Path | None = None,
     random_seed: int = 12345,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentConfig:
     """A: raw train -> raw validation -> raw test."""
     config = ExperimentConfig(
@@ -257,6 +263,7 @@ def experiment_a_config(
         val_source="raw",
         test_source="raw",
         normalization_source="raw",
+        probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
         output_dir=None if output_dir is None else Path(output_dir),
@@ -270,6 +277,7 @@ def experiment_b_config(
     baseline_checkpoint: str | Path | None = None,
     output_dir: str | Path | None = None,
     random_seed: int = 12345,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentConfig:
     """B: frozen raw-trained CNN; raw reference train/val; recon test query."""
     config = ExperimentConfig(
@@ -278,6 +286,7 @@ def experiment_b_config(
         val_source="raw",
         test_source="reconstruction",
         normalization_source="checkpoint",
+        probe_variant=probe_variant,
         training_enabled=False,
         random_seed=random_seed,
         baseline_checkpoint=(
@@ -293,6 +302,7 @@ def experiment_c_config(
     *,
     output_dir: str | Path | None = None,
     random_seed: int = 12345,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentConfig:
     """C: reconstruction train -> reconstruction validation/test."""
     config = ExperimentConfig(
@@ -301,6 +311,7 @@ def experiment_c_config(
         val_source="reconstruction",
         test_source="reconstruction",
         normalization_source="reconstruction",
+        probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
         output_dir=None if output_dir is None else Path(output_dir),
@@ -314,6 +325,7 @@ def experiment_d_config(
     test_source: Literal["raw", "reconstruction"] = "raw",
     output_dir: str | Path | None = None,
     random_seed: int = 12345,
+    probe_variant: ProbeVariant = "cnn_l",
 ) -> ExperimentConfig:
     """D2: raw+reconstruction duplicated training/validation.
 
@@ -326,6 +338,7 @@ def experiment_d_config(
         val_source="mixed",
         test_source=test_source,
         normalization_source="mixed",
+        probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
         output_dir=None if output_dir is None else Path(output_dir),

@@ -195,6 +195,9 @@ def build_experiment_checkpoint(
         model_config = model.architecture_config()
     else:
         model_config = {"class_name": type(model).__name__}
+    if not isinstance(model_config, Mapping):
+        raise TypeError("model.architecture_config() must return a mapping")
+    model_config = dict(model_config)
 
     if experiment_config is None:
         config_dict: dict[str, object] = {}
@@ -211,6 +214,9 @@ def build_experiment_checkpoint(
             key: value.detach().cpu() for key, value in model.state_dict().items()
         },
         "model_config": model_config,
+        # Keep a top-level identity so consumers need not interpret the full
+        # architecture descriptor. Legacy checkpoints simply omit this key.
+        "architecture_variant": model_config.get("variant"),
         "class_to_idx": class_to_idx,
         "acceleration_slice": [ACCELERATION_SLICE.start, ACCELERATION_SLICE.stop],
         "acceleration_channel_names": list(ACCELERATION_CHANNEL_NAMES),
@@ -310,6 +316,24 @@ def restore_model_from_checkpoint(
     device: torch.device | None = None,
     freeze: bool = False,
 ) -> nn.Module:
+    checkpoint_config = checkpoint.get("model_config")
+    model_config = model.architecture_config() if hasattr(model, "architecture_config") else {}
+    checkpoint_variant = checkpoint.get("architecture_variant")
+    if checkpoint_variant is None and isinstance(checkpoint_config, Mapping):
+        checkpoint_variant = checkpoint_config.get("variant")
+    model_variant = model_config.get("variant") if isinstance(model_config, Mapping) else None
+    if checkpoint_variant is not None and model_variant is not None:
+        if str(checkpoint_variant).lower() != str(model_variant).lower():
+            raise ValueError(
+                "Checkpoint/model architecture mismatch: "
+                f"checkpoint={checkpoint_variant!r}, model={model_variant!r}"
+            )
+    elif model_variant is not None and model_variant != "cnn_l":
+        # A legacy descriptor has no reliable identity; only the unchanged
+        # baseline is allowed to use it for backward compatibility.
+        raise ValueError(
+            f"Legacy checkpoint has no architecture identity; cannot restore into {model_variant!r}"
+        )
     model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
     if device is not None:
         model.to(device)

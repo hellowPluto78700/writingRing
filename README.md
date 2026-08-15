@@ -124,6 +124,15 @@ they reject action or canonical sample-ID mismatches and never silently
 intersect packages. Legacy A checkpoints remain usable for a single root only;
 regenerate A before a two-root run.
 
+The acceleration-CNN protocol supports three matched feature-extraction
+probes: `cnn_s`, `cnn_m`, and `cnn_l`. A/B/C/D notebooks expose this as the
+single `PROBE_VARIANT` configuration and pass it to the shared runners; model,
+training, and metric implementations are not duplicated in notebooks. The
+final comparison reads standardized per-probe summaries and reports balanced
+accuracy as the primary metric, with macro-F1 as a secondary metric. Probe
+complexity describes the convolutional feature-extraction hierarchy and should
+not be interpreted as a pure parameter-count comparison.
+
 ## Setup
 
 Use the `writingring-viz` Conda environment with Python 3.11:

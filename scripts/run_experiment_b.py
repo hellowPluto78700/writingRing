@@ -41,6 +41,9 @@ import torch
 from snn.accel_reconstruction_eval import (
     ExperimentConfig,
     MaskAwareAccelerationCNN,
+    ProbeVariant,
+    build_probe_model,
+    validate_probe_variant,
     NormalizationStats,
     build_cross_entropy,
     build_split_loaders,
@@ -419,6 +422,7 @@ def run_experiment_b(
     baseline_checkpoint: str | Path = DEFAULT_BASELINE_CHECKPOINT,
     config: ExperimentConfig | None = None,
     device: str | None = None,
+    probe_variant: ProbeVariant | None = None,
 ) -> ExperimentBRunResult:
     """Execute strict Experiment B and save standardized artifacts.
 
@@ -434,6 +438,7 @@ def run_experiment_b(
     kNN K selection, prototype construction, or linear-probe training.
     """
     repository_root = Path(repository_root).expanduser().resolve()
+    requested_variant = None if probe_variant is None else validate_probe_variant(probe_variant)
     output_dir = _resolve_path(output_dir, repository_root)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -443,6 +448,7 @@ def run_experiment_b(
             baseline_checkpoint=baseline_path,
             output_dir=output_dir,
             random_seed=12345,
+            probe_variant=requested_variant or "cnn_l",
         )
     else:
         config = replace(
@@ -477,6 +483,22 @@ def run_experiment_b(
     torch_device = _select_device(config, device)
 
     checkpoint = load_checkpoint(baseline_path, map_location="cpu")
+    checkpoint_variant = checkpoint.get("architecture_variant")
+    if checkpoint_variant is None and isinstance(checkpoint.get("model_config"), MappingABC):
+        checkpoint_variant = checkpoint["model_config"].get("variant")
+    checkpoint_variant = validate_probe_variant(checkpoint_variant or "cnn_l")
+    if config.probe_variant != checkpoint_variant:
+        raise ValueError(
+            "Experiment B config/checkpoint architecture mismatch: "
+            f"config={config.probe_variant!r}, checkpoint={checkpoint_variant!r}"
+        )
+    if requested_variant is not None and requested_variant != checkpoint_variant:
+        raise ValueError(
+            "Experiment B probe/checkpoint mismatch: "
+            f"requested={requested_variant!r}, checkpoint={checkpoint_variant!r}"
+        )
+    output_dir = output_dir / checkpoint_variant
+    output_dir.mkdir(parents=True, exist_ok=True)
     normalization = normalization_from_checkpoint(checkpoint)
 
     data = load_acceleration_data(
@@ -531,7 +553,11 @@ def run_experiment_b(
     )
 
     num_classes = len(split.class_to_idx)
-    model = MaskAwareAccelerationCNN(num_classes=num_classes).to(torch_device)
+    model = (
+        MaskAwareAccelerationCNN(num_classes=num_classes)
+        if checkpoint_variant == "cnn_l"
+        else build_probe_model(checkpoint_variant, num_classes)
+    ).to(torch_device)
     restore_model_from_checkpoint(
         model,
         checkpoint,
@@ -711,7 +737,8 @@ def run_experiment_b(
                 "artifact_type": checkpoint.get("artifact_type"),
                 "schema_version": checkpoint.get("schema_version"),
             },
-            "baseline_model_config": checkpoint.get("model_config"),
+                "baseline_model_config": checkpoint.get("model_config"),
+                "probe_variant": checkpoint_variant,
             "device": torch_device,
             "config": config.to_dict(),
             "normalization": normalization.to_dict(),
@@ -764,6 +791,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_BASELINE_CHECKPOINT,
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--probe-variant", choices=("cnn_s", "cnn_m", "cnn_l"), default=None)
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -778,6 +806,7 @@ def main() -> None:
 
     config = experiment_b_config(
         baseline_checkpoint=args.baseline_checkpoint,
+        probe_variant=args.probe_variant,
         output_dir=args.output_dir,
         random_seed=args.seed,
     )
@@ -804,6 +833,7 @@ def main() -> None:
         baseline_checkpoint=args.baseline_checkpoint,
         config=config,
         device="cpu" if args.cpu else None,
+        probe_variant=args.probe_variant,
     )
 
     print(f"Output directory:       {result.output_dir}")

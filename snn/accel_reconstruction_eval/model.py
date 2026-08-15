@@ -40,7 +40,13 @@ __all__ = [
     "conv1d_output_lengths",
     "prefix_mask",
     "MaskAwareAccelerationCNN",
+    "ProbeVariant",
+    "build_probe_model",
+    "validate_probe_variant",
 ]
+
+ProbeVariant = str
+PROBE_VARIANTS: Final[tuple[str, ...]] = ("cnn_s", "cnn_m", "cnn_l")
 
 
 def conv1d_output_lengths(
@@ -320,6 +326,7 @@ class MaskAwareAccelerationCNN(nn.Module):
     def architecture_config(self) -> dict[str, object]:
         """Return the exact architecture descriptor stored in current checkpoints."""
         return {
+            "variant": "cnn_l",
             "input_channels": 3,
             "blocks": [
                 {
@@ -355,3 +362,95 @@ class MaskAwareAccelerationCNN(nn.Module):
             "embedding_dim": self.embedding_dim,
             "num_classes": self.num_classes,
         }
+
+
+class _MaskedAccelerationProbe(nn.Module):
+    """Small mask-aware convolutional probe with a shared model interface."""
+
+    def __init__(self, num_classes: int, *, variant: str, channels: tuple[int, ...],
+                 kernels: tuple[int, ...], strides: tuple[int, ...]) -> None:
+        super().__init__()
+        if num_classes <= 0:
+            raise ValueError("num_classes must be positive")
+        if not (len(channels) == len(kernels) == len(strides)):
+            raise ValueError("probe layer configuration lengths must match")
+        self.num_classes = int(num_classes)
+        self.variant = variant
+        self.embedding_dim = channels[-1]
+        layers: list[nn.Conv1d] = []
+        in_channels = INPUT_CHANNELS
+        for out_channels, kernel, stride in zip(channels, kernels, strides):
+            layer = nn.Conv1d(in_channels, out_channels, kernel, stride=stride,
+                              padding=kernel // 2, bias=True)
+            layers.append(layer)
+            in_channels = out_channels
+        self.convs = nn.ModuleList(layers)
+        self.classifier = nn.Linear(self.embedding_dim, self.num_classes)
+
+    @staticmethod
+    def _validate_input(x: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
+        if x.ndim != 3 or x.shape[1] != INPUT_CHANNELS:
+            raise ValueError(f"x must have shape (B, {INPUT_CHANNELS}, T), got {tuple(x.shape)}")
+        if valid_mask.shape != (x.shape[0], x.shape[2]):
+            raise ValueError(f"valid_mask must have shape {(x.shape[0], x.shape[2])}, got {tuple(valid_mask.shape)}")
+        mask = valid_mask.to(device=x.device, dtype=torch.bool)
+        if not mask.any(dim=1).all():
+            raise ValueError("Every segment must contain at least one valid time step")
+        return mask
+
+    def encode(self, x: torch.Tensor, *, valid_mask: torch.Tensor) -> torch.Tensor:
+        mask = self._validate_input(x, valid_mask)
+        lengths = mask.sum(dim=1).to(dtype=torch.long)
+        x = x * mask.unsqueeze(1).to(dtype=x.dtype)
+        for conv in self.convs:
+            x = F.relu(conv(x))
+            lengths = conv1d_output_lengths(lengths, kernel_size=conv.kernel_size[0],
+                                            stride=conv.stride[0], padding=conv.padding[0])
+            mask = prefix_mask(lengths, x.shape[-1])
+            x = x * mask.unsqueeze(1).to(dtype=x.dtype)
+        weights = mask.unsqueeze(1).to(dtype=x.dtype)
+        return (x * weights).sum(dim=-1) / weights.sum(dim=-1).clamp_min(1.0)
+
+    def forward(self, x: torch.Tensor, *, valid_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        embedding = self.encode(x, valid_mask=valid_mask)
+        return self.classifier(embedding), embedding
+
+    def architecture_config(self) -> dict[str, object]:
+        return {
+            "variant": self.variant,
+            "input_channels": INPUT_CHANNELS,
+            "blocks": [{"out_channels": c.out_channels, "kernel_size": c.kernel_size[0],
+                        "stride": c.stride[0], "padding": c.padding[0]}
+                       for c in self.convs],
+            "normalization": "none",
+            "activation": "ReLU",
+            "pooling": "valid-length-propagated masked global average pooling",
+            "embedding_dim": self.embedding_dim,
+            "num_classes": self.num_classes,
+        }
+
+
+class AccelerationCNNS(_MaskedAccelerationProbe):
+    def __init__(self, num_classes: int) -> None:
+        super().__init__(num_classes, variant="cnn_s", channels=(8,), kernels=(7,), strides=(1,))
+
+
+class AccelerationCNNM(_MaskedAccelerationProbe):
+    def __init__(self, num_classes: int) -> None:
+        super().__init__(num_classes, variant="cnn_m", channels=(32, 64), kernels=(7, 5), strides=(1, 2))
+
+
+def validate_probe_variant(variant: str) -> str:
+    value = str(variant).lower()
+    if value not in PROBE_VARIANTS:
+        raise ValueError(f"Unknown probe variant {variant!r}; expected one of {PROBE_VARIANTS}")
+    return value
+
+
+def build_probe_model(variant: str, num_classes: int) -> nn.Module:
+    value = validate_probe_variant(variant)
+    if value == "cnn_s":
+        return AccelerationCNNS(num_classes)
+    if value == "cnn_m":
+        return AccelerationCNNM(num_classes)
+    return MaskAwareAccelerationCNN(num_classes)
