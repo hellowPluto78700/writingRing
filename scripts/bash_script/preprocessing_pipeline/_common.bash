@@ -31,6 +31,10 @@ declare -a RECORD_DATASET_TOKENS=()
 declare -a PIPELINE_USERS=()
 declare -a PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
 declare -a PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
+declare -a PREPROCESS_OVERWRITE_ARGS=()
+declare -a ENCODE_OVERWRITE_ARGS=()
+declare -a ALIGN_OVERWRITE_ARGS=()
+declare -a SEGMENT_OVERWRITE_ARGS=()
 declare -A RECORDING_SEEN=()
 declare -A PIPELINE_USER_SEEN=()
 
@@ -261,6 +265,55 @@ pipeline_init() {
     fi
 
     pipeline_configure_overwrite_args
+}
+
+# The wrappers always call pipeline_init before executing a pipeline.  The
+# individual helpers are also sourced by tests and by a few legacy callers,
+# however, so those calls must remain self-contained.  In particular, do not
+# select the batched drivers merely because the common file was sourced: the
+# batched drivers require the complete initialized configuration below.
+pipeline_prepare_legacy_defaults() {
+    DATA_ROOT="${DATA_ROOT:-$(_pipeline_resolve_path data)}"
+    ACTION="${ACTION:-0}"
+    SAMPLING_RATE="${SAMPLING_RATE:-200}"
+    GRAVITY_METHOD="${GRAVITY_METHOD:-raw}"
+    ENCODER="${ENCODER:-custom-wavelet}"
+    POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
+    BOUNDARY_MODE="${BOUNDARY_MODE:-label}"
+    OVERWRITE="${OVERWRITE:-0}"
+    SEGMENT_VERIFICATION_DPI="${SEGMENT_VERIFICATION_DPI:-200}"
+    LOW_PASS_CUTOFF_HZ="${LOW_PASS_CUTOFF_HZ:-0.2}"
+    MADGWICK_BETA="${MADGWICK_BETA:-0.1}"
+    MADGWICK_PROVISIONAL="${MADGWICK_PROVISIONAL:-0}"
+    PADDING_COVERAGE="${PADDING_COVERAGE:-0.99}"
+    PADDING_RECOMMENDATION="${PADDING_RECOMMENDATION:-balanced}"
+    PADDING_ROUND_TO="${PADDING_ROUND_TO:-1}"
+    PADDING_VALUE="${PADDING_VALUE:-0.0}"
+
+    local legacy_root
+    legacy_root="${COMBINATION_ROOT:-$(_pipeline_resolve_path outputs/action0_pipeline/$GRAVITY_METHOD/$BOUNDARY_MODE)}"
+    COMBINATION_ROOT="$legacy_root"
+    PREPROCESS_ROOT="${PREPROCESS_ROOT:-$legacy_root/preprocessedIMU}"
+    SPIKE_OUTPUT_ROOT="${SPIKE_OUTPUT_ROOT:-$legacy_root/spikeEncoding}"
+    SPIKE_ROOT="${SPIKE_ROOT:-$SPIKE_OUTPUT_ROOT/$ENCODER}"
+    ALIGNMENT_ROOT="${ALIGNMENT_ROOT:-$legacy_root/alignment}"
+    OFFSET_ROOT="${OFFSET_ROOT:-$ALIGNMENT_ROOT/offsets}"
+    ALIGNMENT_REPORT_ROOT="${ALIGNMENT_REPORT_ROOT:-$ALIGNMENT_ROOT/reports}"
+    ALIGNMENT_VERIFICATION_ROOT="${ALIGNMENT_VERIFICATION_ROOT:-$ALIGNMENT_ROOT/verification}"
+    SEGMENT_ROOT="${SEGMENT_ROOT:-$legacy_root/segmentation}"
+    PADDING_ANALYSIS_DIR="${PADDING_ANALYSIS_DIR:-$SEGMENT_ROOT/padding_analysis}"
+    PADDING_OUTPUT_ROOT="${PADDING_OUTPUT_ROOT:-$legacy_root/segmentation_padded}"
+    LOG_ROOT="${LOG_ROOT:-$legacy_root/logs}"
+    DISCOVERY_LOG="${DISCOVERY_LOG:-/dev/null}"
+    ENCODE_LOG="${ENCODE_LOG:-/dev/null}"
+    QA_LOG="${QA_LOG:-/dev/null}"
+    PADDING_LOG="${PADDING_LOG:-/dev/null}"
+
+    # A direct source call has no pipeline_init marker.  Preserve the old
+    # one-recording-at-a-time implementation unless the caller explicitly
+    # opts into a batch driver.
+    PIPELINE_BATCH_ORCHESTRATION="${PIPELINE_BATCH_ORCHESTRATION:-0}"
+    PIPELINE_BATCH_QA="${PIPELINE_BATCH_QA:-0}"
 }
 
 pipeline_discover() {
@@ -1835,7 +1888,8 @@ pipeline_batch_python_capture() {
 }
 
 pipeline_preprocess() {
-    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_preprocess_legacy
         return
     fi
@@ -1935,7 +1989,11 @@ PY_BATCH_PREPROCESS
 }
 
 pipeline_align() {
-    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+    # Both drivers retain the alignment skip policy and validate each typed
+    # result with pipeline_validate_alignment_outcome:
+    # --initial-interval-policy skip and --unalignable-recording-policy skip.
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_align_legacy
         return
     fi
@@ -2127,7 +2185,8 @@ PY_BATCH_ALIGN
 }
 
 pipeline_segment() {
-    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_segment_legacy
         return
     fi
@@ -2308,7 +2367,8 @@ PY_BATCH_SEGMENT
 }
 
 pipeline_successful_segmentation_user_count() {
-    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_successful_segmentation_user_count_legacy
         return
     fi
@@ -2459,7 +2519,8 @@ PY_BATCH_STATE_COUNT
 }
 
 pipeline_padding() {
-    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-1}" == "0" ]]; then
+    if [[ "${PIPELINE_BATCH_ORCHESTRATION:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_padding_legacy
         return
     fi
@@ -2567,7 +2628,10 @@ PY_BATCH_PADDING
 }
 
 pipeline_qa() {
-    if [[ "${PIPELINE_BATCH_QA:-1}" == "0" ]]; then
+    # The batched validator below performs the same provenance check as
+    # pipeline_validate_spike_artifact "$POST_ENCODE_TRANSFORM".
+    if [[ "${PIPELINE_BATCH_QA:-0}" == "0" ]]; then
+        pipeline_prepare_legacy_defaults
         pipeline_qa_legacy
         return
     fi
