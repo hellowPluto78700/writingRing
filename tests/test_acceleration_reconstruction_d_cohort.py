@@ -47,8 +47,10 @@ def _checkpoint(
     require_all_users_assigned: bool = True,
     modern: bool = True,
     class_to_idx: dict[str, int] | None = None,
+    random_seed: int = 12345,
 ) -> dict[str, object]:
     checkpoint: dict[str, object] = {
+        "random_seed": random_seed,
         "train_users": list(train),
         "val_users": list(val),
         "test_users": list(test),
@@ -56,6 +58,7 @@ def _checkpoint(
         if class_to_idx is None
         else class_to_idx,
         "experiment_config": {
+            "random_seed": random_seed,
             "split": {
                 "require_all_users_assigned": require_all_users_assigned,
             }
@@ -186,6 +189,7 @@ def test_modern_reference_rejects_excluded_split_and_class_drift() -> None:
     checkpoint = _checkpoint(
         eligible=["user_0", "user_1", "user_2"],
         excluded=["user_3"],
+        random_seed=37,
         train=("user_3",),
     )
     with pytest.raises(ValueError, match="not eligible"):
@@ -404,6 +408,7 @@ def test_modern_run_persists_cohort_identity_and_keeps_mixed_domains(
     checkpoint = _checkpoint(
         eligible=["user_0", "user_1", "user_2"],
         excluded=["user_3"],
+        random_seed=37,
     )
     checkpoint.update(
         {
@@ -431,7 +436,7 @@ def test_modern_run_persists_cohort_identity_and_keeps_mixed_domains(
         repository_root=tmp_path,
         output_dir=tmp_path / "out",
         reference_checkpoint=reference_path,
-        config=_config(),
+        config=None,
         device="cpu",
     )
 
@@ -448,6 +453,7 @@ def test_modern_run_persists_cohort_identity_and_keeps_mixed_domains(
     assert saved["cohort_source"] == "checkpoint"
     assert saved["reference_identity"] == expected_identity
     assert saved["normalization_fitted_on"] == "mixed:train"
+    assert saved["random_seed"] == 37
     assert saved["model_state_dict"]["weight"].item() == 3.0
 
     provenance = json.loads(

@@ -20,6 +20,7 @@ from .config import (
     experiment_b_config,
     experiment_c_config,
     experiment_d_config,
+    validate_reference_seed,
 )
 from .datasets import (
     ACCELERATION_CHANNEL_NAMES,
@@ -79,6 +80,7 @@ from .io import (
     CHECKPOINT_ARTIFACT_TYPE,
     CHECKPOINT_SCHEMA_VERSION,
     build_experiment_checkpoint,
+    checkpoint_random_seed,
     json_safe,
     load_checkpoint,
     load_embedding_bundle,
@@ -142,6 +144,7 @@ __all__ = [
     "experiment_b_config",
     "experiment_c_config",
     "experiment_d_config",
+    "validate_reference_seed",
     # Dataset
     "Action0DatasetError",
     "ACCELERATION_SLICE",
@@ -227,6 +230,7 @@ __all__ = [
     "CHECKPOINT_ARTIFACT_TYPE",
     "json_safe",
     "build_experiment_checkpoint",
+    "checkpoint_random_seed",
     "save_checkpoint",
     "load_checkpoint",
     "restore_model_from_checkpoint",

@@ -87,6 +87,14 @@ all three explicit user lists; setting only some lists is rejected. The
 configuration also requires every discovered user to be assigned and, by
 default, every class to occur in all three splits.
 
+Experiment A's checkpoint is the seed authority for the B/C/D runs. When a
+reference A checkpoint is supplied, those runs inherit its `random_seed`, and
+the top-level experiment seed must also match the evaluation seed. An explicit
+different seed is rejected so that split assignment, loader shuffling, and
+evaluation randomness cannot silently diverge across experiments. The linear
+probe's configured `seed_offset` remains an intentional local offset from this
+shared base seed.
+
 Acceleration mean and standard deviation are calculated only from valid time
 steps of train users. Each sample is normalized with those train statistics,
 then its invalid right-padded positions are reset to zero. `valid_mask` is

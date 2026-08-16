@@ -43,6 +43,7 @@ __all__ = [
     "DataLoaderConfig",
     "CNNTrainingConfig",
     "ExperimentConfig",
+    "validate_reference_seed",
     "experiment_a_config",
     "experiment_b_config",
     "experiment_c_config",
@@ -189,6 +190,12 @@ class ExperimentConfig:
             raise ValueError("Experiment name must be non-empty")
         if self.random_seed < 0:
             raise ValueError("random_seed must be non-negative")
+        if self.evaluation.random_seed != self.random_seed:
+            raise ValueError(
+                "evaluation.random_seed must match random_seed; "
+                f"got evaluation={self.evaluation.random_seed}, "
+                f"experiment={self.random_seed}"
+            )
         if self.normalization_chunk_segments <= 0:
             raise ValueError("normalization_chunk_segments must be positive")
 
@@ -250,6 +257,26 @@ class ExperimentConfig:
         return value
 
 
+def validate_reference_seed(
+    config: ExperimentConfig,
+    expected_seed: int,
+    *,
+    context: str = "reference checkpoint",
+) -> None:
+    """Require an experiment config to use a reference seed exactly."""
+
+    if config.random_seed != expected_seed:
+        raise ValueError(
+            f"{context} random_seed mismatch: "
+            f"config={config.random_seed}, expected={expected_seed}"
+        )
+    if config.evaluation.random_seed != expected_seed:
+        raise ValueError(
+            f"{context} evaluation.random_seed mismatch: "
+            f"config={config.evaluation.random_seed}, expected={expected_seed}"
+        )
+
+
 def experiment_a_config(
     *,
     output_dir: str | Path | None = None,
@@ -266,6 +293,10 @@ def experiment_a_config(
         probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
+        evaluation=replace(
+            RepresentationEvaluationConfig(),
+            random_seed=random_seed,
+        ),
         output_dir=None if output_dir is None else Path(output_dir),
     )
     config.validate()
@@ -289,6 +320,10 @@ def experiment_b_config(
         probe_variant=probe_variant,
         training_enabled=False,
         random_seed=random_seed,
+        evaluation=replace(
+            RepresentationEvaluationConfig(),
+            random_seed=random_seed,
+        ),
         baseline_checkpoint=(
             None if baseline_checkpoint is None else Path(baseline_checkpoint)
         ),
@@ -314,6 +349,10 @@ def experiment_c_config(
         probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
+        evaluation=replace(
+            RepresentationEvaluationConfig(),
+            random_seed=random_seed,
+        ),
         output_dir=None if output_dir is None else Path(output_dir),
     )
     config.validate()
@@ -341,6 +380,10 @@ def experiment_d_config(
         probe_variant=probe_variant,
         training_enabled=True,
         random_seed=random_seed,
+        evaluation=replace(
+            RepresentationEvaluationConfig(),
+            random_seed=random_seed,
+        ),
         output_dir=None if output_dir is None else Path(output_dir),
     )
     config.validate()

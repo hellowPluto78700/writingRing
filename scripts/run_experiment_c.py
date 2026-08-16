@@ -34,6 +34,7 @@ from snn.accel_reconstruction_eval import (
     MaskAwareAccelerationCNN,
     ProbeVariant,
     build_probe_model,
+    checkpoint_random_seed,
     validate_probe_variant,
     NormalizationStats,
     SplitAssignment,
@@ -55,6 +56,7 @@ from snn.accel_reconstruction_eval import (
     save_embedding_bundle,
     save_provenance,
     save_representation_evaluation,
+    validate_reference_seed,
     validate_checkpoint_cohort_identity,
 )
 from snn.accel_reconstruction_eval.datasets import (
@@ -461,10 +463,28 @@ def run_experiment_c(
     output_dir = _resolve_path(output_dir, repository_root) / probe_variant
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    reference_path: Path | None = None
+    reference: dict[str, object] | None = None
+    reference_seed: int | None = None
+    if reference_checkpoint is not None:
+        reference_path = _resolve_path(reference_checkpoint, repository_root)
+        if reference_path.is_file():
+            reference = load_checkpoint(reference_path, map_location="cpu")
+            reference_seed = checkpoint_random_seed(
+                reference,
+                source=reference_path,
+            )
+        elif not allow_new_split:
+            raise FileNotFoundError(
+                "Reference Experiment A checkpoint was not found: "
+                f"{reference_path}. Supply the correct checkpoint or pass "
+                "allow_new_split=True only if a new split is intentional."
+            )
+
     if config is None:
         config = experiment_c_config(
             output_dir=output_dir,
-            random_seed=12345,
+            random_seed=reference_seed if reference_seed is not None else 12345,
             probe_variant=probe_variant,
         )
     else:
@@ -472,9 +492,15 @@ def run_experiment_c(
             raise ValueError(
                 "Experiment C config/probe mismatch: "
                 f"config={config.probe_variant!r}, requested={probe_variant!r}"
-            )
+        )
         config = replace(config, output_dir=output_dir)
         config.validate()
+    if reference_seed is not None:
+        validate_reference_seed(
+            config,
+            reference_seed,
+            context="Experiment A checkpoint",
+        )
 
     if not config.training_enabled:
         raise ValueError("Experiment C requires training_enabled=True")
@@ -492,18 +518,6 @@ def run_experiment_c(
     _set_global_seed(config.random_seed)
     torch_device = _select_device(config, device)
 
-    reference_path: Path | None = None
-    reference: dict[str, object] | None = None
-    if reference_checkpoint is not None:
-        reference_path = _resolve_path(reference_checkpoint, repository_root)
-        if reference_path.is_file():
-            reference = load_checkpoint(reference_path, map_location="cpu")
-        elif not allow_new_split:
-            raise FileNotFoundError(
-                "Reference Experiment A checkpoint was not found: "
-                f"{reference_path}. Supply the correct checkpoint or pass "
-                "allow_new_split=True only if a new split is intentional."
-            )
     if reference is not None:
         reference_variant = reference.get("architecture_variant")
         if reference_variant is None and isinstance(reference.get("model_config"), MappingABC):
@@ -828,6 +842,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow a newly generated user split if the A checkpoint is unavailable.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Override the Experiment A checkpoint seed; a different value is "
+            "rejected. Defaults to the checkpoint seed."
+        ),
+    )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -845,11 +868,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_arg_parser().parse_args()
     repository_root = args.repository_root.expanduser().resolve()
+    reference_path = _resolve_path(args.reference_checkpoint, repository_root)
+    reference_seed: int | None = None
+    if reference_path.is_file():
+        reference = load_checkpoint(reference_path, map_location="cpu")
+        reference_seed = checkpoint_random_seed(
+            reference,
+            source=reference_path,
+        )
+    random_seed = (
+        args.seed
+        if args.seed is not None
+        else reference_seed if reference_seed is not None else 12345
+    )
 
     config = experiment_c_config(
         output_dir=args.output_dir,
         probe_variant=args.probe_variant,
-        random_seed=12345,
+        random_seed=random_seed,
     )
     config = replace(
         config,

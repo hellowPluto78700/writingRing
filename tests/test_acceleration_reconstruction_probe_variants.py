@@ -38,6 +38,7 @@ def test_probe_variants_preserve_masked_shape_and_embedding(variant: str, embedd
 def _checkpoint(path: Path, variant: str) -> Path:
     model = build_probe_model(variant, num_classes=2)
     payload = {
+        "random_seed": 12345,
         "model_state_dict": model.state_dict(),
         "model_config": model.architecture_config(),
         "architecture_variant": variant,
@@ -47,6 +48,7 @@ def _checkpoint(path: Path, variant: str) -> Path:
         "train_users": ["u0"],
         "val_users": ["u1"],
         "test_users": ["u2"],
+        "experiment_config": {"random_seed": 12345},
     }
     torch.save(payload, path)
     return path

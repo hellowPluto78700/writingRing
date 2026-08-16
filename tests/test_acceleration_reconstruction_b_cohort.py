@@ -43,8 +43,10 @@ def _checkpoint(
     require_all_users_assigned: bool = True,
     modern: bool = True,
     class_to_idx: dict[str, int] | None = None,
+    random_seed: int = 12345,
 ) -> dict[str, object]:
     checkpoint: dict[str, object] = {
+        "random_seed": random_seed,
         "train_users": list(train),
         "val_users": list(val),
         "test_users": list(test),
@@ -52,6 +54,7 @@ def _checkpoint(
         if class_to_idx is None
         else class_to_idx,
         "experiment_config": {
+            "random_seed": random_seed,
             "split": {
                 "require_all_users_assigned": require_all_users_assigned,
             }
@@ -320,6 +323,7 @@ def test_malformed_checkpoint_cohort_fields_are_rejected(
         train=("user_0",),
         val=("user_1",),
         test=("user_2",),
+        random_seed=37,
     )
     if message.startswith("both"):
         checkpoint.pop("excluded_users")
@@ -343,6 +347,7 @@ def test_b_provenance_records_effective_checkpoint_cohort_and_identity(
         train=("user_0",),
         val=("user_1",),
         test=("user_2",),
+        random_seed=37,
     )
     checkpoint.update(
         {
@@ -438,7 +443,7 @@ def test_b_provenance_records_effective_checkpoint_cohort_and_identity(
         repository_root=tmp_path,
         output_dir=tmp_path / "out",
         baseline_checkpoint=baseline,
-        config=_b_config(),
+        config=None,
         device="cpu",
     )
 
@@ -450,6 +455,8 @@ def test_b_provenance_records_effective_checkpoint_cohort_and_identity(
     assert provenance["train_users"] == ["user_0"]
     assert provenance["val_users"] == ["user_1"]
     assert provenance["test_users"] == ["user_2"]
+    assert provenance["config"]["random_seed"] == 37
+    assert provenance["config"]["random_seed"] == 37
     assert provenance["class_to_idx"] == {"a": 0, "b": 1}
     assert provenance["cohort_source"] == "checkpoint"
     assert provenance["baseline_identity"]["sha256"] == hashlib.sha256(

@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 from dataclasses import asdict, is_dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -54,6 +55,7 @@ __all__ = [
     "CHECKPOINT_ARTIFACT_TYPE",
     "json_safe",
     "build_experiment_checkpoint",
+    "checkpoint_random_seed",
     "save_checkpoint",
     "load_checkpoint",
     "restore_model_from_checkpoint",
@@ -89,6 +91,71 @@ def json_safe(value: object) -> object:
     if isinstance(value, (list, tuple, set)):
         return [json_safe(item) for item in value]
     return value
+
+
+def checkpoint_random_seed(
+    checkpoint: Mapping[str, object],
+    *,
+    source: str | Path | None = None,
+) -> int:
+    """Return the canonical random seed recorded by an A checkpoint.
+
+    New checkpoints publish the seed at the top level.  The nested experiment
+    configuration is accepted as a compatibility fallback for checkpoints
+    written before the top-level field was added.  If both locations exist,
+    they must agree so provenance cannot silently diverge.
+    """
+
+    source_label = "checkpoint" if source is None else str(source)
+
+    def normalize(value: object, field_name: str) -> int:
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise ValueError(
+                f"{source_label} {field_name} must be a non-negative integer"
+            )
+        value = int(value)
+        if value < 0:
+            raise ValueError(
+                f"{source_label} {field_name} must be non-negative"
+            )
+        return value
+
+    top_level_seed = (
+        normalize(checkpoint["random_seed"], "random_seed")
+        if "random_seed" in checkpoint
+        else None
+    )
+    nested = checkpoint.get("experiment_config")
+    nested_seed: int | None = None
+    if nested is not None:
+        if not isinstance(nested, Mapping):
+            raise ValueError(
+                f"{source_label} experiment_config must be a mapping"
+            )
+        if "random_seed" in nested:
+            nested_seed = normalize(
+                nested["random_seed"],
+                "experiment_config.random_seed",
+            )
+
+    if (
+        top_level_seed is not None
+        and nested_seed is not None
+        and top_level_seed != nested_seed
+    ):
+        raise ValueError(
+            f"{source_label} random_seed conflicts with "
+            "experiment_config.random_seed: "
+            f"{top_level_seed} != {nested_seed}"
+        )
+    if top_level_seed is not None:
+        return top_level_seed
+    if nested_seed is not None:
+        return nested_seed
+    raise ValueError(
+        f"{source_label} is missing random_seed; regenerate Experiment A "
+        "with a seed-bearing checkpoint"
+    )
 
 
 def _atomic_write_text(path: Path, text: str) -> None:

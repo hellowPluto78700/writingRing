@@ -43,6 +43,7 @@ from snn.accel_reconstruction_eval import (
     MaskAwareAccelerationCNN,
     ProbeVariant,
     build_probe_model,
+    checkpoint_random_seed,
     validate_probe_variant,
     NormalizationStats,
     build_cross_entropy,
@@ -63,6 +64,7 @@ from snn.accel_reconstruction_eval import (
     save_paired_preservation,
     save_provenance,
     save_representation_evaluation,
+    validate_reference_seed,
     validate_checkpoint_cohort_identity,
 )
 from snn.accel_reconstruction_eval.datasets import (
@@ -443,11 +445,20 @@ def run_experiment_b(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     baseline_path = _resolve_path(baseline_checkpoint, repository_root)
+    if not baseline_path.is_file():
+        raise FileNotFoundError(
+            f"Experiment A checkpoint was not found: {baseline_path}"
+        )
+    checkpoint = load_checkpoint(baseline_path, map_location="cpu")
+    checkpoint_seed = checkpoint_random_seed(
+        checkpoint,
+        source=baseline_path,
+    )
     if config is None:
         config = experiment_b_config(
             baseline_checkpoint=baseline_path,
             output_dir=output_dir,
-            random_seed=12345,
+            random_seed=checkpoint_seed,
             probe_variant=requested_variant or "cnn_l",
         )
     else:
@@ -457,13 +468,14 @@ def run_experiment_b(
             output_dir=output_dir,
         )
         config.validate()
+    validate_reference_seed(
+        config,
+        checkpoint_seed,
+        context="Experiment A checkpoint",
+    )
 
     _validate_local_cohort_config(config)
 
-    if not baseline_path.is_file():
-        raise FileNotFoundError(
-            f"Experiment A checkpoint was not found: {baseline_path}"
-        )
     baseline_sha256 = _sha256_file(baseline_path)
 
     if config.training_enabled:
@@ -482,7 +494,6 @@ def run_experiment_b(
     _set_global_seed(config.random_seed)
     torch_device = _select_device(config, device)
 
-    checkpoint = load_checkpoint(baseline_path, map_location="cpu")
     checkpoint_variant = checkpoint.get("architecture_variant")
     if checkpoint_variant is None and isinstance(checkpoint.get("model_config"), MappingABC):
         checkpoint_variant = checkpoint["model_config"].get("variant")
@@ -792,7 +803,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--probe-variant", choices=("cnn_s", "cnn_m", "cnn_l"), default=None)
-    parser.add_argument("--seed", type=int, default=12345)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Override the Experiment A checkpoint seed; a different value is "
+            "rejected. Defaults to the checkpoint seed."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--cpu", action="store_true")
@@ -803,12 +822,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _build_arg_parser().parse_args()
     repository_root = args.repository_root.expanduser().resolve()
+    baseline_path = _resolve_path(args.baseline_checkpoint, repository_root)
+    baseline_checkpoint = load_checkpoint(baseline_path, map_location="cpu")
+    checkpoint_seed = checkpoint_random_seed(
+        baseline_checkpoint,
+        source=baseline_path,
+    )
+    random_seed = checkpoint_seed if args.seed is None else args.seed
 
     config = experiment_b_config(
         baseline_checkpoint=args.baseline_checkpoint,
         probe_variant=args.probe_variant,
         output_dir=args.output_dir,
-        random_seed=args.seed,
+        random_seed=random_seed,
     )
     config = replace(
         config,
@@ -820,7 +846,7 @@ def main() -> None:
         ),
         evaluation=replace(
             config.evaluation,
-            random_seed=args.seed,
+            random_seed=random_seed,
             verbose=not args.quiet,
         ),
     )
