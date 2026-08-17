@@ -15,15 +15,15 @@
     "evaluation_reference_domain": "mixed_train_and_mixed_validation"
   },
   "repository_root": "/home/ted/project/writingring-viz",
-  "dataset_root_argument": "[PosixPath('outputs/action0_rectified/low-pass/aligned-board-events'), PosixPath('outputs/action1_rectified/low-pass/aligned-board-events')]",
-  "resolved_padded_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+  "dataset_root_argument": "[PosixPath('outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events'), PosixPath('outputs/action1_rectified_default_wavelets_absrectify/low-pass/aligned-board-events')]",
+  "resolved_padded_root": "/home/ted/project/writingring-viz/outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events/segmentation_padded",
   "dataset_root_arguments": [
-    "outputs/action0_rectified/low-pass/aligned-board-events",
-    "outputs/action1_rectified/low-pass/aligned-board-events"
+    "outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events",
+    "outputs/action1_rectified_default_wavelets_absrectify/low-pass/aligned-board-events"
   ],
   "resolved_padded_roots": [
-    "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
-    "/home/ted/project/writingring-viz/outputs/action1_rectified/low-pass/aligned-board-events/segmentation_padded"
+    "/home/ted/project/writingring-viz/outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events/segmentation_padded",
+    "/home/ted/project/writingring-viz/outputs/action1_rectified_default_wavelets_absrectify/low-pass/aligned-board-events/segmentation_padded"
   ],
   "selected_actions": [
     "0",
@@ -42,7 +42,7 @@
   "split_reference_only": true,
   "reference_identity": {
     "checkpoint": "/home/ted/project/writingring-viz/notebooks/artifacts/acceleration_cnn_representation/cnn_m/best_acceleration_cnn.pt",
-    "sha256": "152726fa74a7ec3dc8aeb02510a4c57e3397c9c93f27ab5780c0fe1ece91a281",
+    "sha256": "4f89dc0ccb8ace257d2cdea1acf1699e00cfa38fbda4718f705cc201186b4110",
     "artifact_type": "acceleration_cnn_experiment_checkpoint",
     "schema_version": 2
   },
@@ -55,7 +55,7 @@
     "normalization_source": "mixed",
     "probe_variant": "cnn_m",
     "training_enabled": true,
-    "random_seed": 12345,
+    "random_seed": 12348,
     "use_gpu": true,
     "normalization_chunk_segments": 256,
     "split": {
@@ -114,7 +114,7 @@
       "kmeans_n_init": 10,
       "kmeans_max_iter": 100,
       "silhouette_max_samples": 3000,
-      "random_seed": 12345,
+      "random_seed": 12348,
       "verbose": true
     },
     "baseline_checkpoint": null,
@@ -122,16 +122,16 @@
   },
   "normalization": {
     "mean": [
-      -0.47528279582157557,
-      0.1337774065594869,
-      0.12230760966843944
+      -0.15863690171608497,
+      0.2089103519005347,
+      0.15169799349577215
     ],
     "std": [
-      1.6910488989571448,
-      1.5723823284763303,
-      1.4235735387709985
+      1.6094569983917417,
+      1.367000567140928,
+      1.3257235764630155
     ],
-    "valid_time_points": 404716,
+    "valid_time_points": 385232,
     "fitted_on": "mixed:train"
   },
   "excluded_users": [],
@@ -160,28 +160,28 @@
   "train_users": [
     "user_0",
     "user_1",
-    "user_3",
+    "user_2",
     "user_4",
     "user_5",
     "user_6",
     "user_7",
-    "user_9",
     "user_10",
     "user_11",
-    "user_12",
-    "user_15",
-    "user_18",
-    "user_19"
-  ],
-  "val_users": [
-    "user_8",
+    "user_13",
     "user_14",
+    "user_18",
+    "user_19",
     "user_20"
   ],
-  "test_users": [
-    "user_2",
-    "user_13",
+  "val_users": [
+    "user_3",
+    "user_15",
     "user_16"
+  ],
+  "test_users": [
+    "user_8",
+    "user_9",
+    "user_12"
   ],
   "class_to_idx": {
     "A": 0,
@@ -198,8 +198,8 @@
     "X": 11
   },
   "cohort_source": "checkpoint",
-  "best_epoch": 116,
-  "best_val_balanced_accuracy": 0.4037608225108225,
+  "best_epoch": 138,
+  "best_val_balanced_accuracy": 0.25516959891959895,
   "producer_metadata": {
     "input_kind": "spike-imu",
     "feature_schema": "signed_wavelet_events_plus_imu_v1",
@@ -207,30 +207,130 @@
     "target_length": 600,
     "sampling_rate_hz": 200.0,
     "padding_side": "right",
+    "spike_encoder": {
+      "schema": "custom_wavelet_encoder_spec_v1",
+      "name": "custom-wavelet",
+      "wavelet_name": "acceleration",
+      "sampling_rate_hz": 200.0,
+      "frequency_band_count": 5,
+      "frequencies_hz": [
+        0.5,
+        1.0,
+        2.0,
+        4.0,
+        8.0
+      ],
+      "wavelet_widths_samples": [
+        400,
+        200,
+        100,
+        50,
+        25
+      ],
+      "prony_denominator_order": 2,
+      "prony_numerator_order": 2,
+      "max_filter_time_s": 0.3,
+      "max_filter_time_samples": 61,
+      "max_filter_frequency_decades": 0.5,
+      "max_filter_frequency_bands": 1,
+      "boundary_padding_mode": "reflect",
+      "event_index_semantics": "occurrence",
+      "channel_order": "axis_major_frequency_minor",
+      "event_channel_names": [
+        "event_x_0",
+        "event_x_1",
+        "event_x_2",
+        "event_x_3",
+        "event_x_4",
+        "event_y_0",
+        "event_y_1",
+        "event_y_2",
+        "event_y_3",
+        "event_y_4",
+        "event_z_0",
+        "event_z_1",
+        "event_z_2",
+        "event_z_3",
+        "event_z_4"
+      ],
+      "post_encode_transform": "AbsRectify",
+      "event_representation": "abs_rectified_sparse_wavelet_extrema"
+    },
+    "spike_encoder_spec_sha256": "e4e97cf8d8949c81841ea8fff16b4867037872b6cd42c6ba07913dd005b13b5f",
     "raw": {
-      "input_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation",
-      "output_root": "/home/ted/project/writingring-viz/outputs/action0_rectified/low-pass/aligned-board-events/segmentation_padded",
+      "input_root": "/home/ted/project/writingring-viz/outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events/segmentation",
+      "output_root": "/home/ted/project/writingring-viz/outputs/action0_rectified_default_wavelets_absrectify/low-pass/aligned-board-events/segmentation_padded",
       "target_length": 600,
       "sampling_rate_hz": 200.0,
       "channel_count": 21,
       "input_kind": "spike-imu",
       "feature_schema": "signed_wavelet_events_plus_imu_v1",
+      "spike_encoder": {
+        "schema": "custom_wavelet_encoder_spec_v1",
+        "name": "custom-wavelet",
+        "wavelet_name": "acceleration",
+        "sampling_rate_hz": 200.0,
+        "frequency_band_count": 5,
+        "frequencies_hz": [
+          0.5,
+          1.0,
+          2.0,
+          4.0,
+          8.0
+        ],
+        "wavelet_widths_samples": [
+          400,
+          200,
+          100,
+          50,
+          25
+        ],
+        "prony_denominator_order": 2,
+        "prony_numerator_order": 2,
+        "max_filter_time_s": 0.3,
+        "max_filter_time_samples": 61,
+        "max_filter_frequency_decades": 0.5,
+        "max_filter_frequency_bands": 1,
+        "boundary_padding_mode": "reflect",
+        "event_index_semantics": "occurrence",
+        "channel_order": "axis_major_frequency_minor",
+        "event_channel_names": [
+          "event_x_0",
+          "event_x_1",
+          "event_x_2",
+          "event_x_3",
+          "event_x_4",
+          "event_y_0",
+          "event_y_1",
+          "event_y_2",
+          "event_y_3",
+          "event_y_4",
+          "event_z_0",
+          "event_z_1",
+          "event_z_2",
+          "event_z_3",
+          "event_z_4"
+        ],
+        "post_encode_transform": "AbsRectify",
+        "event_representation": "abs_rectified_sparse_wavelet_extrema"
+      },
+      "spike_encoder_spec_sha256": "e4e97cf8d8949c81841ea8fff16b4867037872b6cd42c6ba07913dd005b13b5f",
       "channel_names": [
-        "event_x_0p5_hz",
-        "event_x_1_hz",
-        "event_x_2_hz",
-        "event_x_4_hz",
-        "event_x_8_hz",
-        "event_y_0p5_hz",
-        "event_y_1_hz",
-        "event_y_2_hz",
-        "event_y_4_hz",
-        "event_y_8_hz",
-        "event_z_0p5_hz",
-        "event_z_1_hz",
-        "event_z_2_hz",
-        "event_z_4_hz",
-        "event_z_8_hz",
+        "event_x_0",
+        "event_x_1",
+        "event_x_2",
+        "event_x_3",
+        "event_x_4",
+        "event_y_0",
+        "event_y_1",
+        "event_y_2",
+        "event_y_3",
+        "event_y_4",
+        "event_z_0",
+        "event_z_1",
+        "event_z_2",
+        "event_z_3",
+        "event_z_4",
         "acceleration_x_m_s2",
         "acceleration_y_m_s2",
         "acceleration_z_m_s2",
