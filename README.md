@@ -186,6 +186,7 @@ scripts/reconstruct_padded_spike_accel.py
 scripts/analyze_segment_lengths.py
 scripts/pad_segmented_imu.py
 scripts/bash_script/action0_pipeline/*.sh
+scripts/bash_script/preprocessing_pipeline/rebuild_two_action_frequency_rectify_variant.bash
 scripts/plot_board_segment_trajectories.py
 scripts/plot_board_trajectory_window.py
 scripts/bash_script/Encoder_Evaluation_related/branch_board_trajectory_plot.bash
@@ -205,6 +206,36 @@ repository root with:
 ```bash
 bash scripts/bash_script/action0_pipeline/04_lowpass_aligned_board.sh
 ```
+
+To rebuild both Action 0 and Action 1 from completed pipeline roots while
+testing a new five-band Custom Wavelet frequency sequence and/or a different
+post-encode transform, use:
+
+```bash
+ACTION0_SOURCE_COMBINATION_ROOT="$PWD/outputs/action0_rectified/low-pass/aligned-board-events" \
+ACTION1_SOURCE_COMBINATION_ROOT="$PWD/outputs/action1_rectified/low-pass/aligned-board-events" \
+ENCODER_FREQUENCIES_HZ="1 2 3 4 5" \
+POST_ENCODE_TRANSFORM="none" \
+bash scripts/bash_script/preprocessing_pipeline/rebuild_two_action_frequency_rectify_variant.bash
+```
+
+`ENCODER_FREQUENCIES_HZ` must contain exactly five positive values; the script
+sorts them numerically before encoding. `POST_ENCODE_TRANSFORM` accepts only
+`none` or `AbsRectify` and may differ from the source variant. By default, the
+destination roots are named under
+`outputs/reencoded_wavelet_variants/` as
+`action0_<transform>_wavelets_<frequencies>/` and
+`action1_<transform>_wavelets_<frequencies>/`, followed by the pipeline stage
+and boundary mode. Existing destination roots are replaced by default;
+set `OVERWRITE_DEST=0` to fail instead.
+
+The rebuild reuses the source `preprocessedIMU` files, requires identical
+recording sets and timestamp provenance, and requires SpikeIMU channels
+`15:21` to remain exactly equal. For `aligned-board-events`, alignment
+provenance is rebound and segmentation is regenerated from the new SpikeIMU;
+padding, when present and enabled, is rebuilt using each source dataset's
+target length. A `wavelet_variant_validation.json` report is written to each
+destination root.
 
 Board trajectory visualization is available at two levels. To plot one PNG
 for every exported Board-assisted segment, use the published segmentation
