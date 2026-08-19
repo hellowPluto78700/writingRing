@@ -4,9 +4,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATA_ROOT="data"
-ACTION=1
-POST_ENCODE_TRANSFORM="AbsRectify"  #none, AbsRectify
-OUTPUT_BASE="outputs/action1_rectified_default_wavelets_absrectify"
+ACTION=0
+POST_ENCODE_TRANSFORM="none"  #none, AbsRectify
+OUTPUT_BASE="outputs/action0_default_wavelets"
 PIPELINE_MODE="overwrite"  # "continue" or "overwrite"
 # Five Custom Wavelet bands. Leave unset to use custom_wavelet.json defaults.
 #ENCODER_FREQUENCIES_HZ="1 2 4 8 16"
