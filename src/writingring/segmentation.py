@@ -541,6 +541,9 @@ def _manifest_row(
         "sample_count": sample.sample_count,
         "input_kind": feature_input.input_kind,
         "feature_schema": feature_input.feature_schema,
+        "event_representation": feature_input.event_representation,
+        "event_feature_schema": feature_input.event_feature_schema,
+        "event_channel_count": feature_input.event_channel_count,
         "channel_count": feature_input.channel_count,
         "channel_names": list(feature_input.channel_names),
         "units": list(feature_input.units),
@@ -623,6 +626,9 @@ def _summary(
     if any(
         feature.input_kind != feature_input_kind
         or feature.feature_schema != first_feature.feature_schema
+        or feature.event_representation != first_feature.event_representation
+        or feature.event_feature_schema != first_feature.event_feature_schema
+        or feature.event_channel_count != first_feature.event_channel_count
         or feature.channel_names != first_feature.channel_names
         or feature.units != first_feature.units
         for feature in feature_inputs
@@ -647,6 +653,9 @@ def _summary(
         },
         "input_kind": feature_input_kind,
         "feature_schema": first_feature.feature_schema,
+        "event_representation": first_feature.event_representation,
+        "event_feature_schema": first_feature.event_feature_schema,
+        "event_channel_count": first_feature.event_channel_count,
         "spike_encoder": None if encoder_spec is None else dict(encoder_spec),
         "spike_encoder_spec_sha256": encoder_hash,
         "encoder_spec": None if encoder_spec is None else dict(encoder_spec),
@@ -675,13 +684,25 @@ def _summary(
         "transient_channel_indices": list(first_feature.transient_channel_indices),
         "transient_channel_names": list(first_feature.transient_channel_names),
         "event_channel_slice": (
-            [0, 15] if feature_input_kind == "spike-imu" else None
+            [0, first_feature.transient_channel_indices[0]]
+            if feature_input_kind == "spike-imu"
+            else None
         ),
         "acceleration_m_s2_channel_slice": (
-            [15, 18] if feature_input_kind == "spike-imu" else [3, 6]
+            [
+                first_feature.transient_channel_indices[0],
+                first_feature.transient_channel_indices[0] + 3,
+            ]
+            if feature_input_kind == "spike-imu"
+            else [3, 6]
         ),
         "gyroscope_channel_slice": (
-            [18, 21] if feature_input_kind == "spike-imu" else [6, 9]
+            [
+                first_feature.transient_channel_indices[0] + 3,
+                first_feature.transient_channel_indices[0] + 6,
+            ]
+            if feature_input_kind == "spike-imu"
+            else [6, 9]
         ),
         "timestamps": {
             "unit": "microseconds",

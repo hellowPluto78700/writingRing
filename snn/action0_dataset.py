@@ -19,6 +19,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from writingring.recording_features import (
+    SPIKE_IMU_TRAILING_CHANNEL_COUNT,
+)
 from writingring.segment_padding import SPIKE_IMU_FEATURE_SCHEMA
 
 
@@ -59,6 +62,10 @@ class PaddingDatasetMetadata:
     target_length: int
     sampling_rate_hz: float
     padding_side: str
+    event_representation: str | None = None
+    event_feature_schema: str | None = None
+    event_channel_count: int | None = None
+    spike_encoder_spec_sha256: str | None = None
     processed_user_action_count: int | None = None
     source_segment_count: int | None = None
     segment_count: int | None = None
@@ -76,7 +83,6 @@ class PaddingDatasetMetadata:
             for name in _DIAGNOSTIC_COUNT_FIELDS
             if (value := getattr(self, name)) is not None
         }
-
 
 @dataclass(frozen=True, slots=True)
 class _PaddedPackage:
@@ -144,12 +150,30 @@ def load_padding_dataset_metadata(segmentation_root: Path) -> PaddingDatasetMeta
     input_kind = _require_exact_string(
         payload, "input_kind", "spike-imu", summary_path
     )
-    feature_schema = _require_exact_string(
-        payload, "feature_schema", SPIKE_IMU_FEATURE_SCHEMA, summary_path
-    )
+    feature_schema = _require_nonempty_string(payload, "feature_schema", summary_path)
     channel_count = _require_exact_int(
-        payload, "channel_count", summary_path, expected=SPIKE_IMU_CHANNEL_COUNT
+        payload,
+        "channel_count",
+        summary_path,
     )
+    if channel_count <= SPIKE_IMU_TRAILING_CHANNEL_COUNT:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires channel_count to exceed "
+            f"{SPIKE_IMU_TRAILING_CHANNEL_COUNT}; got {channel_count}"
+        )
+    event_representation = _optional_nonempty_string(payload, "event_representation")
+    event_feature_schema = _optional_nonempty_string(payload, "event_feature_schema")
+    event_channel_count = payload.get("event_channel_count")
+    if event_channel_count is not None and (
+        not isinstance(event_channel_count, int)
+        or isinstance(event_channel_count, bool)
+        or event_channel_count != channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT
+    ):
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires event_channel_count="
+            f"{channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT}; got {event_channel_count!r}"
+        )
+    spike_encoder_spec_sha256 = _optional_sha256(payload, "spike_encoder_spec_sha256")
     target_length = _require_positive_int(payload, "target_length", summary_path)
     sampling_rate_hz = _require_positive_finite_float(
         payload, "sampling_rate_hz", summary_path
@@ -166,6 +190,10 @@ def load_padding_dataset_metadata(segmentation_root: Path) -> PaddingDatasetMeta
         input_kind=input_kind,
         feature_schema=feature_schema,
         channel_count=channel_count,
+        event_representation=event_representation,
+        event_feature_schema=event_feature_schema,
+        event_channel_count=event_channel_count,
+        spike_encoder_spec_sha256=spike_encoder_spec_sha256,
         target_length=target_length,
         sampling_rate_hz=sampling_rate_hz,
         padding_side=padding_side,
@@ -188,18 +216,58 @@ def _require_exact_string(
     return value
 
 
+def _require_nonempty_string(
+    payload: Mapping[str, object],
+    name: str,
+    summary_path: Path,
+) -> str:
+    value = payload.get(name)
+    if not isinstance(value, str) or not value:
+        raise Action0DatasetError(
+            f"padded dataset summary {summary_path} requires non-empty {name}; got {value!r}"
+        )
+    return value
+
+
 def _require_exact_int(
     payload: Mapping[str, object],
     name: str,
     summary_path: Path,
     *,
-    expected: int,
+    expected: int | None = None,
 ) -> int:
     value = payload.get(name)
-    if not isinstance(value, int) or isinstance(value, bool) or value != expected:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or (expected is not None and value != expected)
+    ):
+        requirement = "an integer" if expected is None else repr(expected)
         raise Action0DatasetError(
-            f"padded dataset summary {summary_path} requires {name}={expected}; "
+            f"padded dataset summary {summary_path} requires {name}={requirement}; "
             f"got {value!r}"
+        )
+    return value
+
+
+def _optional_nonempty_string(payload: Mapping[str, object], name: str) -> str | None:
+    value = payload.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise Action0DatasetError(
+            f"padded dataset summary requires non-empty {name}; got {value!r}"
+        )
+    return value
+
+
+def _optional_sha256(payload: Mapping[str, object], name: str) -> str | None:
+    value = payload.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) != 64:
+        raise Action0DatasetError(
+            f"padded dataset summary requires a SHA-256 {name}; got {value!r}"
         )
     return value
 
@@ -275,7 +343,7 @@ def discover_class_to_idx(segmentation_root: Path) -> dict[str, int]:
 class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
     """One fixed-length Action0 segment per item.
 
-    Each item is ``(x, label, valid_mask)`` with shapes ``(T, 15)``, ``()``,
+    Each item is ``(x, label, valid_mask)`` with shapes ``(T, C_event)``, ``()``,
     and ``(T,)`` respectively.  The source packages are memory mapped but the
     returned tensors are writable copies, which keeps DataLoader workers and
     autograd isolated from the NPY files.
@@ -290,6 +358,9 @@ class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
         self.segmentation_root = Path(segmentation_root)
         self.users = _validate_users(users)
         self.class_to_idx = _validate_class_mapping(class_to_idx)
+        self.producer_metadata = load_padding_dataset_metadata(self.segmentation_root)
+        _validate_unsigned_event_contract(self.producer_metadata)
+        self._input_channel_count = int(self.producer_metadata.event_channel_count)
 
         package_paths = _discover_package_paths(self.segmentation_root, users=self.users)
         packages: list[_PaddedPackage] = []
@@ -302,6 +373,7 @@ class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
                 stem=stem,
                 directory=directory,
                 class_to_idx=self.class_to_idx,
+                expected_channel_count=self.producer_metadata.channel_count,
             )
             current_length = int(package.padded_spike_imu.shape[1])
             if padded_length is None:
@@ -331,6 +403,12 @@ class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
         return self._padded_length
 
     @property
+    def input_channel_count(self) -> int:
+        """Return the full event-channel count supplied to the SNN."""
+
+        return self._input_channel_count
+
+    @property
     def class_distribution(self) -> dict[str, int]:
         """Return this split's original-label frequencies in stable order."""
 
@@ -354,14 +432,19 @@ class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
         package_index, segment_index = self._index[index]
         package = self._packages[package_index]
         features = np.array(
-            package.padded_spike_imu[segment_index, :, :INPUT_CHANNEL_COUNT],
+            package.padded_spike_imu[segment_index, :, : self._input_channel_count],
             dtype=np.float32,
             copy=True,
         )
-        if features.shape != (self._padded_length, INPUT_CHANNEL_COUNT):
+        if features.shape != (self._padded_length, self._input_channel_count):
             raise AssertionError(
                 "validated padded package changed shape after initialization: "
-                f"expected {(self._padded_length, INPUT_CHANNEL_COUNT)}, got {features.shape}"
+                f"expected {(self._padded_length, self._input_channel_count)}, got {features.shape}"
+            )
+        if float(np.min(features)) < 0.0:
+            raise Action0DatasetError(
+                "padded SpikeIMU event channels must be nonnegative for "
+                "event_representation='unsigned'"
             )
         valid_mask = np.array(package.valid_mask[segment_index], dtype=np.bool_, copy=True)
         label = int(package.label_indices[segment_index])
@@ -369,6 +452,28 @@ class Action0SegmentDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tens
             torch.from_numpy(features),
             torch.tensor(label, dtype=torch.long),
             torch.from_numpy(valid_mask),
+        )
+
+
+def _validate_unsigned_event_contract(metadata: PaddingDatasetMetadata) -> None:
+    if metadata.event_representation != "unsigned":
+        raise Action0DatasetError(
+            "Action0 SNN requires event_representation='unsigned'; "
+            f"got {metadata.event_representation!r}"
+        )
+    if not metadata.event_feature_schema:
+        raise Action0DatasetError(
+            "Action0 SNN requires a non-empty event_feature_schema"
+        )
+    if metadata.event_channel_count != (
+        metadata.channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT
+    ):
+        raise Action0DatasetError(
+            "Action0 SNN requires event_channel_count to equal channel_count minus 6"
+        )
+    if not metadata.spike_encoder_spec_sha256:
+        raise Action0DatasetError(
+            "Action0 SNN requires spike_encoder_spec_sha256"
         )
 
 
@@ -457,6 +562,7 @@ def _load_and_validate_package(
     stem: str,
     directory: Path,
     class_to_idx: Mapping[str, int],
+    expected_channel_count: int,
 ) -> _PaddedPackage:
     padded_path = directory / f"{stem}_paddedSpikeIMU.npy"
     labels_path = directory / f"{stem}_labels.npy"
@@ -468,9 +574,12 @@ def _load_and_validate_package(
     valid_mask = _load_npy(mask_path, description="valid mask", mmap=True)
     valid_lengths = _load_npy(lengths_path, description="valid lengths")
 
-    if padded_spike_imu.ndim != 3 or padded_spike_imu.shape[2] != SPIKE_IMU_CHANNEL_COUNT:
+    if (
+        padded_spike_imu.ndim != 3
+        or padded_spike_imu.shape[2] != expected_channel_count
+    ):
         raise Action0DatasetError(
-            f"padded SpikeIMU must have shape (segment_count, T_pad, {SPIKE_IMU_CHANNEL_COUNT}): "
+            f"padded SpikeIMU must have shape (segment_count, T_pad, {expected_channel_count}): "
             f"{padded_path} has shape {tuple(padded_spike_imu.shape)}"
         )
     if padded_spike_imu.shape[0] == 0 or padded_spike_imu.shape[1] == 0:

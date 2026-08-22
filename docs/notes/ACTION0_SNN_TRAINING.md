@@ -2,14 +2,15 @@
 
 `python -m snn.train_action0` is an independent, from-scratch segment
 classifier. It always uses the local snnTorch `SynNet`, fixed label boundaries,
-and channels `0:15` from padded SpikeIMU input. It does not reuse the legacy
+and all metadata-declared event channels from padded SpikeIMU input (15 for
+unsigned rectified layouts and 30 for polarity-split layouts). It does not reuse the legacy
 HAR dataset/transforms, Board-event targets, Rockpool deployment model, or a
 random segment split.
 
 The separate
 [`experiment_A_acceleration_cnn_representation_evaluation.ipynb`](../../notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb)
 notebook is not a SynNet variant: it uses the producer's raw acceleration
-channels `15:18` and evaluates a CNN representation across all discovered
+trailing acceleration channels and evaluates a CNN representation across all discovered
 padded packages. Its contract and outputs are documented in [Experiment A:
 raw-acceleration CNN representation evaluation](ACCELERATION_CNN_REPRESENTATION_EVALUATION.md).
 The separate
@@ -25,12 +26,12 @@ The Action0 producer has two distinct representations:
 
 ```text
 <variant>/label/segmentation/
-    <user>/action_0/<user>_action_0_spikeIMU.npy       # (N, 21), variable length
+    <user>/action_0/<user>_action_0_spikeIMU.npy       # (N, 21 or 36), variable length
     <user>/action_0/<user>_action_0_segment_offsets.npy
     <user>/action_0/<user>_action_0_segment_lengths.npy
 
 <variant>/label/segmentation_padded/
-    <user>/action_0/<user>_action_0_paddedSpikeIMU.npy # (S, T_pad, 21)
+    <user>/action_0/<user>_action_0_paddedSpikeIMU.npy # (S, T_pad, 21 or 36)
     <user>/action_0/<user>_action_0_labels.npy         # (S,)
     <user>/action_0/<user>_action_0_valid_lengths.npy  # (S,)
     <user>/action_0/<user>_action_0_valid_mask.npy     # (S, T_pad)
@@ -43,16 +44,24 @@ there. Before padding, the producer uses `offsets[i]:offsets[i + 1]` to select
 each segment. After padding, segment `i` is already directly addressed by
 axis 0, so offsets are not copied into the padded package.
 
+The SNN accepts only the explicit unsigned event contract published at the
+padded root: `event_representation="unsigned"`, a non-empty
+`event_feature_schema`, `event_channel_count = channel_count - 6`, and an
+encoder specification SHA-256. It feeds exactly the leading
+`event_channel_count` values into SynNet and rejects negative event values.
+Thus a 15-event artifact creates `inputSize=15`, while a 30-event
+polarity-split artifact creates `inputSize=30` without a trainer code change.
+
 Each padded representation root must also contain
 `padding_dataset_summary.json`. Before discovering classes or constructing a
 dataset, the trainer requires `input_kind=spike-imu`, feature schema
-`signed_wavelet_events_plus_imu_v1`, `channel_count=21`, a positive integer
-`target_length`, a finite positive `sampling_rate_hz`, and
+and a positive `channel_count` consistent with the event contract, a positive
+integer `target_length`, a finite positive `sampling_rate_hz`, and
 `padding_side=right`. The selected train, validation, and test packages must
 each use that target length and agree with one another. Producer counters are
 diagnostic/provenance information, not relocatable-root checks.
 
-The dataset validates that every padded package is `(S, T_pad, 21)`, all
+The dataset validates that every padded package is `(S, T_pad, channel_count)`, all
 packages share `T_pad`, values are finite, masks are boolean contiguous
 prefixes, and each valid length agrees with its mask. It returns:
 
@@ -96,9 +105,9 @@ only to that mapping.
 The notebook's `POST_ENCODE_TRANSFORM` setting selects a pre-published
 representation before it constructs datasets: user-facing `"None"` selects
 the signed root `outputs/action0_pipeline`, while `"AbsRectify"` selects
-`outputs/action0_rectified`. It does not apply `abs` while plotting or train a
-different representation from the displayed one. Both choices still require
-the normal padded 21-channel producer validation; absent roots fail rather
+`outputs/action0_rectified`. It does not apply a transform while plotting or train
+a different representation from the displayed one. Each choice requires its
+matching normal padded producer validation; absent roots fail rather
 than falling back or re-encoding data.
 
 After training, the notebook restores the strict-best validation-balanced-
@@ -171,6 +180,8 @@ Normal training uses Adam and optionally saves the best
 validation-balanced-accuracy checkpoint. Schema-v1 checkpoints are
 configuration-compatible **model-only restores for a new run**: the loader
 rejects missing or unknown schema versions and validates variant, boundary,
+event representation, event feature schema, encoder specification hash, input
+channel count,
 class mapping/counts, input slice, topology/shifts, sample rate, and ordered
 user splits before applying model weights. It does not restore optimizer,
 epoch, best metric, RNG, or DataLoader/shuffle state, and is not an exact
@@ -182,5 +193,6 @@ regularization, and seed may differ.
 The upstream `vendor/WritingRing/ring_plot.py` reads only `*_ring_0.bin` as a
 float64 `(N, 7)` matrix, while `board_plot.py` reads gzipped Board pickles for
 visualization. This trainer intentionally does neither: it consumes the
-repository's already-validated 21-channel SpikeIMU producer outputs and does
+repository's already-validated unsigned-rectified 21-channel or polarity-split
+36-channel SpikeIMU producer outputs and does
 not infer any undocumented unit. It also never reads `*_ring_1.bin`.

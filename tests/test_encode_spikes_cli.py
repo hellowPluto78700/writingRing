@@ -222,6 +222,9 @@ def test_cli_post_encode_transform_precedence_and_result_representation(
     configured = run(output_name="configured")
     signed = run("--post-encode-transform", "none", output_name="signed")
     rectified = run("--post-encode-transform", "AbsRectify", output_name="rectified")
+    polarity_split = run(
+        "--post-encode-transform", "PolaritySplitAbs", output_name="polarity-split"
+    )
 
     assert configured["settings"]["post_encode_transform"] == "AbsRectify"
     assert configured["output"]["event_representation"] == "abs_rectified_sparse_wavelet_extrema"
@@ -229,6 +232,10 @@ def test_cli_post_encode_transform_precedence_and_result_representation(
     assert signed["output"]["event_representation"] == "signed_sparse_wavelet_extrema"
     assert rectified["settings"]["post_encode_transform"] == "AbsRectify"
     assert rectified["output"]["event_representation"] == "abs_rectified_sparse_wavelet_extrema"
+    assert polarity_split["settings"]["post_encode_transform"] == "PolaritySplitAbs"
+    assert polarity_split["output"]["event_representation"] == "polarity_split_sparse_wavelet_extrema"
+    assert polarity_split["spike_imu"]["schema"] == "polarity_split_wavelet_events_plus_imu_v1"
+    assert polarity_split["spike_imu"]["channel_count"] == 36
 
     signed_values = np.load(
         tmp_path / "signed" / "custom-wavelet" / "recording" / "recording_spikeEvents.npy",
@@ -241,6 +248,13 @@ def test_cli_post_encode_transform_precedence_and_result_representation(
     assert np.any(signed_values < 0.0)
     np.testing.assert_array_equal(rectified_values, np.abs(signed_values))
     assert np.all(rectified_values >= 0.0)
+    polarity_values = np.load(
+        tmp_path / "polarity-split" / "custom-wavelet" / "recording" / "recording_spikeEvents.npy",
+        allow_pickle=False,
+    )
+    assert polarity_values.shape == (80, 30)
+    np.testing.assert_array_equal(polarity_values[:, 0::2], np.maximum(signed_values, 0.0))
+    np.testing.assert_array_equal(polarity_values[:, 1::2], np.maximum(-signed_values, 0.0))
 
     output = capsys.readouterr().out
     assert "signed_sparse_wavelet_extrema spike channels" in output

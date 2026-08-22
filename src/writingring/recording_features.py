@@ -29,9 +29,22 @@ from writingring.ring_loader import RingLoadError, load_ring
 
 
 RAW_RING_FEATURE_SCHEMA = "dual_acceleration_units_v1"
-SPIKE_IMU_FEATURE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
+SIGNED_WAVELET_SPIKE_IMU_FEATURE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
+POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA = (
+    "polarity_split_wavelet_events_plus_imu_v1"
+)
+# Backwards-compatible aliases for the existing signed/AbsRectify layout.
+SPIKE_IMU_FEATURE_SCHEMA = SIGNED_WAVELET_SPIKE_IMU_FEATURE_SCHEMA
 SPIKE_IMU_CHANNEL_COUNT = 21
-SPIKE_IMU_TRANSIENT_CHANNEL_INDICES = tuple(range(15, 21))
+SPIKE_IMU_TRAILING_CHANNEL_COUNT = 6
+SPIKE_IMU_SCHEMA_CHANNEL_COUNTS = {
+    SIGNED_WAVELET_SPIKE_IMU_FEATURE_SCHEMA: 21,
+    POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA: 36,
+}
+# Backwards-compatible indices for the 21-channel signed/AbsRectify layout.
+# Callers handling arbitrary supported layouts must use the loaded feature's
+# ``transient_channel_indices`` instead.
+SPIKE_IMU_TRANSIENT_CHANNEL_INDICES = (15, 16, 17, 18, 19, 20)
 SPIKE_IMU_TRANSIENT_CHANNEL_NAMES = (
     "acceleration_x_m_s2",
     "acceleration_y_m_s2",
@@ -60,6 +73,9 @@ class RecordingFeatureInput:
 
     input_kind: str
     feature_schema: str
+    event_representation: str | None
+    event_feature_schema: str | None
+    event_channel_count: int | None
     channel_names: tuple[str, ...]
     units: tuple[str, ...]
 
@@ -185,6 +201,9 @@ def load_raw_ring_features(
         recording=recording,
         input_kind="raw-ring",
         feature_schema=RAW_RING_FEATURE_SCHEMA,
+        event_representation=None,
+        event_feature_schema=None,
+        event_channel_count=None,
         channel_names=PREPROCESSED_IMU_COLUMNS,
         units=PREPROCESSED_IMU_UNITS,
         transient_channel_indices=tuple(range(3, 9)),
@@ -223,12 +242,25 @@ def load_spike_imu_features(
     spike_section = metadata.get("spike_imu")
     if not isinstance(spike_section, dict):
         raise RecordingFeatureError("SpikeIMU metadata must contain a spike_imu object")
-    if spike_section.get("schema") != SPIKE_IMU_FEATURE_SCHEMA:
+    feature_schema = spike_section.get("schema")
+    if (
+        not isinstance(feature_schema, str)
+        or feature_schema not in SPIKE_IMU_SCHEMA_CHANNEL_COUNTS
+    ):
         raise RecordingFeatureError(
-            f"SpikeIMU metadata schema must be {SPIKE_IMU_FEATURE_SCHEMA!r}"
+            "SpikeIMU metadata schema must be one of "
+            f"{sorted(SPIKE_IMU_SCHEMA_CHANNEL_COUNTS)!r}"
         )
-    if spike_section.get("channel_count") != SPIKE_IMU_CHANNEL_COUNT:
-        raise RecordingFeatureError("SpikeIMU metadata channel_count must be 21")
+    expected_channel_count = SPIKE_IMU_SCHEMA_CHANNEL_COUNTS[feature_schema]
+    if spike_section.get("channel_count") != expected_channel_count:
+        raise RecordingFeatureError(
+            "SpikeIMU metadata channel_count must be "
+            f"{expected_channel_count} for schema {feature_schema!r}"
+        )
+    event_representation, event_feature_schema, event_channel_count = _event_contract(
+        spike_section,
+        channel_count=expected_channel_count,
+    )
     try:
         values = np.load(values_path, allow_pickle=False)
     except (OSError, ValueError) as error:
@@ -239,7 +271,7 @@ def load_spike_imu_features(
         np.zeros(len(values), dtype=np.float64),
         name="SpikeIMU features",
         validate_timestamps=False,
-        expected_channel_count=SPIKE_IMU_CHANNEL_COUNT,
+        expected_channel_count=expected_channel_count,
     )
     expected_sample_count = _metadata_sample_count(spike_section, metadata)
     if expected_sample_count != len(values):
@@ -259,7 +291,10 @@ def load_spike_imu_features(
     if expected_values_hash is not None and values_hash != expected_values_hash:
         raise RecordingFeatureError("SpikeIMU metadata hash does not match spikeIMU.npy")
 
-    channel_names = _spike_channel_names(spike_section)
+    channel_names = _spike_channel_names(
+        spike_section,
+        channel_count=expected_channel_count,
+    )
     units = _spike_units(spike_section, channel_count=len(channel_names))
     timestamps_path = _resolve_timestamp_path(metadata, metadata_path=metadata_path)
     if timestamps_path is None:
@@ -308,10 +343,18 @@ def load_spike_imu_features(
         timestamps_us=timestamps,
         recording=recording,
         input_kind="spike-imu",
-        feature_schema=SPIKE_IMU_FEATURE_SCHEMA,
+        feature_schema=feature_schema,
+        event_representation=event_representation,
+        event_feature_schema=event_feature_schema,
+        event_channel_count=event_channel_count,
         channel_names=channel_names,
         units=units,
-        transient_channel_indices=SPIKE_IMU_TRANSIENT_CHANNEL_INDICES,
+        transient_channel_indices=tuple(
+            range(
+                expected_channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT,
+                expected_channel_count,
+            )
+        ),
         transient_channel_names=SPIKE_IMU_TRANSIENT_CHANNEL_NAMES,
         values_path=values_path,
         metadata_path=metadata_path,
@@ -383,6 +426,9 @@ def _feature_input(
     recording: Recording,
     input_kind: str,
     feature_schema: str,
+    event_representation: str | None,
+    event_feature_schema: str | None,
+    event_channel_count: int | None,
     channel_names: tuple[str, ...],
     units: tuple[str, ...],
     transient_channel_indices: tuple[int, ...],
@@ -418,6 +464,9 @@ def _feature_input(
         dataset_id=recording.dataset_id,
         input_kind=input_kind,
         feature_schema=feature_schema,
+        event_representation=event_representation,
+        event_feature_schema=event_feature_schema,
+        event_channel_count=event_channel_count,
         channel_names=tuple(channel_names),
         units=tuple(units),
         transient_channel_indices=tuple(transient_channel_indices),
@@ -566,14 +615,45 @@ def _metadata_sample_count(section: Mapping[str, object], metadata: Mapping[str,
     return value
 
 
-def _spike_channel_names(section: Mapping[str, object]) -> tuple[str, ...]:
+def _event_contract(
+    section: Mapping[str, object],
+    *,
+    channel_count: int,
+) -> tuple[str, str, int]:
+    representation = section.get("event_representation")
+    if representation not in {"signed", "unsigned"}:
+        raise RecordingFeatureError(
+            "SpikeIMU metadata event_representation must be 'signed' or 'unsigned'"
+        )
+    event_feature_schema = section.get("event_feature_schema")
+    if not isinstance(event_feature_schema, str) or not event_feature_schema:
+        raise RecordingFeatureError(
+            "SpikeIMU metadata must declare a non-empty event_feature_schema"
+        )
+    event_channel_count = section.get("event_channel_count")
+    expected_event_channel_count = channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT
+    if event_channel_count != expected_event_channel_count:
+        raise RecordingFeatureError(
+            "SpikeIMU metadata event_channel_count must equal channel_count minus "
+            f"the trailing IMU channels ({expected_event_channel_count})"
+        )
+    return representation, event_feature_schema, event_channel_count
+
+
+def _spike_channel_names(
+    section: Mapping[str, object],
+    *,
+    channel_count: int,
+) -> tuple[str, ...]:
     value = section.get("channel_names")
-    if not isinstance(value, list) or len(value) != SPIKE_IMU_CHANNEL_COUNT or not all(
+    if not isinstance(value, list) or len(value) != channel_count or not all(
         isinstance(name, str) and name for name in value
     ):
-        raise RecordingFeatureError("SpikeIMU metadata channel_names must contain 21 names")
+        raise RecordingFeatureError(
+            f"SpikeIMU metadata channel_names must contain {channel_count} names"
+        )
     names = tuple(value)
-    if names[15:] != SPIKE_IMU_TRANSIENT_CHANNEL_NAMES:
+    if names[-SPIKE_IMU_TRAILING_CHANNEL_COUNT:] != SPIKE_IMU_TRANSIENT_CHANNEL_NAMES:
         raise RecordingFeatureError("SpikeIMU metadata trailing channel_names do not match the IMU schema")
     return names
 
@@ -585,9 +665,11 @@ def _spike_units(section: Mapping[str, object], *, channel_count: int) -> tuple[
     if not isinstance(value, list) or len(value) != channel_count or not all(
         isinstance(unit, str) and unit for unit in value
     ):
-        raise RecordingFeatureError("SpikeIMU metadata units must contain 21 values")
+        raise RecordingFeatureError(
+            f"SpikeIMU metadata units must contain {channel_count} values"
+        )
     units = tuple(value)
-    if units[15:] != SPIKE_IMU_UNITS[15:]:
+    if units[-SPIKE_IMU_TRAILING_CHANNEL_COUNT:] != SPIKE_IMU_UNITS[-SPIKE_IMU_TRAILING_CHANNEL_COUNT:]:
         raise RecordingFeatureError(
             "SpikeIMU metadata trailing units do not match the IMU schema"
         )

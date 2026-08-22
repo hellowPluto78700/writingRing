@@ -67,13 +67,19 @@ def test_settings_reject_noncanonical_post_encode_transforms(transform: object) 
         CustomWaveletSettings(post_encode_transform=transform)  # type: ignore[arg-type]
 
 
-def test_settings_accept_only_none_or_exact_abs_rectify_transform() -> None:
+def test_settings_accept_canonical_post_encode_transforms() -> None:
     assert CustomWaveletSettings().post_encode_transform is None
     assert (
         CustomWaveletSettings.from_mapping(
             {"post_encode_transform": "AbsRectify"}
         ).post_encode_transform
         == "AbsRectify"
+    )
+    assert (
+        CustomWaveletSettings.from_mapping(
+            {"post_encode_transform": "PolaritySplitAbs"}
+        ).post_encode_transform
+        == "PolaritySplitAbs"
     )
 
 

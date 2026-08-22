@@ -14,7 +14,6 @@ from torch.utils.data import DataLoader
 
 from .action0_dataset import (
     BOUNDARY,
-    INPUT_CHANNEL_COUNT,
     Action0DatasetError,
     Action0SegmentDataset,
     PaddingDatasetMetadata,
@@ -74,6 +73,7 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         val_dataset=val_dataset,
         test_dataset=test_dataset,
     )
+    input_channel_count = train_dataset.input_channel_count
     _print_dataset_statistics(
         class_to_idx=class_to_idx,
         idx_to_class=idx_to_class,
@@ -92,7 +92,12 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         device=device,
     )
     first_inputs, first_labels, first_mask = next(iter(train_loader))
-    _inspect_first_batch(first_inputs, first_labels, first_mask)
+    _inspect_first_batch(
+        first_inputs,
+        first_labels,
+        first_mask,
+        input_channel_count=input_channel_count,
+    )
 
     num_outputs = len(class_to_idx)
     kwargs: dict[str, int] = {}
@@ -105,14 +110,14 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
         )
     model = createModel(
         args.network_type,
-        inputSize=INPUT_CHANNEL_COUNT,
+        inputSize=input_channel_count,
         outputSize=num_outputs,
         hiddenSizes=args.neurons_network,
         device=device,
         sampleFreq=args.sample_freq,
         **kwargs,
     )
-    _print_network_dynamics(args)
+    _print_network_dynamics(args, input_channel_count=input_channel_count)
     criterion = MaskedCrossEntropySpkReg(spike_regularization=args.spike_regularization)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     if args.model_checkpoint is not None:
@@ -123,6 +128,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
             class_to_idx=class_to_idx,
             dataset_variant=args.dataset_variant,
             args=args,
+            input_channel_count=input_channel_count,
+            producer_metadata=producer_metadata,
         )
 
     if args.dry_run:
@@ -210,6 +217,8 @@ def main(argv: Sequence[str] | None = None) -> dict[str, object]:
                         best_val_metric=best_metric,
                         args=args,
                         class_to_idx=class_to_idx,
+                        input_channel_count=input_channel_count,
+                        producer_metadata=producer_metadata,
                         path_name="best_action0_synnet.pt",
                     )
                     print(f"Saved best checkpoint: {checkpoint_path}")
@@ -319,6 +328,44 @@ def _validate_split_padded_lengths(
             "train, validation, and test padded lengths must match; "
             f"got {lengths}"
         )
+    input_channels = {
+        "train": train_dataset.input_channel_count,
+        "validation": val_dataset.input_channel_count,
+        "test": test_dataset.input_channel_count,
+    }
+    if any(
+        channel_count != producer_metadata.event_channel_count
+        for channel_count in input_channels.values()
+    ):
+        raise Action0DatasetError(
+            "selected split event-channel counts must equal the producer metadata "
+            f"value {producer_metadata.event_channel_count}; got {input_channels}"
+        )
+    reference_contract = _event_contract_tuple(producer_metadata)
+    split_contracts = {
+        "train": _event_contract_tuple(train_dataset.producer_metadata),
+        "validation": _event_contract_tuple(val_dataset.producer_metadata),
+        "test": _event_contract_tuple(test_dataset.producer_metadata),
+    }
+    if any(contract != reference_contract for contract in split_contracts.values()):
+        raise Action0DatasetError(
+            "train, validation, and test must share event_channel_count, "
+            "event_feature_schema, and spike_encoder_spec_sha256; "
+            f"got {split_contracts}"
+        )
+
+
+def _event_contract_tuple(metadata: PaddingDatasetMetadata) -> tuple[int, str, str]:
+    """Return the event identity fields that must match across user splits."""
+
+    values = (
+        metadata.event_channel_count,
+        metadata.event_feature_schema,
+        metadata.spike_encoder_spec_sha256,
+    )
+    if not isinstance(values[0], int) or not isinstance(values[1], str) or not isinstance(values[2], str):
+        raise Action0DatasetError("Action0 SNN requires a complete unsigned event metadata contract")
+    return values
 
 
 def _validate_user_splits(
@@ -382,11 +429,15 @@ def _create_dataloaders(
 
 
 def _inspect_first_batch(
-    inputs: torch.Tensor, labels: torch.Tensor, valid_mask: torch.Tensor
+    inputs: torch.Tensor,
+    labels: torch.Tensor,
+    valid_mask: torch.Tensor,
+    *,
+    input_channel_count: int,
 ) -> None:
-    if inputs.ndim != 3 or inputs.shape[2] != INPUT_CHANNEL_COUNT:
+    if inputs.ndim != 3 or inputs.shape[2] != input_channel_count:
         raise AssertionError(
-            "Action0 inputs must have shape (batch, padded_time, 15); "
+            "Action0 inputs must have shape (batch, padded_time, event_channels); "
             f"got {tuple(inputs.shape)}"
         )
     if labels.shape != (inputs.shape[0],):
@@ -409,10 +460,14 @@ def _print_producer_metadata(metadata: PaddingDatasetMetadata) -> None:
     print(f"  input_kind: {metadata.input_kind}")
     print(f"  feature_schema: {metadata.feature_schema}")
     print(f"  channel_count: {metadata.channel_count}")
+    print(f"  event_representation: {metadata.event_representation}")
+    print(f"  event_feature_schema: {metadata.event_feature_schema}")
+    print(f"  event_channel_count: {metadata.event_channel_count}")
+    print(f"  spike_encoder_spec_sha256: {metadata.spike_encoder_spec_sha256}")
     print(f"  target_length: {metadata.target_length}")
     print(f"  sampling_rate_hz: {metadata.sampling_rate_hz:g}")
     print(f"  padding_side: {metadata.padding_side}")
-    print(f"Trainer input channel slice: 0:{INPUT_CHANNEL_COUNT}")
+    print(f"Trainer input channel slice: 0:{metadata.event_channel_count}")
 
 
 def _print_dataset_statistics(
@@ -437,13 +492,13 @@ def _print_dataset_statistics(
         print(f"{name} class distribution: {dataset.class_distribution}")
 
 
-def _print_network_dynamics(args: Any) -> None:
+def _print_network_dynamics(args: Any, *, input_channel_count: int) -> None:
     shifts = list(range(args.shift_syn, args.shift_syn + 8))
     beta = 1 - 2 ** (-args.shift_mem)
     tau_syn = [-(1 / args.sample_freq) / math.log(1 - 2 ** (-shift)) for shift in shifts]
     tau_mem = -(1 / args.sample_freq) / math.log(1 - 2 ** (-args.shift_mem))
     print("Network: SynNet")
-    print(f"Input channels: {INPUT_CHANNEL_COUNT}")
+    print(f"Input channels: {input_channel_count}")
     print(f"Hidden sizes: {args.neurons_network}")
     print(f"Sample frequency: {args.sample_freq:g} Hz")
     print(f"shift_syn: {args.shift_syn}")
@@ -501,6 +556,8 @@ def _checkpoint_payload(
     model: torch.nn.Module,
     args: Any,
     class_to_idx: Mapping[str, int],
+    input_channel_count: int = 15,
+    producer_metadata: PaddingDatasetMetadata | None = None,
     optimizer: torch.optim.Optimizer | None = None,
     epoch: int | None = None,
     best_val_metric: float | None = None,
@@ -513,14 +570,20 @@ def _checkpoint_payload(
     compatible model restore, not an optimizer or trajectory resume.
     """
 
+    if producer_metadata is None:
+        raise ValueError("producer_metadata is required for Action0 checkpoints")
     return {
         "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
         "model_state_dict": model.state_dict(),
         "dataset_variant": args.dataset_variant,
         "boundary": BOUNDARY,
         "class_to_idx": dict(class_to_idx),
-        "input_channels": [0, INPUT_CHANNEL_COUNT],
-        "num_inputs": INPUT_CHANNEL_COUNT,
+        "input_channels": [0, input_channel_count],
+        "input_channel_count": input_channel_count,
+        "num_inputs": input_channel_count,
+        "event_representation": producer_metadata.event_representation,
+        "event_feature_schema": producer_metadata.event_feature_schema,
+        "encoder_spec_sha256": producer_metadata.spike_encoder_spec_sha256,
         "num_outputs": len(class_to_idx),
         "hidden_sizes": list(args.neurons_network),
         "shift_syn": args.shift_syn,
@@ -541,6 +604,8 @@ def _save_checkpoint(
     best_val_metric: float,
     args: Any,
     class_to_idx: Mapping[str, int],
+    input_channel_count: int,
+    producer_metadata: PaddingDatasetMetadata,
     path_name: str,
 ) -> Path:
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -553,6 +618,8 @@ def _save_checkpoint(
             best_val_metric=best_val_metric,
             args=args,
             class_to_idx=class_to_idx,
+            input_channel_count=input_channel_count,
+            producer_metadata=producer_metadata,
         ),
         path,
     )
@@ -567,6 +634,8 @@ def _load_checkpoint(
     class_to_idx: Mapping[str, int],
     dataset_variant: str,
     args: Any,
+    input_channel_count: int = 15,
+    producer_metadata: PaddingDatasetMetadata | None = None,
 ) -> None:
     """Restore model weights after validating the schema-v1 configuration.
 
@@ -574,6 +643,8 @@ def _load_checkpoint(
     and DataLoader state are intentionally not part of this new-run restore.
     """
 
+    if producer_metadata is None:
+        raise ValueError("producer_metadata is required for Action0 checkpoint validation")
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"model checkpoint does not exist: {checkpoint_path}")
     payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -594,8 +665,12 @@ def _load_checkpoint(
         "dataset_variant": dataset_variant,
         "boundary": BOUNDARY,
         "class_to_idx": dict(class_to_idx),
-        "input_channels": [0, INPUT_CHANNEL_COUNT],
-        "num_inputs": INPUT_CHANNEL_COUNT,
+        "input_channels": [0, input_channel_count],
+        "input_channel_count": input_channel_count,
+        "num_inputs": input_channel_count,
+        "event_representation": producer_metadata.event_representation,
+        "event_feature_schema": producer_metadata.event_feature_schema,
+        "encoder_spec_sha256": producer_metadata.spike_encoder_spec_sha256,
         "num_outputs": len(class_to_idx),
         "hidden_sizes": list(args.neurons_network),
         "shift_syn": args.shift_syn,

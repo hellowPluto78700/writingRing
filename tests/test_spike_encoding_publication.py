@@ -252,8 +252,9 @@ def test_publication_records_rectified_representation_and_preserves_spike_imu_ta
     assert signed_summary["encoder"]["representation"] == "signed_sparse_wavelet_extrema"
     assert signed_summary["encoder"]["post_encode_transform"] is None
     assert signed_summary["output"]["polarity_preserved"] is True
-    assert signed_summary["spike_imu"]["event_representation"] == (
-        "signed_sparse_wavelet_extrema"
+    assert signed_summary["spike_imu"]["event_representation"] == "signed"
+    assert signed_summary["spike_imu"]["event_feature_schema"] == (
+        "custom_wavelet_signed_events_v1"
     )
     assert rectified_summary["encoder"]["representation"] == (
         "abs_rectified_sparse_wavelet_extrema"
@@ -264,8 +265,74 @@ def test_publication_records_rectified_representation_and_preserves_spike_imu_ta
     assert rectified_summary["encoder"]["post_encode_transform"] == "AbsRectify"
     assert rectified_summary["output"]["polarity_preserved"] is False
     assert rectified_summary["spike_imu"]["schema"] == "signed_wavelet_events_plus_imu_v1"
-    assert rectified_summary["spike_imu"]["event_representation"] == (
-        "abs_rectified_sparse_wavelet_extrema"
+    assert rectified_summary["spike_imu"]["event_representation"] == "unsigned"
+    assert rectified_summary["spike_imu"]["event_feature_schema"] == (
+        "custom_wavelet_abs_rectified_events_v1"
     )
     assert rectified_summary["spike_imu"]["post_encode_transform"] == "AbsRectify"
     assert rectified_summary["statistics"]["negative_event_count"] == 0
+
+
+def test_publication_records_polarity_split_layout_and_preserves_imu_tail(
+    tmp_path: Path,
+) -> None:
+    acceleration_g = np.column_stack(
+        (
+            np.sin(np.arange(160) / 3.0),
+            np.zeros(160),
+            -np.sin(np.arange(160) / 3.0),
+        )
+    ).astype(np.float32)
+    raw = np.column_stack(
+        (
+            acceleration_g,
+            acceleration_g * 9.80665,
+            np.arange(160 * 3, dtype=np.float32).reshape(160, 3),
+        )
+    )
+    raw_path = tmp_path / "recording_rawIMU.npy"
+    np.save(raw_path, raw, allow_pickle=False)
+    input_data = load_spike_encoding_input(raw_path)
+    encoder = CustomWaveletEncoder(
+        CustomWaveletSettings(post_encode_transform="PolaritySplitAbs", output_dtype="float32")
+    )
+    output = run_spike_encoder(
+        encoder,
+        acceleration_g=input_data.acceleration_g,
+        sequence_offsets=np.array([0, len(raw)], dtype=np.int64),
+    )
+    paths = spike_encoding_output_paths(
+        raw_imu_path=raw_path,
+        encoder_name=encoder.name,
+        output_stem=None,
+        output_root=None,
+    )
+
+    summary = publish_spike_encoding(
+        output=output,
+        input_data=input_data,
+        encoder=encoder,
+        effective_settings={"sampling_rate_hz": 200.0, "post_encode_transform": "PolaritySplitAbs"},
+        source_summary=None,
+        sequence_mode="offsets",
+        offsets_source="recording offsets",
+        output_dtype="float32",
+        paths=paths,
+        overwrite=False,
+    )
+
+    events = np.load(paths.spike_events_path, allow_pickle=False)
+    spike_imu = np.load(paths.spike_imu_path, allow_pickle=False)
+    assert events.shape == (160, 30)
+    assert spike_imu.shape == (160, 36)
+    np.testing.assert_array_equal(spike_imu[:, :30], events)
+    np.testing.assert_array_equal(spike_imu[:, 30:], raw[:, 3:9])
+    assert summary["spike_imu"]["schema"] == "polarity_split_wavelet_events_plus_imu_v1"
+    assert summary["spike_imu"]["channel_count"] == 36
+    assert summary["spike_imu"]["event_channel_count"] == 30
+    assert summary["spike_imu"]["event_representation"] == "unsigned"
+    assert summary["spike_imu"]["event_feature_schema"] == (
+        "custom_wavelet_polarity_split_abs_events_v1"
+    )
+    assert summary["spike_imu"]["channel_names"][:2] == ["event_x_0_pos", "event_x_0_neg_abs"]
+    assert summary["output"]["polarity_preserved"] is True

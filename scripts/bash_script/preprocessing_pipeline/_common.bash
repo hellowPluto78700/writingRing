@@ -194,9 +194,9 @@ pipeline_init() {
         pipeline_die "action-0 scripts require ENCODER=custom-wavelet"
     fi
     case "$POST_ENCODE_TRANSFORM" in
-        none|AbsRectify) ;;
+        none|AbsRectify|PolaritySplitAbs) ;;
         *)
-            pipeline_die "POST_ENCODE_TRANSFORM must be none or AbsRectify"
+            pipeline_die "POST_ENCODE_TRANSFORM must be none, AbsRectify, or PolaritySplitAbs"
             ;;
     esac
     if [[ "$MADGWICK_PROVISIONAL" != "0" && "$MADGWICK_PROVISIONAL" != "1" ]]; then
@@ -905,16 +905,30 @@ expected = sys.argv[4]
 settings_path = Path(sys.argv[5]) if len(sys.argv) > 5 and sys.argv[5] else None
 frequencies = [float(value) for value in sys.argv[6:]]
 expected_transform = None if expected == "none" else expected
+expected_channels, expected_schema, expected_event_representation, expected_event_schema, expected_event_channels = {
+    "none": (21, "signed_wavelet_events_plus_imu_v1", "signed", "custom_wavelet_signed_events_v1", 15),
+    "AbsRectify": (21, "signed_wavelet_events_plus_imu_v1", "unsigned", "custom_wavelet_abs_rectified_events_v1", 15),
+    "PolaritySplitAbs": (36, "polarity_split_wavelet_events_plus_imu_v1", "unsigned", "custom_wavelet_polarity_split_abs_events_v1", 30),
+}[expected]
 values = np.load(values_path, allow_pickle=False)
 timestamps = np.load(timestamps_path, allow_pickle=False)
 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+if values.ndim != 2 or values.shape[1] != expected_channels or not np.isfinite(values).all():
     raise SystemExit(f"invalid SpikeIMU matrix: {values_path} shape={values.shape}")
 if timestamps.ndim != 1 or len(timestamps) != len(values):
     raise SystemExit(f"timestamp row count mismatch: {timestamps_path}")
 spike_imu = metadata.get("spike_imu", {})
-if spike_imu.get("channel_count") != 21:
-    raise SystemExit(f"metadata does not declare 21 SpikeIMU channels: {metadata_path}")
+if (
+    spike_imu.get("channel_count") != expected_channels
+    or spike_imu.get("schema") != expected_schema
+    or spike_imu.get("event_representation") != expected_event_representation
+    or spike_imu.get("event_feature_schema") != expected_event_schema
+    or spike_imu.get("event_channel_count") != expected_event_channels
+):
+    raise SystemExit(
+        "SpikeIMU metadata layout mismatch: "
+        f"expected={expected_schema}/{expected_channels}/{expected_event_representation}, path={metadata_path}"
+    )
 settings = metadata.get("settings") or {}
 actual_transform = settings.get("post_encode_transform")
 if actual_transform != expected_transform:
@@ -960,12 +974,18 @@ import sys
 values_path, summary_path, targets_path = map(Path, sys.argv[1:])
 values = np.load(values_path, allow_pickle=False)
 targets = np.load(targets_path, allow_pickle=False)
-json.loads(summary_path.read_text(encoding="utf-8"))
-if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+expected_channels = {
+    "signed_wavelet_events_plus_imu_v1": 21,
+    "polarity_split_wavelet_events_plus_imu_v1": 36,
+}.get(summary.get("feature_schema"))
+if summary.get("channel_count") != expected_channels:
+    raise SystemExit(f"invalid segmented SpikeIMU schema: {summary_path}")
+if values.ndim != 2 or values.shape[1] != expected_channels or not np.isfinite(values).all():
     raise SystemExit(f"invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}")
 if targets.shape != (len(values), 4) or targets.dtype != np.dtype(bool):
     raise SystemExit(f"invalid Board target matrix: {targets_path} shape={targets.shape} dtype={targets.dtype}")
-print(f"validated segmented SpikeIMU rows={len(values)} channels=21 targets=4: {values_path}")
+print(f"validated segmented SpikeIMU rows={len(values)} channels={expected_channels} targets=4: {values_path}")
 ' "$values_path" "$summary_path" "$board_targets_path"
     else
         pipeline_run_logged "$QA_LOG" "${PYTHON_CMD[@]}" -c '
@@ -976,10 +996,16 @@ import sys
 
 values_path, summary_path = map(Path, sys.argv[1:])
 values = np.load(values_path, allow_pickle=False)
-json.loads(summary_path.read_text(encoding="utf-8"))
-if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+expected_channels = {
+    "signed_wavelet_events_plus_imu_v1": 21,
+    "polarity_split_wavelet_events_plus_imu_v1": 36,
+}.get(summary.get("feature_schema"))
+if summary.get("channel_count") != expected_channels:
+    raise SystemExit(f"invalid segmented SpikeIMU schema: {summary_path}")
+if values.ndim != 2 or values.shape[1] != expected_channels or not np.isfinite(values).all():
     raise SystemExit(f"invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}")
-print(f"validated segmented SpikeIMU rows={len(values)} channels=21: {values_path}")
+print(f"validated segmented SpikeIMU rows={len(values)} channels={expected_channels}: {values_path}")
 ' "$values_path" "$summary_path"
     fi
 }
@@ -1000,10 +1026,12 @@ if summary.get("input_root") != expected_input_root:
     raise SystemExit(f"padded summary input root mismatch: {summary_path}")
 if summary.get("input_kind") != "spike-imu":
     raise SystemExit(f"padded summary is not SpikeIMU: {summary_path}")
-if summary.get("feature_schema") != "signed_wavelet_events_plus_imu_v1":
-    raise SystemExit(f"padded summary feature schema mismatch: {summary_path}")
-if summary.get("channel_count") != 21:
-    raise SystemExit(f"padded summary channel count is not 21: {summary_path}")
+expected_channels = {
+    "signed_wavelet_events_plus_imu_v1": 21,
+    "polarity_split_wavelet_events_plus_imu_v1": 36,
+}.get(summary.get("feature_schema"))
+if summary.get("channel_count") != expected_channels:
+    raise SystemExit(f"padded summary schema mismatch: {summary_path}")
 processed_user_action_count = summary.get("processed_user_action_count")
 if processed_user_action_count != expected_user_action_count:
     raise SystemExit(
@@ -1198,7 +1226,13 @@ offsets = np.load(offsets_path, allow_pickle=False)
 lengths = np.load(lengths_path, allow_pickle=False)
 summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
-if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+expected_channels = {
+    "signed_wavelet_events_plus_imu_v1": 21,
+    "polarity_split_wavelet_events_plus_imu_v1": 36,
+}.get(summary.get("feature_schema"))
+if summary.get("channel_count") != expected_channels:
+    raise SystemExit(f"invalid segmented SpikeIMU schema: {summary_path}")
+if values.ndim != 2 or values.shape[1] != expected_channels or not np.isfinite(values).all():
     raise SystemExit(f"invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}")
 if labels.ndim != 1 or lengths.ndim != 1 or len(labels) != len(lengths):
     raise SystemExit(f"segment labels/lengths mismatch under {values_path.parent}")
@@ -2799,7 +2833,7 @@ def args_parser():
     p.add_argument('--log-root', type=Path, required=True)
     p.add_argument('--action', required=True)
     p.add_argument('--boundary-mode', choices=('label','aligned-board-events'), required=True)
-    p.add_argument('--post-encode-transform', choices=('none','AbsRectify'), required=True)
+    p.add_argument('--post-encode-transform', choices=('none','AbsRectify','PolaritySplitAbs'), required=True)
     p.add_argument('--expected-ring-count', type=int, required=True)
     p.add_argument('--expected-user-count', type=int, required=True)
     return p.parse_args()
@@ -2835,8 +2869,22 @@ def progress(label: str, i: int, n: int, detail: str = ''):
 def validate_transform(metadata_path: Path, requested: str):
     metadata = load_json(metadata_path)
     spike = metadata.get('spike_imu') or {}
-    if not isinstance(spike, dict) or spike.get('channel_count') != 21:
-        raise QAError(f'metadata does not declare 21 SpikeIMU channels: {metadata_path}')
+    expected_channels, expected_schema, expected_event_representation, expected_event_schema, expected_event_channels = {
+        'none': (21, 'signed_wavelet_events_plus_imu_v1', 'signed', 'custom_wavelet_signed_events_v1', 15),
+        'AbsRectify': (21, 'signed_wavelet_events_plus_imu_v1', 'unsigned', 'custom_wavelet_abs_rectified_events_v1', 15),
+        'PolaritySplitAbs': (36, 'polarity_split_wavelet_events_plus_imu_v1', 'unsigned', 'custom_wavelet_polarity_split_abs_events_v1', 30),
+    }[requested]
+    if (
+        not isinstance(spike, dict)
+        or spike.get('channel_count') != expected_channels
+        or spike.get('schema') != expected_schema
+        or spike.get('event_representation') != expected_event_representation
+        or spike.get('event_feature_schema') != expected_event_schema
+        or spike.get('event_channel_count') != expected_event_channels
+    ):
+        raise QAError(
+            f'metadata layout mismatch (expected {expected_schema}/{expected_channels}): {metadata_path}'
+        )
     settings = metadata.get('settings') or {}
     if not isinstance(settings, dict):
         raise QAError(f'invalid settings object: {metadata_path}')
@@ -2893,7 +2941,14 @@ def validate_segment_package(root: Path, user: str, action: str, board_mode: boo
     labels = np.load(labels_path, allow_pickle=False)
     offsets = np.load(offsets_path, allow_pickle=False)
     lengths = np.load(lengths_path, allow_pickle=False)
-    if values.ndim != 2 or values.shape[1] != 21 or not np.isfinite(values).all():
+    summary = load_json(summary_path)
+    expected_channels = {
+        'signed_wavelet_events_plus_imu_v1': 21,
+        'polarity_split_wavelet_events_plus_imu_v1': 36,
+    }.get(summary.get('feature_schema'))
+    if summary.get('channel_count') != expected_channels:
+        raise QAError(f'invalid segmented SpikeIMU schema: {summary_path}')
+    if values.ndim != 2 or values.shape[1] != expected_channels or not np.isfinite(values).all():
         raise QAError(f'invalid segmented SpikeIMU matrix: {values_path} shape={values.shape}')
     if labels.ndim != 1 or lengths.ndim != 1 or len(labels) != len(lengths):
         raise QAError(f'segment labels/lengths mismatch under {d}')
@@ -2916,7 +2971,11 @@ def validate_padding(summary_path: Path, segment_root: Path, expected_users: int
     s = load_json(summary_path)
     if s.get('input_root') != str(segment_root.resolve()):
         raise QAError('padded summary input root mismatch')
-    if s.get('input_kind') != 'spike-imu' or s.get('feature_schema') != 'signed_wavelet_events_plus_imu_v1' or s.get('channel_count') != 21:
+    expected_channels = {
+        'signed_wavelet_events_plus_imu_v1': 21,
+        'polarity_split_wavelet_events_plus_imu_v1': 36,
+    }.get(s.get('feature_schema'))
+    if s.get('input_kind') != 'spike-imu' or s.get('channel_count') != expected_channels:
         raise QAError('padded summary schema mismatch')
     if s.get('processed_user_action_count') != expected_users:
         raise QAError(f"padded package count {s.get('processed_user_action_count')} != user count {expected_users}")
@@ -2963,7 +3022,8 @@ def run(a):
         if a.boundary_mode == 'label':
             values = np.load(spike_dir / 'spikeIMU.npy', allow_pickle=False)
             ts = np.load(timestamps, allow_pickle=False)
-            if values.ndim != 2 or values.shape[1] != 21 or len(ts) != len(values) or not np.isfinite(values).all():
+            expected_channels = 36 if a.post_encode_transform == 'PolaritySplitAbs' else 21
+            if values.ndim != 2 or values.shape[1] != expected_channels or len(ts) != len(values) or not np.isfinite(values).all():
                 raise QAError(f'invalid SpikeIMU/timestamp artifact for {r.user}/{r.dataset_id}')
             continue
 

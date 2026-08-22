@@ -8,8 +8,8 @@ Protocol
 2. Apply configured user exclusions and label selection, then build a
    user-disjoint train/validation/test split.
 3. Fit acceleration normalization on the final RAW TRAIN valid samples only.
-4. Train a new MaskAwareAccelerationCNN from scratch on raw acceleration
-   channels 15:18.
+4. Train a new MaskAwareAccelerationCNN from scratch on the metadata-declared
+   raw acceleration channels.
 5. Select the best epoch using validation balanced accuracy.
 6. Evaluate raw held-out test classification and the shared representation
    protocol (kNN, retrieval, prototype, linear probe, geometry, clustering).
@@ -470,7 +470,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Experiment A: train the acceleration CNN on raw paddedSpikeIMU "
-            "channels 15:18 and evaluate on held-out raw-user test data."
+            "acceleration channels and evaluate on held-out raw-user test data."
         )
     )
     parser.add_argument("--repository-root", type=Path, default=Path("."))

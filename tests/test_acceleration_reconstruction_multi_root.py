@@ -27,14 +27,19 @@ def _write_root(
     action: str,
     target_length: int = 4,
     sampling_rate_hz: float = 200.0,
+    channel_count: int = 21,
     encoder_spec: dict[str, object] | None = None,
     include_encoder_identity: bool = True,
 ) -> Path:
     root.mkdir(parents=True)
     root_summary = {
         "input_kind": "spike-imu",
-        "feature_schema": "signed_wavelet_events_plus_imu_v1",
-        "channel_count": 21,
+        "feature_schema": (
+            "signed_wavelet_events_plus_imu_v1"
+            if channel_count == 21
+            else "polarity_split_wavelet_events_plus_imu_v1"
+        ),
+        "channel_count": channel_count,
         "target_length": target_length,
         "sampling_rate_hz": sampling_rate_hz,
         "padding_side": "right",
@@ -61,8 +66,10 @@ def _write_root(
         labels = np.asarray(["a", "b"])
         valid_lengths = np.asarray([target_length, target_length - 1], dtype=np.int64)
         valid_mask = np.arange(target_length)[None, :] < valid_lengths[:, None]
-        values = np.zeros((len(labels), target_length, 21), dtype=np.float32)
-        values[:, :, 15:18] = float(user_index + int(action) + 1)
+        values = np.zeros((len(labels), target_length, channel_count), dtype=np.float32)
+        values[:, :, channel_count - 6 : channel_count - 3] = float(
+            user_index + int(action) + 1
+        )
         values[~valid_mask] = 0.0
         np.save(action_dir / f"{stem}_paddedSpikeIMU.npy", values, allow_pickle=False)
         np.save(action_dir / f"{stem}_labels.npy", labels, allow_pickle=False)
@@ -127,6 +134,30 @@ def test_multi_root_loader_reindexes_packages_and_preserves_user_splits(
     )
     assert normalization.fitted_on == "raw:train"
     assert normalization.valid_time_points == 14
+
+
+def test_raw_acceleration_loader_uses_trailing_imu_offset_for_polarity_split(
+    tmp_path: Path,
+) -> None:
+    root = _write_root(tmp_path / "polarity-split", action="0", channel_count=36)
+
+    data = load_acceleration_data(root)
+    split = prepare_user_disjoint_splits(
+        data.sample_manifest,
+        explicit_train_users=("user_0",),
+        explicit_val_users=("user_1",),
+        explicit_test_users=("user_2",),
+    )
+    normalization = fit_acceleration_normalization(
+        data.packages,
+        split.sample_manifest,
+        split="train",
+        source="raw",
+    )
+
+    assert data.producer_metadata.channel_count == 36
+    assert data.packages[0].acceleration_slice == slice(30, 33)
+    np.testing.assert_array_equal(normalization.mean, np.full(3, 1.0))
 
 
 def test_multi_root_loader_rejects_duplicate_roots_and_package_identities(

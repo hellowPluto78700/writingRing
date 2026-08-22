@@ -44,7 +44,9 @@ _SEQUENCE_FIELDS = (
     "negative_event_count",
     "event_density",
 )
-_SPIKE_IMU_EVENT_UNITS = ("event",) * 15
+_TRAILING_SPIKE_IMU_CHANNEL_COUNT = 6
+_SIGNED_WAVELET_SPIKE_IMU_SCHEMA = "signed_wavelet_events_plus_imu_v1"
+_POLARITY_SPLIT_WAVELET_SPIKE_IMU_SCHEMA = "polarity_split_wavelet_events_plus_imu_v1"
 
 
 class SpikeEncodingPublishError(SpikeEncodingError):
@@ -168,7 +170,7 @@ def publish_spike_encoding(
     offsets_path = _offsets_path(paths, offset_semantics=offset_semantics)
     spike_imu = (
         _build_spike_imu(values, input_data.preprocessed_imu)
-        if _publishes_signed_wavelet_spike_imu(output, input_data.preprocessed_imu, values)
+        if _publishes_wavelet_spike_imu(output, input_data.preprocessed_imu, values)
         else None
     )
     if sequence_mode not in {"offsets", "single-array"}:
@@ -248,16 +250,16 @@ def _validated_values(
     return stored.copy()
 
 
-def _publishes_signed_wavelet_spike_imu(
+def _publishes_wavelet_spike_imu(
     output: SpikeEncodingOutput,
     raw_imu: np.ndarray,
     values: np.ndarray,
 ) -> bool:
-    """Return whether this output satisfies the 15-channel Wavelet IMU layout."""
+    """Return whether this output has a supported Custom Wavelet event layout."""
 
     return (
         output.encoder_name == "custom-wavelet"
-        and values.shape[1] == 15
+        and values.shape[1] in {15, 30}
         and raw_imu.ndim == 2
         and raw_imu.shape == (len(values), len(PREPROCESSED_IMU_COLUMNS))
     )
@@ -276,6 +278,45 @@ def _build_spike_imu(values: np.ndarray, raw_imu: np.ndarray) -> np.ndarray:
     if not np.array_equal(spike_imu[:, values.shape[1] :], source[:, 3:9]):
         raise SpikeEncodingPublishError("spike IMU did not preserve source m/s² and gyro channels")
     return spike_imu
+
+
+def _spike_imu_schema(event_representation: str) -> str:
+    if event_representation == "polarity_split_sparse_wavelet_extrema":
+        return _POLARITY_SPLIT_WAVELET_SPIKE_IMU_SCHEMA
+    return _SIGNED_WAVELET_SPIKE_IMU_SCHEMA
+
+
+def _event_value_representation(event_representation: str) -> str:
+    """Return the SNN-facing signedness contract for event values."""
+
+    if event_representation in {
+        "abs_rectified_sparse_wavelet_extrema",
+        "polarity_split_sparse_wavelet_extrema",
+    }:
+        return "unsigned"
+    return "signed"
+
+
+def _event_feature_schema(event_representation: str) -> str:
+    """Return the event-only schema independent of trailing IMU channels."""
+
+    schemas = {
+        "signed_sparse_wavelet_extrema": "custom_wavelet_signed_events_v1",
+        "abs_rectified_sparse_wavelet_extrema": "custom_wavelet_abs_rectified_events_v1",
+        "polarity_split_sparse_wavelet_extrema": "custom_wavelet_polarity_split_abs_events_v1",
+    }
+    try:
+        return schemas[event_representation]
+    except KeyError as error:
+        raise SpikeEncodingPublishError(
+            f"unsupported Custom Wavelet event representation: {event_representation!r}"
+        ) from error
+
+
+def _polarity_is_preserved(event_representation: str) -> bool:
+    return "signed" in event_representation or event_representation == (
+        "polarity_split_sparse_wavelet_extrema"
+    )
 
 
 def _validated_statistics(
@@ -340,7 +381,7 @@ def _build_summary(
         "channel_names": list(output.channel_names),
         "dtype": values.dtype.name,
         "binary": output.representation == "binary_spike_train",
-        "polarity_preserved": "signed" in output.representation,
+        "polarity_preserved": _polarity_is_preserved(output.representation),
         "amplitude_preserved": output.representation != "binary_spike_train",
         "event_representation": event_representation,
     }
@@ -512,18 +553,22 @@ def _build_summary(
             "gyro_z_rad_s",
         ]
         summary["spike_imu"] = {
-            "schema": "signed_wavelet_events_plus_imu_v1",
-            "event_representation": event_representation,
-            "polarity_preserved": "signed" in event_representation,
+            "schema": _spike_imu_schema(output.representation),
+            "event_representation": _event_value_representation(event_representation),
+            "event_feature_schema": _event_feature_schema(event_representation),
+            "event_encoding": event_representation,
+            "polarity_preserved": _polarity_is_preserved(event_representation),
             "sample_count": len(spike_imu),
             "channel_count": spike_imu.shape[1],
+            "event_channel_count": values.shape[1],
+            "trailing_imu_channel_count": _TRAILING_SPIKE_IMU_CHANNEL_COUNT,
             "channel_names": list(output.channel_names) + trailing_channel_names,
             "trailing_channel_names": trailing_channel_names,
             "source_channel_names": list(PREPROCESSED_IMU_COLUMNS[3:]),
             "dtype": spike_imu.dtype.name,
             "source_imu_columns": [3, 4, 5, 6, 7, 8],
             "source_raw_imu_columns": [3, 4, 5, 6, 7, 8],
-            "units": list(_SPIKE_IMU_EVENT_UNITS + PREPROCESSED_IMU_UNITS[3:]),
+            "units": ["event"] * values.shape[1] + list(PREPROCESSED_IMU_UNITS[3:]),
             "sha256": "pending",
             "spike_imu_sha256": "pending",
         }

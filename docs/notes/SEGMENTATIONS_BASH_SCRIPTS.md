@@ -89,7 +89,9 @@ For encoded SpikeIMU artifacts, validity also requires the published
 `POST_ENCODE_TRANSFORM` (`none` is metadata `null`). Legacy metadata with no
 transform key is treated as `none`; a transform mismatch makes encoding
 invalid and uses this same existing preprocessing/full-rebuild path rather
-than a transform-specific resume mode.
+than a transform-specific resume mode. The normal pipeline accepts `none`,
+`AbsRectify`, and `PolaritySplitAbs`; the latter requires the matching
+36-channel polarity-split SpikeIMU layout throughout downstream stages.
 `OVERWRITE=1` is a legacy alias only when `PIPELINE_MODE` is unset; an explicit
 `PIPELINE_MODE` takes precedence. A failed preprocessing, encoding, alignment,
 or user segmentation command stops the run. Label mode adds only
@@ -168,8 +170,9 @@ then reconciles discovered `ring_0`,
 preprocessing-summary, SpikeIMU, per-user segmentation-summary, and
 padded-summary counts; completed recording skips are not expected to produce
 segments. It also verifies canonical timestamp sidecars, metadata, matrices,
-manifests, Board targets/audits for processed recordings, the `(N, 21)`
-SpikeIMU contract, and that padded source/exported/segment-skipped counts
+manifests, Board targets/audits for processed recordings, the requested
+signed/rectified `(N, 21)` or polarity-split `(N, 36)` SpikeIMU contract, and
+that padded source/exported/segment-skipped counts
 reconcile. Logs contain discovery, per-recording preprocessing and alignment,
 one encoding log, per-user segmentation, padding analysis/publish output, and
 QA output.

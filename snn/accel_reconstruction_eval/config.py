@@ -9,7 +9,8 @@ representation-evaluation protocol.  It does not load data or perform I/O.
 Source conventions
 ------------------
 raw:
-    Use paddedSpikeIMU acceleration channels 15:18.
+    Use the three acceleration channels immediately before the trailing
+    gyroscope channels in paddedSpikeIMU.
 reconstruction:
     Use ``*_padded_reconstructed_accel_m_s2.npy``.
 mixed:

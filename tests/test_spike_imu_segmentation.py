@@ -34,6 +34,7 @@ from writingring.gravity import GravityRemovalConfig
 from writingring.imu_preprocessing import PREPROCESSED_IMU_COLUMNS
 from writingring.preprocessing_io import PREPROCESSED_IMU_UNITS, sha256_file
 from writingring.recording_features import (
+    POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA,
     RecordingFeatureError,
     SPIKE_IMU_FEATURE_SCHEMA,
     SPIKE_IMU_TRANSIENT_CHANNEL_NAMES,
@@ -105,6 +106,7 @@ def _write_spike_artifact(
     sample_count: int = 400,
     dataset_id: int = 0,
     sampling_rate_hz: float = 1_000.0,
+    channel_count: int = 21,
 ) -> tuple[Path, np.ndarray]:
     recording = next(
         recording
@@ -113,7 +115,9 @@ def _write_spike_artifact(
     )
     directory = tmp_path / "spike" / recording.user / recording.action / str(recording.dataset_id)
     directory.mkdir(parents=True)
-    values = np.arange(sample_count * 21, dtype=np.float32).reshape(sample_count, 21)
+    values = np.arange(sample_count * channel_count, dtype=np.float32).reshape(
+        sample_count, channel_count
+    )
     timestamps = 1_000_000.0 + (
         np.arange(sample_count, dtype=np.float64) * 1_000_000.0 / sampling_rate_hz
     )
@@ -148,12 +152,23 @@ def _write_spike_artifact(
             "sampling_rate_hz": sampling_rate_hz,
         },
         "spike_imu": {
-            "schema": SPIKE_IMU_FEATURE_SCHEMA,
+            "schema": (
+                SPIKE_IMU_FEATURE_SCHEMA
+                if channel_count == 21
+                else POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA
+            ),
+            "event_representation": "unsigned" if channel_count == 36 else "signed",
+            "event_feature_schema": (
+                "custom_wavelet_polarity_split_abs_events_v1"
+                if channel_count == 36
+                else "custom_wavelet_signed_events_v1"
+            ),
+            "event_channel_count": channel_count - 6,
             "sample_count": sample_count,
-            "channel_count": 21,
-            "channel_names": [f"event_{i}" for i in range(15)]
+            "channel_count": channel_count,
+            "channel_names": [f"event_{i}" for i in range(channel_count - 6)]
             + list(SPIKE_IMU_TRANSIENT_CHANNEL_NAMES),
-            "units": ["event"] * 15 + list(PREPROCESSED_IMU_UNITS[3:]),
+            "units": ["event"] * (channel_count - 6) + list(PREPROCESSED_IMU_UNITS[3:]),
             "sha256": sha256_file(values_path),
         },
     }
@@ -468,6 +483,35 @@ def test_spike_label_segmentation_publishes_21_channel_slices(
     np.testing.assert_array_equal(result.raw_imu, source_values)
     np.testing.assert_array_equal(result.segment_lengths, [200, 200])
     np.testing.assert_array_equal(result.segment_offsets, [0, 200, 400])
+
+
+def test_spike_label_segmentation_publishes_polarity_split_slices(
+    tmp_path: Path,
+) -> None:
+    data_root = _data_root(tmp_path)
+    spike_root, source_values = _write_spike_artifact(
+        tmp_path,
+        data_root,
+        channel_count=36,
+    )
+
+    result = segment_user_action(
+        data_root=data_root,
+        user="writer_a",
+        action="letters",
+        output_root=tmp_path / "segmented",
+        input_kind="spike-imu",
+        spike_root=spike_root,
+        expected_sampling_rate_hz=1_000.0,
+    )
+
+    assert result.raw_imu.shape == (400, 36)
+    assert result.summary["feature_schema"] == POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA
+    assert result.summary["channel_count"] == 36
+    assert result.summary["event_channel_slice"] == [0, 30]
+    assert result.summary["acceleration_m_s2_channel_slice"] == [30, 33]
+    assert result.summary["gyroscope_channel_slice"] == [33, 36]
+    np.testing.assert_array_equal(result.raw_imu, source_values)
     assert result.manifest["input_kind"].tolist() == ["spike-imu", "spike-imu"]
     assert result.output_paths.raw_imu_path.is_file()
 

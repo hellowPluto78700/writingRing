@@ -45,8 +45,19 @@ def _write_package(
     (directory / f"{stem}_segmentation_summary.json").write_text(
         json.dumps({
             "input_kind": "spike-imu",
-            "feature_schema": "signed_wavelet_events_plus_imu_v1",
+            "feature_schema": (
+                "signed_wavelet_events_plus_imu_v1"
+                if channel_count == 21
+                else "polarity_split_wavelet_events_plus_imu_v1"
+            ),
             "channel_count": channel_count,
+            "event_representation": "unsigned",
+            "event_feature_schema": (
+                "custom_wavelet_polarity_split_abs_events_v1"
+                if channel_count == 36
+                else "custom_wavelet_abs_rectified_events_v1"
+            ),
+            "event_channel_count": channel_count - 6,
             "channel_names": [f"channel_{index}" for index in range(channel_count)],
             "units": ["unit"] * channel_count,
             "spike_encoder": {"schema": "custom_wavelet_encoder_spec_v1", "frequencies_hz": [0.5, 1.0, 2.0, 4.0, 8.0]},
@@ -180,8 +191,35 @@ def test_padding_rejects_non_spike_channel_count(tmp_path: Path) -> None:
         lengths=[2, 3],
         channel_count=9,
     )
-    with pytest.raises(SegmentPaddingError, match="expected shape .*21"):
+    with pytest.raises(SegmentPaddingError, match="channel_count"):
         validate_segmented_root(root)
+
+
+def test_padding_preserves_polarity_split_channel_layout(tmp_path: Path) -> None:
+    root = tmp_path / "segments"
+    _write_package(
+        root,
+        user="user_a",
+        action="one",
+        lengths=[3, 5],
+        channel_count=36,
+    )
+
+    dataset = validate_segmented_root(root)[0]
+    result = build_padding_package(dataset, target_length=4)
+    output = tmp_path / "padded"
+    summary = publish_padded_root([dataset], input_root=root, output_root=output, target_length=4)
+
+    assert dataset.spike_imu.shape == (8, 36)
+    assert result.padded_spike_imu.shape == (1, 4, 36)
+    assert result.summary["feature_schema"] == "polarity_split_wavelet_events_plus_imu_v1"
+    assert result.summary["channel_count"] == 36
+    assert summary["feature_schema"] == "polarity_split_wavelet_events_plus_imu_v1"
+    assert summary["channel_count"] == 36
+    assert np.load(
+        output / "user_a" / "action_one" / "user_a_action_one_paddedSpikeIMU.npy",
+        allow_pickle=False,
+    ).shape == (1, 4, 36)
 
 
 def test_padding_rejects_non_spike_summary(tmp_path: Path) -> None:

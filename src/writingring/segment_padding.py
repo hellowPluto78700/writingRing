@@ -20,6 +20,8 @@ from typing import Any, Final, Iterable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from writingring.recording_features import SPIKE_IMU_SCHEMA_CHANNEL_COUNTS
+
 
 DEFAULT_CANDIDATE_LENGTHS: Final[tuple[int, ...]] = (
     256, 320, 400, 480, 512, 600, 640, 768, 800, 1024,
@@ -147,19 +149,36 @@ def discover_segmented_datasets(input_root: Path) -> tuple[SegmentedDatasetPaths
 def load_and_validate_segmented_dataset(paths: SegmentedDatasetPaths) -> ValidatedSegmentedDataset:
     """Load one SpikeIMU package without pickle support and enforce its contract."""
 
-    spike_imu = _load_array(paths.spike_imu_path, paths=paths, expected="a 2-D (N, 21) SpikeIMU array")
-    if spike_imu.ndim != 2 or spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT:
-        _shape_error(paths, paths.spike_imu_path, f"(sample_count, {SPIKE_IMU_CHANNEL_COUNT})", tuple(spike_imu.shape))
+    segmentation_summary = _load_segmentation_summary(paths)
+    expected_channel_count = int(segmentation_summary["channel_count"])
+    spike_imu = _load_array(
+        paths.spike_imu_path,
+        paths=paths,
+        expected=f"a 2-D (N, {expected_channel_count}) SpikeIMU array",
+    )
+    if spike_imu.ndim != 2 or spike_imu.shape[1] != expected_channel_count:
+        _shape_error(
+            paths,
+            paths.spike_imu_path,
+            f"(sample_count, {expected_channel_count})",
+            tuple(spike_imu.shape),
+        )
     if not np.isfinite(spike_imu).all():
         raise SegmentPaddingError(
             f"user={paths.user!r}, action={paths.action!r}, file={paths.spike_imu_path}: "
             "SpikeIMU values must be finite"
         )
-    segmentation_summary = _load_segmentation_summary(paths)
     labels = _load_array(paths.labels_path, paths=paths, expected="a 1-D labels array")
     offsets = _load_array(paths.segment_offsets_path, paths=paths, expected="a 1-D offsets array")
     lengths = _load_array(paths.segment_lengths_path, paths=paths, expected="a 1-D lengths array")
-    _validate_dataset_arrays(paths, spike_imu, labels, offsets, lengths)
+    _validate_dataset_arrays(
+        paths,
+        spike_imu,
+        labels,
+        offsets,
+        lengths,
+        expected_channel_count=expected_channel_count,
+    )
     targets: np.ndarray | None = None
     if paths.board_event_targets_path is not None:
         targets = _load_array(
@@ -187,8 +206,18 @@ def validate_segmented_root(input_root: Path) -> tuple[ValidatedSegmentedDataset
     """Discover and fully validate every package before any output is written."""
 
     datasets = tuple(load_and_validate_segmented_dataset(item) for item in discover_segmented_datasets(input_root))
-    if any(dataset.spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT for dataset in datasets):
-        raise SegmentPaddingError("segmentation root contains a non-21-channel SpikeIMU package")
+    reference_schema = datasets[0].segmentation_summary["feature_schema"]
+    reference_count = datasets[0].spike_imu.shape[1]
+    reference_event_contract = _event_contract(datasets[0].segmentation_summary)
+    if any(
+        dataset.segmentation_summary["feature_schema"] != reference_schema
+        or dataset.spike_imu.shape[1] != reference_count
+        or _event_contract(dataset.segmentation_summary) != reference_event_contract
+        for dataset in datasets[1:]
+    ):
+        raise SegmentPaddingError(
+            "segmentation root contains mixed SpikeIMU schemas or channel counts"
+        )
     return datasets
 
 
@@ -299,8 +328,11 @@ def write_segment_length_analysis(
     payload = {
         "input_root": str(Path(input_root).resolve()),
         "input_kind": "spike-imu",
-        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
-        "channel_count": SPIKE_IMU_CHANNEL_COUNT,
+        "feature_schema": datasets[0].segmentation_summary["feature_schema"],
+        "event_representation": datasets[0].segmentation_summary["event_representation"],
+        "event_feature_schema": datasets[0].segmentation_summary["event_feature_schema"],
+        "event_channel_count": datasets[0].segmentation_summary["event_channel_count"],
+        "channel_count": datasets[0].spike_imu.shape[1],
         "sampling_rate_hz": analysis["sampling_rate_hz"],
         "segment_count": analysis["segment_count"],
         "user_action_count": analysis["user_action_count"],
@@ -403,7 +435,10 @@ def build_padding_package(
             "board_event_targets_present": padded_targets is not None,
             "channel_count": channel_count,
             "input_kind": "spike-imu",
-            "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+            "feature_schema": dataset.segmentation_summary["feature_schema"],
+            "event_representation": dataset.segmentation_summary["event_representation"],
+            "event_feature_schema": dataset.segmentation_summary["event_feature_schema"],
+            "event_channel_count": dataset.segmentation_summary["event_channel_count"],
             "source_input_directory": str(dataset.paths.input_dir),
         })
     total_valid = int(np.sum(valid_lengths, dtype=np.int64))
@@ -423,7 +458,10 @@ def build_padding_package(
         "board_event_targets_present": padded_targets is not None,
         "channel_count": channel_count,
         "input_kind": "spike-imu",
-        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "feature_schema": dataset.segmentation_summary["feature_schema"],
+        "event_representation": dataset.segmentation_summary["event_representation"],
+        "event_feature_schema": dataset.segmentation_summary["event_feature_schema"],
+        "event_channel_count": dataset.segmentation_summary["event_channel_count"],
         "spike_encoder": dataset.segmentation_summary["spike_encoder"],
         "spike_encoder_spec_sha256": dataset.segmentation_summary["spike_encoder_spec_sha256"],
         "channel_names": dataset.segmentation_summary["channel_names"],
@@ -517,9 +555,22 @@ def _load_array(path: Path, *, paths: SegmentedDatasetPaths, expected: str) -> n
     return value
 
 
-def _validate_dataset_arrays(paths: SegmentedDatasetPaths, spike_imu: np.ndarray, labels: np.ndarray, offsets: np.ndarray, lengths: np.ndarray) -> None:
-    if spike_imu.ndim != 2 or spike_imu.shape[1] != SPIKE_IMU_CHANNEL_COUNT:
-        _shape_error(paths, paths.spike_imu_path, f"(sample_count, {SPIKE_IMU_CHANNEL_COUNT})", tuple(spike_imu.shape))
+def _validate_dataset_arrays(
+    paths: SegmentedDatasetPaths,
+    spike_imu: np.ndarray,
+    labels: np.ndarray,
+    offsets: np.ndarray,
+    lengths: np.ndarray,
+    *,
+    expected_channel_count: int,
+) -> None:
+    if spike_imu.ndim != 2 or spike_imu.shape[1] != expected_channel_count:
+        _shape_error(
+            paths,
+            paths.spike_imu_path,
+            f"(sample_count, {expected_channel_count})",
+            tuple(spike_imu.shape),
+        )
     if labels.ndim != 1:
         _shape_error(paths, paths.labels_path, "(segment_count,)", tuple(labels.shape))
     if lengths.ndim != 1:
@@ -604,16 +655,22 @@ def _load_segmentation_summary(paths: SegmentedDatasetPaths) -> dict[str, object
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
             "padding only supports input_kind='spike-imu'"
         )
-    if summary.get("feature_schema") != SPIKE_IMU_FEATURE_SCHEMA:
+    feature_schema = summary.get("feature_schema")
+    if (
+        not isinstance(feature_schema, str)
+        or feature_schema not in SPIKE_IMU_SCHEMA_CHANNEL_COUNTS
+    ):
         raise SegmentPaddingError(
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
-            f"expected feature_schema={SPIKE_IMU_FEATURE_SCHEMA!r}"
+            "expected a supported SpikeIMU feature_schema"
         )
-    if summary.get("channel_count") != SPIKE_IMU_CHANNEL_COUNT:
+    expected_channel_count = SPIKE_IMU_SCHEMA_CHANNEL_COUNTS[feature_schema]
+    if summary.get("channel_count") != expected_channel_count:
         raise SegmentPaddingError(
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
-            f"expected channel_count={SPIKE_IMU_CHANNEL_COUNT}"
+            f"expected channel_count={expected_channel_count} for {feature_schema!r}"
         )
+    _event_contract(summary)
     spec = summary.get("spike_encoder")
     digest = summary.get("spike_encoder_spec_sha256")
     if not isinstance(spec, Mapping) or not isinstance(digest, str) or len(digest) != 64:
@@ -628,12 +685,36 @@ def _load_segmentation_summary(paths: SegmentedDatasetPaths) -> dict[str, object
     if hashlib.sha256(encoded).hexdigest() != digest:
         raise SegmentPaddingError("segmentation summary encoder_spec_sha256 does not match encoder_spec")
     channel_names = summary.get("channel_names")
-    if not isinstance(channel_names, list) or len(channel_names) != SPIKE_IMU_CHANNEL_COUNT:
+    if not isinstance(channel_names, list) or len(channel_names) != expected_channel_count:
         raise SegmentPaddingError(
             f"user={paths.user!r}, action={paths.action!r}, file={paths.segmentation_summary_path}: "
-            f"expected {SPIKE_IMU_CHANNEL_COUNT} channel_names"
+            f"expected {expected_channel_count} channel_names"
         )
     return summary
+
+
+def _event_contract(summary: Mapping[str, object]) -> tuple[str, str, int]:
+    representation = summary.get("event_representation")
+    if representation not in {"signed", "unsigned"}:
+        raise SegmentPaddingError(
+            "segmentation summary event_representation must be 'signed' or 'unsigned'"
+        )
+    event_feature_schema = summary.get("event_feature_schema")
+    if not isinstance(event_feature_schema, str) or not event_feature_schema:
+        raise SegmentPaddingError(
+            "segmentation summary must declare a non-empty event_feature_schema"
+        )
+    channel_count = summary.get("channel_count")
+    event_channel_count = summary.get("event_channel_count")
+    if (
+        not isinstance(channel_count, int)
+        or not isinstance(event_channel_count, int)
+        or event_channel_count != channel_count - 6
+    ):
+        raise SegmentPaddingError(
+            "segmentation summary event_channel_count must equal channel_count minus 6"
+        )
+    return representation, event_feature_schema, event_channel_count
 
 
 def _manifest_metadata_by_index(dataset: ValidatedSegmentedDataset) -> dict[int, Mapping[str, Any]]:
@@ -729,8 +810,11 @@ def _package_fingerprints(datasets: Sequence[ValidatedSegmentedDataset], *, inpu
         "relative_spike_imu_path": str(dataset.paths.spike_imu_path.resolve().relative_to(root)),
         "segment_count": len(dataset.segment_lengths),
         "maximum_length": int(np.max(dataset.segment_lengths)),
-        "channel_count": SPIKE_IMU_CHANNEL_COUNT,
-        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "channel_count": dataset.spike_imu.shape[1],
+        "feature_schema": dataset.segmentation_summary["feature_schema"],
+        "event_representation": dataset.segmentation_summary["event_representation"],
+        "event_feature_schema": dataset.segmentation_summary["event_feature_schema"],
+        "event_channel_count": dataset.segmentation_summary["event_channel_count"],
         "spike_encoder": dataset.segmentation_summary["spike_encoder"],
         "spike_encoder_spec_sha256": dataset.segmentation_summary["spike_encoder_spec_sha256"],
     } for dataset in datasets]
@@ -774,10 +858,18 @@ def _validate_analysis_report(report: Mapping[str, object], *, datasets: Sequenc
         )
     if report.get("input_kind") != "spike-imu":
         raise SegmentPaddingError("analysis report is not for SpikeIMU input; rerun analysis")
-    if report.get("feature_schema") != SPIKE_IMU_FEATURE_SCHEMA:
+    expected_schema = datasets[0].segmentation_summary["feature_schema"]
+    expected_channel_count = datasets[0].spike_imu.shape[1]
+    expected_event_contract = _event_contract(datasets[0].segmentation_summary)
+    if report.get("feature_schema") != expected_schema:
         raise SegmentPaddingError("analysis report feature schema is not SpikeIMU; rerun analysis")
-    if report.get("channel_count") != SPIKE_IMU_CHANNEL_COUNT:
-        raise SegmentPaddingError("analysis report channel count is not 21; rerun analysis")
+    if report.get("channel_count") != expected_channel_count:
+        raise SegmentPaddingError(
+            "analysis report channel count does not match the segmented SpikeIMU; "
+            "rerun analysis"
+        )
+    if _event_contract(report) != expected_event_contract:
+        raise SegmentPaddingError("analysis report event contract differs from the segmented SpikeIMU")
     if report.get("segment_count") != sum(len(dataset.segment_lengths) for dataset in datasets):
         raise SegmentPaddingError("analysis report segment count differs from current input; rerun analysis")
     expected = _package_fingerprints(datasets, input_root=input_root)
@@ -842,10 +934,12 @@ def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root
         raise SegmentPaddingError("cannot publish an empty padding root")
     reference_hash = results[0].summary.get("spike_encoder_spec_sha256")
     reference_spec = results[0].summary.get("spike_encoder")
+    reference_event_contract = _event_contract(results[0].summary)
     for result in results[1:]:
         if (
             result.summary.get("spike_encoder_spec_sha256") != reference_hash
             or result.summary.get("spike_encoder") != reference_spec
+            or _event_contract(result.summary) != reference_event_contract
         ):
             raise SegmentPaddingError(
                 "padding packages contain mismatched encoder specifications: "
@@ -861,7 +955,10 @@ def _root_padding_summary(results: Sequence[PaddingPackageResult], *, input_root
         "target_length": target_length, "sampling_rate_hz": sampling_rate_hz,
         "channel_count": results[0].padded_spike_imu.shape[2],
         "input_kind": "spike-imu",
-        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
+        "feature_schema": results[0].summary["feature_schema"],
+        "event_representation": results[0].summary["event_representation"],
+        "event_feature_schema": results[0].summary["event_feature_schema"],
+        "event_channel_count": results[0].summary["event_channel_count"],
         "spike_encoder": reference_spec,
         "spike_encoder_spec_sha256": reference_hash,
         "channel_names": results[0].summary["channel_names"],

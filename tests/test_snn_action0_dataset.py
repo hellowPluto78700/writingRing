@@ -27,16 +27,18 @@ def _write_padded_package(
     user: str,
     labels: list[str],
     padded_length: int = 4,
+    channel_count: int = 21,
 ) -> np.ndarray:
     directory = segmentation_root / user / "action_0"
     directory.mkdir(parents=True)
     stem = f"{user}_action_0"
     segment_count = len(labels)
-    values = np.zeros((segment_count, padded_length, 21), dtype=np.float32)
-    values[:, :, :15] = np.arange(
-        segment_count * padded_length * 15, dtype=np.float32
-    ).reshape(segment_count, padded_length, 15)
-    values[:, :, 15:] = 10_000 + np.arange(
+    event_channel_count = channel_count - 6
+    values = np.zeros((segment_count, padded_length, channel_count), dtype=np.float32)
+    values[:, :, :event_channel_count] = np.arange(
+        segment_count * padded_length * event_channel_count, dtype=np.float32
+    ).reshape(segment_count, padded_length, event_channel_count)
+    values[:, :, event_channel_count:] = 10_000 + np.arange(
         segment_count * padded_length * 6, dtype=np.float32
     ).reshape(segment_count, padded_length, 6)
     valid_lengths = np.asarray(
@@ -56,12 +58,25 @@ def _write_metadata(
     *,
     target_length: object = 4,
     sampling_rate_hz: object = 200.0,
+    channel_count: int = 21,
     **overrides: object,
 ) -> None:
     payload: dict[str, object] = {
         "input_kind": "spike-imu",
-        "feature_schema": SPIKE_IMU_FEATURE_SCHEMA,
-        "channel_count": 21,
+        "feature_schema": (
+            SPIKE_IMU_FEATURE_SCHEMA
+            if channel_count == 21
+            else "polarity_split_wavelet_events_plus_imu_v1"
+        ),
+        "channel_count": channel_count,
+        "event_representation": "unsigned",
+        "event_feature_schema": (
+            "custom_wavelet_polarity_split_abs_events_v1"
+            if channel_count == 36
+            else "custom_wavelet_abs_rectified_events_v1"
+        ),
+        "event_channel_count": channel_count - 6,
+        "spike_encoder_spec_sha256": "0" * 64,
         "target_length": target_length,
         "sampling_rate_hz": sampling_rate_hz,
         "padding_side": "right",
@@ -92,6 +107,7 @@ def test_dataset_returns_only_the_first_fifteen_spike_channels(tmp_path: Path) -
     segmentation_root = tmp_path / "low-pass" / "label" / "segmentation_padded"
     source = _write_padded_package(segmentation_root, user="user_0", labels=["A", "B"])
     _write_padded_package(segmentation_root, user="user_1", labels=["B", "A"])
+    _write_metadata(segmentation_root)
     class_to_idx = discover_class_to_idx(segmentation_root)
 
     dataset = Action0SegmentDataset(segmentation_root, ["user_0"], class_to_idx)
@@ -108,6 +124,57 @@ def test_dataset_returns_only_the_first_fifteen_spike_channels(tmp_path: Path) -
     assert valid_mask.tolist() == [True, True, True, True]
     assert dataset.padded_length == 4
     assert dataset.class_distribution == {"A": 1, "B": 1}
+
+
+def test_dataset_keeps_all_thirty_polarity_split_event_channels(tmp_path: Path) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    source = _write_padded_package(
+        segmentation_root,
+        user="user_0",
+        labels=["A", "B"],
+        channel_count=36,
+    )
+    _write_padded_package(
+        segmentation_root,
+        user="user_1",
+        labels=["B", "A"],
+        channel_count=36,
+    )
+    _write_metadata(segmentation_root, channel_count=36)
+    class_to_idx = discover_class_to_idx(segmentation_root)
+
+    dataset = Action0SegmentDataset(segmentation_root, ["user_0"], class_to_idx)
+    features, _, _ = dataset[0]
+
+    assert dataset.input_channel_count == 30
+    assert features.shape == (4, 30)
+    torch.testing.assert_close(features, torch.from_numpy(source[0, :, :30]))
+    assert not torch.any(features >= 10_000)
+
+
+def test_dataset_rejects_signed_event_metadata(tmp_path: Path) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    _write_padded_package(segmentation_root, user="user_0", labels=["A", "B"])
+    _write_metadata(segmentation_root, event_representation="signed")
+
+    with pytest.raises(Action0DatasetError, match="event_representation='unsigned'"):
+        Action0SegmentDataset(segmentation_root, ["user_0"], {"A": 0, "B": 1})
+
+
+def test_dataset_rejects_negative_values_declared_unsigned(tmp_path: Path) -> None:
+    segmentation_root = tmp_path / "segmentation_padded"
+    _write_padded_package(segmentation_root, user="user_0", labels=["A", "B"])
+    _write_metadata(segmentation_root)
+    padded_path = (
+        segmentation_root / "user_0" / "action_0" / "user_0_action_0_paddedSpikeIMU.npy"
+    )
+    values = np.load(padded_path, allow_pickle=False)
+    values[0, 0, 0] = -1.0
+    np.save(padded_path, values, allow_pickle=False)
+    dataset = Action0SegmentDataset(segmentation_root, ["user_0"], {"A": 0, "B": 1})
+
+    with pytest.raises(Action0DatasetError, match="must be nonnegative"):
+        _ = dataset[0]
 
 
 def test_valid_padding_metadata_loads_and_keeps_diagnostic_counts(tmp_path: Path) -> None:
@@ -160,8 +227,9 @@ def test_malformed_padding_metadata_fails(tmp_path: Path) -> None:
     ("field", "value", "message"),
     [
         ("input_kind", "raw-ring", "input_kind"),
-        ("feature_schema", "wrong_schema", "feature_schema"),
-        ("channel_count", 15, "channel_count"),
+        ("event_channel_count", 14, "event_channel_count"),
+        ("event_feature_schema", "", "event_feature_schema"),
+        ("spike_encoder_spec_sha256", "not-a-hash", "spike_encoder_spec_sha256"),
         ("target_length", 0, "target_length"),
         ("target_length", 4.0, "target_length"),
         ("sampling_rate_hz", 0.0, "sampling_rate_hz"),

@@ -120,6 +120,44 @@ def test_post_encode_abs_rectify_preserves_occurrences_and_signed_step() -> None
     assert rectified_encoder.encoding_metadata["event_representation"] == rectified.representation
 
 
+def test_polarity_split_abs_preserves_signed_event_occurrences_and_names() -> None:
+    settings = dict(
+        frequencies_hz=(1.0, 2.0, 4.0, 8.0, 16.0),
+        max_filter_time_s=0.3,
+        output_dtype="float64",
+    )
+    samples = np.column_stack(
+        (
+            np.sin(np.arange(160) / 3.0),
+            np.zeros(160),
+            -np.sin(np.arange(160) / 3.0),
+        )
+    )
+    signed = CustomWaveletEncoder(CustomWaveletSettings(**settings)).encode_sequence(samples)
+    split_encoder = CustomWaveletEncoder(
+        CustomWaveletSettings(**settings, post_encode_transform="PolaritySplitAbs")
+    )
+    split = split_encoder.encode_sequence(samples)
+
+    assert split.values.shape == (160, 30)
+    assert split.representation == "polarity_split_sparse_wavelet_extrema"
+    assert split.channel_names[:4] == (
+        "event_x_0_pos",
+        "event_x_0_neg_abs",
+        "event_x_1_pos",
+        "event_x_1_neg_abs",
+    )
+    assert split_encoder.canonical_encoder_spec["channel_order"] == (
+        "axis_major_frequency_minor_pairwise_positive_negative"
+    )
+    assert split_encoder.canonical_encoder_spec["event_channel_names"] == list(split.channel_names)
+    assert np.all(split.values >= 0.0)
+    np.testing.assert_array_equal(split.values[:, 0::2], np.maximum(signed.values, 0.0))
+    np.testing.assert_array_equal(split.values[:, 1::2], np.maximum(-signed.values, 0.0))
+    np.testing.assert_array_equal(np.any(split.values != 0.0, axis=1), np.any(signed.values != 0.0, axis=1))
+    assert np.count_nonzero(split.values) == np.count_nonzero(signed.values)
+
+
 def test_encoder_reset_reproduces_one_sequence_and_runner_resets_each_boundary() -> None:
     settings = {
         "frequencies_hz": [1.0, 2.0, 4.0, 8.0, 16.0],

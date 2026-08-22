@@ -1249,7 +1249,7 @@ def _build_aligned_recording_artifacts(
         # Compute the exact same robust transient score once for both the
         # first-segment recovery rule and the verification plot.  SpikeIMU
         # therefore continues to use only its declared transient IMU channels
-        # (currently 15:21), never the spike event channels.
+        # (the declared trailing six IMU channels), never spike event channels.
         transient_score = compute_transient_score_array(
             feature_input.values[:, feature_input.transient_channel_indices]
         )
@@ -1924,6 +1924,9 @@ def _manifest_row(
         "segmentation_verification_path": str(published_verification_path),
         "input_kind": feature.input_kind,
         "feature_schema": feature.feature_schema,
+        "event_representation": feature.event_representation,
+        "event_feature_schema": feature.event_feature_schema,
+        "event_channel_count": feature.event_channel_count,
         "channel_count": feature.channel_count,
         "channel_schema": feature.feature_schema,
         "channel_names": list(feature.channel_names),
@@ -2143,6 +2146,9 @@ def _aligned_summary(
         feature.input_kind != input_kind
         or feature.feature_schema != first_feature.feature_schema
         or feature.channel_count != first_feature.channel_count
+        or feature.event_representation != first_feature.event_representation
+        or feature.event_feature_schema != first_feature.event_feature_schema
+        or feature.event_channel_count != first_feature.event_channel_count
         or feature.channel_names != first_feature.channel_names
         or feature.units != first_feature.units
         for feature in feature_inputs
@@ -2330,6 +2336,9 @@ def _aligned_summary(
         "output_dtype": output_dtype.name,
         "output_schema_version": 4,
         "feature_schema": first_feature.feature_schema,
+        "event_representation": first_feature.event_representation,
+        "event_feature_schema": first_feature.event_feature_schema,
+        "event_channel_count": first_feature.event_channel_count,
         "channel_count": first_feature.channel_count,
         "channel_names": list(first_feature.channel_names),
         "channel_units": list(first_feature.units),
@@ -2340,12 +2349,26 @@ def _aligned_summary(
         },
         "transient_channel_indices": list(first_feature.transient_channel_indices),
         "transient_channel_names": list(first_feature.transient_channel_names),
-        "event_channel_slice": [0, 15] if input_kind == "spike-imu" else None,
+        "event_channel_slice": (
+            [0, first_feature.transient_channel_indices[0]]
+            if input_kind == "spike-imu"
+            else None
+        ),
         "acceleration_m_s2_channel_slice": (
-            [15, 18] if input_kind == "spike-imu" else [3, 6]
+            [
+                first_feature.transient_channel_indices[0],
+                first_feature.transient_channel_indices[0] + 3,
+            ]
+            if input_kind == "spike-imu"
+            else [3, 6]
         ),
         "gyroscope_channel_slice": (
-            [18, 21] if input_kind == "spike-imu" else [6, 9]
+            [
+                first_feature.transient_channel_indices[0] + 3,
+                first_feature.transient_channel_indices[0] + 6,
+            ]
+            if input_kind == "spike-imu"
+            else [6, 9]
         ),
         "feature_values_sha256": [
             feature.values_sha256 for feature in feature_inputs

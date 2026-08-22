@@ -43,8 +43,8 @@ def test_all_preprocessing_pipeline_entry_points_use_shared_padding_pipeline() -
 def test_preprocessing_pipeline_transform_control_is_validated_and_wired(tmp_path: Path) -> None:
     common = COMMON_PATH.read_text(encoding="utf-8")
     assert 'POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"' in common
-    assert 'none|AbsRectify)' in common
-    assert '"POST_ENCODE_TRANSFORM must be none or AbsRectify"' in common
+    assert 'none|AbsRectify|PolaritySplitAbs)' in common
+    assert '"POST_ENCODE_TRANSFORM must be none, AbsRectify, or PolaritySplitAbs"' in common
     assert '--post-encode-transform "$POST_ENCODE_TRANSFORM"' in common
 
     environment = {
@@ -64,7 +64,7 @@ def test_preprocessing_pipeline_transform_control_is_validated_and_wired(tmp_pat
         text=True,
     )
     assert completed.returncode != 0
-    assert "POST_ENCODE_TRANSFORM must be none or AbsRectify" in completed.stderr
+    assert "POST_ENCODE_TRANSFORM must be none, AbsRectify, or PolaritySplitAbs" in completed.stderr
 
 
 def test_requested_transform_reaches_continue_and_qa_validation_sites() -> None:
@@ -91,7 +91,22 @@ def _write_spike_artifact(
     metadata_path = root / "metadata.json"
     np.save(values_path, np.zeros((2, 21), dtype=np.float32), allow_pickle=False)
     np.save(timestamps_path, np.arange(2, dtype=np.float64), allow_pickle=False)
-    metadata: dict[str, object] = {"spike_imu": {"channel_count": 21}}
+    transform = settings.get("post_encode_transform") if isinstance(settings, dict) else None
+    event_representation = "unsigned" if transform == "AbsRectify" else "signed"
+    event_feature_schema = (
+        "custom_wavelet_abs_rectified_events_v1"
+        if transform == "AbsRectify"
+        else "custom_wavelet_signed_events_v1"
+    )
+    metadata: dict[str, object] = {
+        "spike_imu": {
+            "channel_count": 21,
+            "schema": "signed_wavelet_events_plus_imu_v1",
+            "event_representation": event_representation,
+            "event_feature_schema": event_feature_schema,
+            "event_channel_count": 15,
+        }
+    }
     if settings != "missing":
         metadata["settings"] = settings
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
@@ -161,9 +176,43 @@ def test_spike_validator_enforces_transform_provenance(
     assert (completed.returncode == 0) is valid
     if not valid:
         output = completed.stdout + completed.stderr
-        assert "SpikeIMU post_encode_transform mismatch" in output
-        assert "expected=" in output
-        assert "actual=" in output
+        assert (
+            "SpikeIMU post_encode_transform mismatch" in output
+            or "SpikeIMU metadata layout mismatch" in output
+        )
+
+
+def test_spike_validator_accepts_polarity_split_layout(tmp_path: Path) -> None:
+    values_path = tmp_path / "spikeIMU.npy"
+    timestamps_path = tmp_path / "timestamps_us.npy"
+    metadata_path = tmp_path / "metadata.json"
+    np.save(values_path, np.zeros((2, 36), dtype=np.float32), allow_pickle=False)
+    np.save(timestamps_path, np.arange(2, dtype=np.float64), allow_pickle=False)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "spike_imu": {
+                    "channel_count": 36,
+                    "schema": "polarity_split_wavelet_events_plus_imu_v1",
+                    "event_representation": "unsigned",
+                    "event_feature_schema": "custom_wavelet_polarity_split_abs_events_v1",
+                    "event_channel_count": 30,
+                },
+                "settings": {"post_encode_transform": "PolaritySplitAbs"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_spike_validator(
+        values_path,
+        metadata_path,
+        timestamps_path,
+        "PolaritySplitAbs",
+        tmp_path / "qa.log",
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_continue_validation_reuses_matching_transform_and_rebuilds_on_mismatch(
@@ -188,7 +237,16 @@ def test_continue_validation_reuses_matching_transform_and_rebuilds_on_mismatch(
     np.save(spike_root / "spikeIMU.npy", np.zeros((2, 21), dtype=np.float32), allow_pickle=False)
     np.save(spike_root / "recording_offsets.npy", np.array([0, 2], dtype=np.int64), allow_pickle=False)
 
-    metadata = {"spike_imu": {"channel_count": 21}, "settings": {"post_encode_transform": "AbsRectify"}}
+    metadata = {
+        "spike_imu": {
+            "channel_count": 21,
+            "schema": "signed_wavelet_events_plus_imu_v1",
+            "event_representation": "unsigned",
+            "event_feature_schema": "custom_wavelet_abs_rectified_events_v1",
+            "event_channel_count": 15,
+        },
+        "settings": {"post_encode_transform": "AbsRectify"},
+    }
     (spike_root / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
 
     script = "\n".join(

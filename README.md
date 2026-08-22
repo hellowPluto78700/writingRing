@@ -46,8 +46,8 @@ Ring recording (`*_ring_0.bin`)
   → discovery / inspection / Matplotlib visualization
   → 9-channel preprocessing and gravity handling
   → optional Custom Wavelet encoding
-       ├── 15 event channels
-       └── 21-channel SpikeIMU artifact
+       ├── 15 signed/rectified event channels, or 30 polarity-split channels
+       └── 21-channel signed/rectified or 36-channel polarity-split SpikeIMU artifact
   → optional Ring–Board alignment
   → label or aligned-Board-event variable-length segmentation
        ├── optional row-aligned acceleration reconstruction `(N, 3)`
@@ -55,13 +55,13 @@ Ring recording (`*_ring_0.bin`)
              └── optional padded acceleration reconstruction `(S, T_pad, 3)`
              └── optional acceleration-CNN representation evaluation
                  ├── Experiment A: raw-acceleration baseline
-                 │   (SpikeIMU channels `15:18`)
+                 │   (the trailing acceleration channels)
                  ├── Experiment B: reconstructed acceleration through the
                  │   frozen raw-trained CNN
                  ├── Experiment C: CNN trained and tested on reconstruction
                  └── Experiment D2: mixed raw/reconstruction training with
                      separate raw and reconstruction test evaluations
-  → optional, separate Action-0 SynNet training (SpikeIMU channels 0:15)
+  → optional, separate Action-0 SynNet training (all published event channels)
        ├── CLI baseline with the full variant label mapping
        └── notebook common-label subset experiment
 ```

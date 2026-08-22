@@ -83,10 +83,11 @@ python scripts/encode_spikes.py \
   --post-encode-transform AbsRectify
 ```
 
-`--post-encode-transform` accepts only `none` and `AbsRectify`. Omitting it
+`--post-encode-transform` accepts `none`, `AbsRectify`, and `PolaritySplitAbs`. Omitting it
 does not override encoder settings; explicit `none` writes a no-transform
-setting, and explicit `AbsRectify` writes rectification after occurrence
-alignment. It is valid only with `--encoder custom-wavelet`; explicitly using
+setting, `AbsRectify` writes rectification after occurrence alignment, and
+`PolaritySplitAbs` writes ordered nonnegative `<channel>_pos`,
+`<channel>_neg_abs` pairs after occurrence alignment. It is valid only with `--encoder custom-wavelet`; explicitly using
 it with another encoder fails rather than being ignored.
 
 Custom Wavelet treats the entire file as one recording and uses
@@ -140,25 +141,27 @@ preprocessing summary both provide `sampling_rate_hz`, they must match
 exactly. If neither provides it, encoding fails.
 
 Custom Wavelet defaults to signed local-extrema amplitudes, not binary spike
-trains. Its optional `post_encode_transform` accepts only `AbsRectify`, which
-applies `abs` **after** complete occurrence-aligned encoding. It never changes
-wavelet responses, extrema detection, occurrence rows, event channels, event
-sparsity, timestamps, or the trailing IMU values. Metadata records the chosen
-transform and either `signed_sparse_wavelet_extrema` or
-`abs_rectified_sparse_wavelet_extrema`; consumers must use that explicit event
-representation for polarity, not infer it from the legacy layout name.
+trains. Its optional `post_encode_transform` applies either `AbsRectify` or
+`PolaritySplitAbs` **after** complete occurrence-aligned encoding. The latter
+splits every signed event channel into positive and negative-absolute outputs.
+No transform changes wavelet responses, extrema detection, occurrence rows,
+event sparsity, timestamps, or the trailing IMU values. Metadata records the
+chosen transform and explicit representation; consumers must not infer
+polarity semantics from a layout name alone.
 
 The encoder reflect-pads by half of its odd extrema window, compensates the
 fixed extrema-confirmation latency, and returns events to their occurrence
 rows. At the default settings the half-window is 30 samples (0.15 seconds) on
 each side. IIR phase/group delay and warmup are not compensated.
 
-`spikes.npy` has shape `(N, 15)`. `spikeIMU.npy` has shape `(N, 21)`:
+Signed/rectified `spikes.npy` has shape `(N, 15)` and `spikeIMU.npy` has shape
+`(N, 21)`. With `PolaritySplitAbs`, they instead have shapes `(N, 30)` and
+`(N, 36)`:
 
 ```text
-15 Custom Wavelet event channels (signed by default; optionally abs-rectified)
-3 acceleration channels in m/s²
-3 gyroscope channels in rad/s
+15 signed/rectified channels, or 30 ordered polarity-split event channels
+3 trailing acceleration channels in m/s²
+3 trailing gyroscope channels in rad/s
 ```
 
 The six trailing values are copied row-for-row from source columns `3:9`;
@@ -167,20 +170,28 @@ or Xylo, and measured acceleration only when raw mode was explicitly allowed.
 `recording_offsets.npy` is `[0, N]`. `metadata.json` records the source
 contract, encoder settings, output schema, reset boundary, row alignment, and
 the explicit post-transform/event representation. For the canonical
-preprocessing handoff, its `spike_imu` section also records the unchanged
-legacy 21-channel layout schema `signed_wavelet_events_plus_imu_v1`, explicit
-event representation, event units, trailing IMU units, source columns `3:9`,
-sample count, and the copied timestamp provenance.
+preprocessing handoff, its `spike_imu` section records explicit event and
+trailing-IMU counts, representation, units, source columns `3:9`, sample
+count, and copied timestamp provenance. Signed/rectified data use
+`signed_wavelet_events_plus_imu_v1`; polarity-split data use
+`polarity_split_wavelet_events_plus_imu_v1`.
+
+For event-consuming models, the same section has a separate event contract:
+`event_representation` is `signed` or `unsigned`, `event_channel_count` is the
+number of leading event channels, and `event_feature_schema` identifies their
+meaning and order. `AbsRectify` and `PolaritySplitAbs` publish `unsigned`;
+the detailed transform representation remains in `event_encoding`.
 
 The downstream segmentation matrix is:
 
 ```text
-columns 0:15   Custom Wavelet events; polarity is explicit metadata
-columns 15:18  acceleration x/y/z (m/s²)
-columns 18:21  gyro x/y/z (rad/s)
+signed/rectified: columns 0:15   Custom Wavelet events
+polarity split:   columns 0:30   ordered positive/negative-absolute event pairs
+both layouts: trailing six columns are acceleration x/y/z (m/s²), then gyro x/y/z (rad/s)
 ```
 
-Alignment and Board-assisted segmentation use only `15:21` for transient
+Alignment and Board-assisted segmentation use only the metadata-declared
+trailing six IMU channels for transient
 detection and require the SpikeIMU values, metadata, and canonical timestamp
 hashes to match the saved alignment offset.
 

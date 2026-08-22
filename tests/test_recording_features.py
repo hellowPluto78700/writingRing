@@ -14,6 +14,7 @@ from writingring.event_alignment import compute_transient_score_array
 from writingring.imu_preprocessing import PREPROCESSED_IMU_COLUMNS
 from writingring.preprocessing_io import PREPROCESSED_IMU_UNITS, sha256_file
 from writingring.recording_features import (
+    POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA,
     SPIKE_IMU_FEATURE_SCHEMA,
     SPIKE_IMU_TRANSIENT_CHANNEL_NAMES,
     RecordingFeatureError,
@@ -49,11 +50,12 @@ def _spike_artifact(
     *,
     sample_count: int = 12,
     timestamps: np.ndarray | None = None,
+    channel_count: int = 21,
 ) -> tuple[Path, Path, np.ndarray]:
     spike_root = tmp_path / "spike-root"
     directory = spike_root / recording.user / recording.action / str(recording.dataset_id)
     directory.mkdir(parents=True)
-    values = np.arange(sample_count * 21, dtype=np.float32).reshape(sample_count, 21)
+    values = np.arange(sample_count * channel_count, dtype=np.float32).reshape(sample_count, channel_count)
     timestamps = (
         np.asarray(timestamps, dtype=np.float64)
         if timestamps is not None
@@ -64,7 +66,13 @@ def _spike_artifact(
     metadata_path = directory / "metadata.json"
     np.save(values_path, values, allow_pickle=False)
     np.save(timestamps_path, timestamps, allow_pickle=False)
-    channel_names = [f"event_{index}" for index in range(15)] + list(
+    event_channel_count = channel_count - 6
+    feature_schema = (
+        SPIKE_IMU_FEATURE_SCHEMA
+        if channel_count == 21
+        else POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA
+    )
+    channel_names = [f"event_{index}" for index in range(event_channel_count)] + list(
         SPIKE_IMU_TRANSIENT_CHANNEL_NAMES
     )
     metadata = {
@@ -84,11 +92,18 @@ def _spike_artifact(
         "timestamps_sha256": sha256_file(timestamps_path),
         "timestamp_unit": "microseconds",
         "spike_imu": {
-            "schema": SPIKE_IMU_FEATURE_SCHEMA,
+            "schema": feature_schema,
+            "event_representation": "unsigned" if channel_count == 36 else "signed",
+            "event_feature_schema": (
+                "custom_wavelet_polarity_split_abs_events_v1"
+                if channel_count == 36
+                else "custom_wavelet_signed_events_v1"
+            ),
+            "event_channel_count": event_channel_count,
             "sample_count": sample_count,
-            "channel_count": 21,
+            "channel_count": channel_count,
             "channel_names": channel_names,
-            "units": ["event"] * 15 + list(PREPROCESSED_IMU_UNITS[3:]),
+            "units": ["event"] * event_channel_count + list(PREPROCESSED_IMU_UNITS[3:]),
             "sha256": sha256_file(values_path),
         },
     }
@@ -160,6 +175,21 @@ def test_spike_loader_validates_identity_hashes_and_accepts_duplicate_timestamps
     metadata_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(RecordingFeatureError, match="hash"):
         load_spike_imu_features(recording, spike_root=spike_root)
+
+
+def test_spike_loader_accepts_polarity_split_layout_and_finds_trailing_imu(
+    tmp_path: Path,
+) -> None:
+    _, recording = _recording(tmp_path)
+    spike_root, _, values = _spike_artifact(tmp_path, recording, channel_count=36)
+
+    loaded = load_spike_imu_features(recording, spike_root=spike_root)
+
+    assert loaded.feature_schema == POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA
+    assert loaded.values.shape == (12, 36)
+    assert loaded.transient_channel_indices == (30, 31, 32, 33, 34, 35)
+    assert loaded.transient_channel_names == SPIKE_IMU_TRANSIENT_CHANNEL_NAMES
+    np.testing.assert_array_equal(loaded.values, values)
 
 
 @pytest.mark.parametrize(

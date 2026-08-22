@@ -116,8 +116,9 @@ user/action selects multiple final SUCCESS SpikeIMU recordings, their metadata
 rates must match within `1e-12`; mixed successful rates do not publish partial
 outputs and successful summaries contain one common `sampling_rate_hz`.
 
-Spike label verification scores only channels `15:21`; channels `0:15` are
-signed wavelet event channels and cannot affect segmentation. The optional
+Spike label verification scores only the metadata-declared trailing six IMU
+channels; all preceding channels are wavelet event channels and cannot affect
+segmentation. The optional
 Board overlay is diagnostic only: it can reject a stale or raw-ring offset,
 but it cannot alter values, offsets, lengths, labels, or manifest boundaries.
 

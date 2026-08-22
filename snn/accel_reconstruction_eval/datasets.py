@@ -13,8 +13,9 @@ This module preserves the current trainer/embedding batch contract:
         ...
     }
 
-Raw acceleration comes from ``paddedSpikeIMU[..., 15:18]``. Reconstruction
-comes from the aligned standalone ``*_padded_reconstructed_accel_m_s2.npy``.
+Raw acceleration comes from the three acceleration channels immediately before
+the trailing gyroscope channels in ``paddedSpikeIMU``. Reconstruction comes
+from the aligned standalone ``*_padded_reconstructed_accel_m_s2.npy``.
 All normalization statistics are computed from valid time points only, and the
 invalid right-padding region is reset to exact zero after normalization.
 """
@@ -37,6 +38,7 @@ try:
         Action0DatasetError,
         PADDING_DATASET_SUMMARY_FILENAME,
         SPIKE_IMU_CHANNEL_COUNT,
+        SPIKE_IMU_TRAILING_CHANNEL_COUNT,
         load_padding_dataset_metadata as _repository_load_padding_dataset_metadata,
     )
 except (ImportError, ModuleNotFoundError):
@@ -45,12 +47,16 @@ except (ImportError, ModuleNotFoundError):
 
     PADDING_DATASET_SUMMARY_FILENAME = "padding_dataset_summary.json"
     SPIKE_IMU_CHANNEL_COUNT = 21
+    SPIKE_IMU_TRAILING_CHANNEL_COUNT = 6
     _repository_load_padding_dataset_metadata = None
 
 try:
-    from writingring.segment_padding import SPIKE_IMU_FEATURE_SCHEMA
+    from writingring.segment_padding import SPIKE_IMU_SCHEMA_CHANNEL_COUNTS
 except (ImportError, ModuleNotFoundError):
-    SPIKE_IMU_FEATURE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
+    SPIKE_IMU_SCHEMA_CHANNEL_COUNTS = {
+        "signed_wavelet_events_plus_imu_v1": 21,
+        "polarity_split_wavelet_events_plus_imu_v1": 36,
+    }
 
 
 ACCELERATION_SLICE = slice(15, 18)
@@ -235,6 +241,16 @@ class AccelerationPackage:
     labels: np.ndarray
     valid_lengths: np.ndarray
     valid_mask: np.ndarray
+
+    @property
+    def acceleration_slice(self) -> slice:
+        """Return the acceleration channels preceding the six IMU tail channels."""
+
+        channel_count = int(self.padded_spike_imu.shape[2])
+        return slice(
+            channel_count - SPIKE_IMU_TRAILING_CHANNEL_COUNT,
+            channel_count - 3,
+        )
 
     @property
     def segment_count(self) -> int:
@@ -424,14 +440,21 @@ def _validate_producer_metadata(metadata: AccelerationProducerMetadata) -> None:
         raise Action0DatasetError(
             f"Expected input_kind='spike-imu', got {metadata.input_kind!r}"
         )
-    if metadata.feature_schema not in (None, SPIKE_IMU_FEATURE_SCHEMA):
+    expected_channel_count = SPIKE_IMU_SCHEMA_CHANNEL_COUNTS.get(metadata.feature_schema)
+    if metadata.feature_schema is not None and expected_channel_count is None:
         raise Action0DatasetError(
-            f"Expected feature_schema={SPIKE_IMU_FEATURE_SCHEMA!r}, "
-            f"got {metadata.feature_schema!r}"
+            f"Unsupported feature_schema={metadata.feature_schema!r}; "
+            f"expected one of {sorted(SPIKE_IMU_SCHEMA_CHANNEL_COUNTS)!r}"
         )
-    if metadata.channel_count != SPIKE_IMU_CHANNEL_COUNT:
+    if expected_channel_count is not None and metadata.channel_count != expected_channel_count:
         raise Action0DatasetError(
-            f"Expected {SPIKE_IMU_CHANNEL_COUNT} channels, got {metadata.channel_count}"
+            f"Expected {expected_channel_count} channels for "
+            f"{metadata.feature_schema!r}, got {metadata.channel_count}"
+        )
+    if metadata.feature_schema is None and metadata.channel_count != SPIKE_IMU_CHANNEL_COUNT:
+        raise Action0DatasetError(
+            f"Expected legacy {SPIKE_IMU_CHANNEL_COUNT} channels without feature_schema, "
+            f"got {metadata.channel_count}"
         )
     if metadata.target_length <= 0:
         raise Action0DatasetError("target_length must be positive")
@@ -605,6 +628,7 @@ def _load_and_validate_package(
     *,
     padded_root: Path,
     root_target_length: int,
+    root_channel_count: int,
     require_reconstruction: bool,
 ) -> tuple[AccelerationPackage, pd.DataFrame]:
     action_dir = padded_path.parent
@@ -667,9 +691,9 @@ def _load_and_validate_package(
     valid_lengths = valid_lengths_raw.astype(np.int64, copy=False)
     valid_mask = np.load(valid_mask_path, allow_pickle=False, mmap_mode="r")
 
-    if padded_spike.ndim != 3 or padded_spike.shape[2] != SPIKE_IMU_CHANNEL_COUNT:
+    if padded_spike.ndim != 3 or padded_spike.shape[2] != root_channel_count:
         raise Action0DatasetError(
-            f"{padded_path}: expected (S,T,{SPIKE_IMU_CHANNEL_COUNT}), got {padded_spike.shape}"
+            f"{padded_path}: expected (S,T,{root_channel_count}), got {padded_spike.shape}"
         )
     segment_count, padded_length, _ = map(int, padded_spike.shape)
     if segment_count <= 0 or padded_length <= 0:
@@ -711,8 +735,10 @@ def _load_and_validate_package(
         raise Action0DatasetError(f"{padding_summary_path}: expected overflow_policy='skip'")
     if padding_summary.get("input_kind") not in (None, "spike-imu"):
         raise Action0DatasetError(f"{padding_summary_path}: expected spike-imu package")
-    if padding_summary.get("feature_schema") not in (None, SPIKE_IMU_FEATURE_SCHEMA):
+    if padding_summary.get("feature_schema") not in (None, *SPIKE_IMU_SCHEMA_CHANNEL_COUNTS):
         raise Action0DatasetError(f"{padding_summary_path}: unexpected feature_schema")
+    if padding_summary.get("channel_count") not in (None, root_channel_count):
+        raise Action0DatasetError(f"{padding_summary_path}: channel_count mismatch")
 
     exported = _load_manifest_rows(
         padding_manifest_path,
@@ -845,6 +871,7 @@ def load_acceleration_data(
                 padded_path,
                 padded_root=padded_root,
                 root_target_length=producer_metadata.target_length,
+                root_channel_count=producer_metadata.channel_count,
                 require_reconstruction=require_reconstruction,
             )
             identity = (package.user, package.action)
@@ -1308,7 +1335,7 @@ def _source_values(
 ) -> np.ndarray:
     if source == "raw":
         return np.asarray(
-            package.padded_spike_imu[segment_indices, :, ACCELERATION_SLICE],
+            package.padded_spike_imu[segment_indices, :, package.acceleration_slice],
             dtype=np.float64,
         )
     if source == "reconstruction":
@@ -1441,7 +1468,7 @@ class AccelerationSegmentDataset(Dataset[dict[str, object]]):
     ) -> np.ndarray:
         if self.source == "raw":
             return np.array(
-                package.padded_spike_imu[segment_index, :, ACCELERATION_SLICE],
+                package.padded_spike_imu[segment_index, :, package.acceleration_slice],
                 dtype=np.float32,
                 copy=True,
             )

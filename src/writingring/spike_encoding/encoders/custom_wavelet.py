@@ -155,6 +155,10 @@ class CustomWaveletEncoder:
             for axis in ("x", "y", "z")
             for band_index in range(5)
         )
+        self._output_channel_names = _transformed_channel_names(
+            self._channel_names,
+            self.settings.post_encode_transform,
+        )
         self._time_window_samples = _odd_window(
             self.settings.max_filter_time_s * self.settings.sampling_rate_hz
         )
@@ -177,9 +181,9 @@ class CustomWaveletEncoder:
 
     @property
     def output_channel_names(self) -> tuple[str, ...]:
-        """Return axis-major, frequency-minor event labels."""
+        """Return event labels after the configured post-encode transform."""
 
-        return self._channel_names
+        return self._output_channel_names
 
     @property
     def representation(self) -> str:
@@ -192,7 +196,7 @@ class CustomWaveletEncoder:
         """Declare the encoder-specific layout of its flattened event channels."""
 
         return {
-            "channel_order": "axis_major_frequency_minor",
+            "channel_order": _channel_order(self.settings.post_encode_transform),
             "event_index_semantics": "wavelet_extrema_occurrence_index",
             "post_encode_transform": self.settings.post_encode_transform,
             "event_representation": self.representation,
@@ -218,8 +222,8 @@ class CustomWaveletEncoder:
             "max_filter_frequency_bands": self._frequency_window_bands,
             "boundary_padding_mode": "reflect",
             "event_index_semantics": "occurrence",
-            "channel_order": "axis_major_frequency_minor",
-            "event_channel_names": list(self._channel_names),
+            "channel_order": _channel_order(self.settings.post_encode_transform),
+            "event_channel_names": list(self._output_channel_names),
             "post_encode_transform": self.settings.post_encode_transform,
             "event_representation": self.representation,
         }
@@ -395,7 +399,7 @@ class CustomWaveletEncoder:
         encoded.setflags(write=False)
         return SpikeEncodingSequenceResult(
             values=encoded,
-            channel_names=self._channel_names,
+            channel_names=self._output_channel_names,
             representation=self.representation,
             diagnostics={
                 "wavelet_name": self.settings.wavelet_name,
@@ -587,16 +591,41 @@ def _positive_integer(name: str, value: object) -> None:
 
 
 def _validate_post_encode_transform(value: object) -> None:
-    if value is not None and (not isinstance(value, str) or value != "AbsRectify"):
+    if value is not None and (
+        not isinstance(value, str)
+        or value not in {"AbsRectify", "PolaritySplitAbs"}
+    ):
         raise CustomWaveletSettingsError(
-            "post_encode_transform must be None or the exact string 'AbsRectify'"
+            "post_encode_transform must be None, 'AbsRectify', or "
+            "'PolaritySplitAbs'"
         )
 
 
 def _event_representation(transform: str | None) -> str:
     if transform == "AbsRectify":
         return "abs_rectified_sparse_wavelet_extrema"
+    if transform == "PolaritySplitAbs":
+        return "polarity_split_sparse_wavelet_extrema"
     return "signed_sparse_wavelet_extrema"
+
+
+def _channel_order(transform: str | None) -> str:
+    if transform == "PolaritySplitAbs":
+        return "axis_major_frequency_minor_pairwise_positive_negative"
+    return "axis_major_frequency_minor"
+
+
+def _transformed_channel_names(
+    channel_names: tuple[str, ...],
+    transform: str | None,
+) -> tuple[str, ...]:
+    if transform != "PolaritySplitAbs":
+        return channel_names
+    return tuple(
+        transformed_name
+        for channel_name in channel_names
+        for transformed_name in (f"{channel_name}_pos", f"{channel_name}_neg_abs")
+    )
 
 
 def _apply_post_encode_transform(values: np.ndarray, transform: str | None) -> np.ndarray:
@@ -605,8 +634,16 @@ def _apply_post_encode_transform(values: np.ndarray, transform: str | None) -> n
     _validate_post_encode_transform(transform)
     if transform is None:
         return values
-    np.abs(values, out=values)
-    return values
+    if transform == "AbsRectify":
+        np.abs(values, out=values)
+        return values
+    output = np.empty(
+        values.shape[:-1] + (values.shape[-1] * 2,),
+        dtype=values.dtype,
+    )
+    output[..., 0::2] = np.maximum(values, 0)
+    output[..., 1::2] = np.maximum(-values, 0)
+    return output
 
 
 def _is_finite_real(value: object) -> bool:

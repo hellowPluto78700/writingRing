@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--post-encode-transform",
-        choices=("none", "AbsRectify"),
+        choices=("none", "AbsRectify", "PolaritySplitAbs"),
         default=None,
         help="override the encoder settings post-encode transform",
     )
@@ -244,10 +244,18 @@ def _run_one(
         else single_array_offsets(sample_count=len(input_data.acceleration_g))
     )
     encoder = create_encoder(args.encoder, settings=settings)
-    if args.encoder == "custom-wavelet" and len(encoder.output_channel_names) != 15:
+    expected_event_channels = (
+        30
+        if settings.get("post_encode_transform") == "PolaritySplitAbs"
+        else 15
+    )
+    if (
+        args.encoder == "custom-wavelet"
+        and len(encoder.output_channel_names) != expected_event_channels
+    ):
         raise ValueError(
-            "custom-wavelet must produce exactly 15 event channels "
-            "(three axes by five frequencies)"
+            "custom-wavelet must produce exactly "
+            f"{expected_event_channels} event channels for the selected transform"
         )
     result = run_spike_encoder(
         encoder,

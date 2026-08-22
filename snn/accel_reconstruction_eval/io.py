@@ -274,6 +274,11 @@ def build_experiment_checkpoint(
     else:
         config_dict = dict(experiment_config)
 
+    acceleration_slice = ACCELERATION_SLICE
+    producer_channel_count = getattr(producer_metadata, "channel_count", None)
+    if isinstance(producer_channel_count, int) and producer_channel_count >= 6:
+        acceleration_slice = slice(producer_channel_count - 6, producer_channel_count - 3)
+
     checkpoint: dict[str, object] = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "artifact_type": CHECKPOINT_ARTIFACT_TYPE,
@@ -285,7 +290,7 @@ def build_experiment_checkpoint(
         # architecture descriptor. Legacy checkpoints simply omit this key.
         "architecture_variant": model_config.get("variant"),
         "class_to_idx": class_to_idx,
-        "acceleration_slice": [ACCELERATION_SLICE.start, ACCELERATION_SLICE.stop],
+        "acceleration_slice": [acceleration_slice.start, acceleration_slice.stop],
         "acceleration_channel_names": list(ACCELERATION_CHANNEL_NAMES),
         "normalization_mean": mean,
         "normalization_std": std,
