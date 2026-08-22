@@ -196,6 +196,9 @@ python -m snn.train_action0
 notebooks/action0_snn_training.ipynb
 notebooks/experiment_A_acceleration_cnn_representation_evaluation.ipynb
 notebooks/experiment_B_reconstruction_frozen_cnn.ipynb
+notebooks/experiment_1_1_reconstruction_temporal_shuffle.ipynb
+notebooks/experiment_1_2_event_temporal_shuffle.ipynb
+notebooks/experiment_1_3_event_temporal_binning_probe.ipynb
 ```
 
 Use `--help` on an entry point for its required inputs and output controls.
@@ -291,6 +294,52 @@ normalization are authoritative. For C and D2, the checkpoint's user split and
 class mapping are authoritative while each protocol retains its own training
 and normalization behavior. The same metric and artifact conventions are used
 across the protocols; D2 reuses one trained checkpoint for both test domains.
+
+## Phase-A temporal-information experiments
+
+Experiments 1.1–1.3 are matched temporal-information probes over the selected
+Action 0 and Action 1 combination roots. They use five deterministic master
+seeds `(11, 23, 37, 53, 71)` and the same user-disjoint train/validation/test
+split within each seed. The notebooks expose `INCLUDED_LABELS`; the current
+configuration retains the ordered labels `A, B, C, D, E, X, G, H, I, J, K,
+L`, while `None` retains every available label.
+
+All three experiments use each segment's published `valid_length`. Temporal
+perturbations and feature construction operate only on the valid prefix;
+right-padding is not shuffled or binned and is reset to zero before model
+evaluation. Normalization, when used, is fitted from valid training samples
+only. Balanced accuracy is the primary reported metric.
+
+### Experiment 1.1 — Reconstruction temporal-scale ablation
+
+[Experiment 1.1 notebook](notebooks/experiment_1_1_reconstruction_temporal_shuffle.ipynb)
+uses the padded reconstructed-acceleration representation with three input
+channels. A mask-aware CNN-L is trained from scratch for the original sequence
+and for temporal block-shuffle conditions at 5, 50, 100, 200, and 500 ms.
+Blocks move jointly across all channels, preserving order inside each block
+while disrupting the order between blocks. The best CNN-L embedding is then
+frozen and evaluated with a linear probe on held-out users. This experiment
+asks how much temporal order remains readable from reconstructed acceleration.
+
+### Experiment 1.2 — Event temporal-scale ablation
+
+[Experiment 1.2 notebook](notebooks/experiment_1_2_event_temporal_shuffle.ipynb)
+uses the first 15 channels of the padded SpikeIMU event representation, which
+is the event input relevant to the later SNN design. It applies the same
+original and 5/50/100/200/500 ms block conditions and retrains an Event-CNN-L
+for each condition and seed. Each `[time, 15]` block is shuffled as one unit;
+event channels are never permuted independently. A frozen-embedding linear
+probe provides the held-out-user test metrics.
+
+### Experiment 1.3 — Event temporal-binning probe
+
+[Experiment 1.3 notebook](notebooks/experiment_1_3_event_temporal_binning_probe.ipynb)
+uses the same 15-channel event representation but does not train a CNN or
+shuffle blocks. For each segment, it sums weighted event values within
+1, 2, 4, 10, or 20 relative-time bins defined over that segment's valid
+prefix, then fits a fresh linear probe for each seed and bin count. This is a
+low-capacity baseline for testing whether coarse temporal position alone is
+enough to explain the classification signal.
 
 ## Documentation
 
