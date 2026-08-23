@@ -14,9 +14,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-EXPECTED_TRANSIENT_CHANNELS = [15, 16, 17, 18, 19, 20]
-SPIKE_CHANNEL_COUNT = 21
-EVENT_CHANNEL_COUNT = 15
+TRAILING_IMU_CHANNEL_COUNT = 6
 
 
 class ReuseError(RuntimeError):
@@ -246,6 +244,23 @@ def encoder_hash(meta: dict[str, Any]) -> str:
     return str(meta["spike_encoder_spec_sha256"])
 
 
+def spike_layout(meta: dict[str, Any]) -> tuple[int, int]:
+    """Return validated total/event channel counts for signed or polarity split output."""
+    spike = meta.get("spike_imu")
+    if not isinstance(spike, dict):
+        raise ReuseError("metadata is missing top-level spike_imu object")
+    channels = spike.get("channel_count")
+    event_channels = spike.get("event_channel_count")
+    if (
+        not isinstance(channels, int)
+        or not isinstance(event_channels, int)
+        or channels <= TRAILING_IMU_CHANNEL_COUNT
+        or event_channels + TRAILING_IMU_CHANNEL_COUNT != channels
+    ):
+        raise ReuseError("metadata has an invalid SpikeIMU channel layout")
+    return channels, event_channels
+
+
 def frequencies(meta: dict[str, Any]) -> list[float]:
     spec = encoder_spec(meta)
     value = spec.get("frequencies_hz")
@@ -289,8 +304,9 @@ def check_uniform_source_records(records: dict[tuple[str, str], Record]) -> tupl
             raise ReuseError(
                 f"source action mixes frequency lists: {record.user}/{record.dataset_id}"
             )
+        channels, _ = spike_layout(record.metadata)
         values = np.load(record.values_path, allow_pickle=False, mmap_mode="r")
-        if values.ndim != 2 or values.shape[1] != SPIKE_CHANNEL_COUNT or values.shape[0] == 0:
+        if values.ndim != 2 or values.shape[1] != channels or values.shape[0] == 0:
             raise ReuseError(f"invalid SpikeIMU shape {values.shape}: {record.values_path}")
     return base_hash, base_freq
 
@@ -332,9 +348,11 @@ def validate_alignment_reusable(root: Path, records: dict[tuple[str, str], Recor
                     normalized.append([int(x) for x in value])
                 except (TypeError, ValueError):
                     pass
-        if EXPECTED_TRANSIENT_CHANNELS not in normalized:
+        channels, _ = spike_layout(record.metadata)
+        expected_transient = list(range(channels - TRAILING_IMU_CHANNEL_COUNT, channels))
+        if expected_transient not in normalized:
             raise ReuseError(
-                f"alignment report does not prove transient channels 15:21: {report_path}"
+                f"alignment report does not prove transient channels {expected_transient}: {report_path}"
             )
 
 
@@ -419,15 +437,17 @@ def compare_new_encoding(
             )
         old_values = np.load(old.values_path, allow_pickle=False, mmap_mode="r")
         new_values = np.load(new.values_path, allow_pickle=False, mmap_mode="r")
-        if old_values.shape != new_values.shape:
+        old_channels, old_events = spike_layout(old.metadata)
+        new_channels, new_events = spike_layout(new.metadata)
+        if old_values.ndim != 2 or new_values.ndim != 2 or old_values.shape[0] != new_values.shape[0]:
             raise ReuseError(
-                f"SpikeIMU shape changed for {new.user}/{new.dataset_id}: {old_values.shape} -> {new_values.shape}"
+                f"SpikeIMU row count changed for {new.user}/{new.dataset_id}: {old_values.shape} -> {new_values.shape}"
             )
-        if old_values.ndim != 2 or old_values.shape[1] != SPIKE_CHANNEL_COUNT:
-            raise ReuseError(f"unexpected SpikeIMU shape: {old_values.shape}")
-        if not np.array_equal(old_values[:, EVENT_CHANNEL_COUNT:], new_values[:, EVENT_CHANNEL_COUNT:]):
+        if old_values.shape[1] != old_channels or new_values.shape[1] != new_channels:
+            raise ReuseError(f"unexpected SpikeIMU layout: {old_values.shape} -> {new_values.shape}")
+        if not np.array_equal(old_values[:, old_events:], new_values[:, new_events:]):
             raise ReuseError(
-                f"trailing IMU channels 15:21 changed for {new.user}/{new.dataset_id}; alignment reuse is unsafe"
+                f"trailing IMU channels changed for {new.user}/{new.dataset_id}; alignment reuse is unsafe"
             )
         old_values_hash = sha256_file(old.values_path)
         new_values_hash = sha256_file(new.values_path)
@@ -622,9 +642,16 @@ def compare_segment_geometry(source_root: Path, dest_root: Path, action: str, us
             checks["board_event_targets"] = compare_npy(src_targets, dst_targets, "board event targets")
         src_values = np.load(src / f"{stem}_spikeIMU.npy", allow_pickle=False, mmap_mode="r")
         dst_values = np.load(dst / f"{stem}_spikeIMU.npy", allow_pickle=False, mmap_mode="r")
-        if src_values.shape != dst_values.shape:
-            raise ReuseError(f"segmented SpikeIMU shape changed for {user}")
-        if not np.array_equal(src_values[:, EVENT_CHANNEL_COUNT:], dst_values[:, EVENT_CHANNEL_COUNT:]):
+        src_summary = load_json(src / f"{stem}_segmentation_summary.json")
+        src_channels = src_summary.get("channel_count")
+        dst_channels = load_json(dst / f"{stem}_segmentation_summary.json").get("channel_count")
+        if not isinstance(src_channels, int) or not isinstance(dst_channels, int):
+            raise ReuseError(f"segmented SpikeIMU schema is missing for {user}")
+        if src_values.ndim != 2 or dst_values.ndim != 2 or src_values.shape[0] != dst_values.shape[0]:
+            raise ReuseError(f"segmented SpikeIMU row count changed for {user}")
+        if src_values.shape[1] != src_channels or dst_values.shape[1] != dst_channels:
+            raise ReuseError(f"segmented SpikeIMU layout mismatch for {user}")
+        if not np.array_equal(src_values[:, -TRAILING_IMU_CHANNEL_COUNT:], dst_values[:, -TRAILING_IMU_CHANNEL_COUNT:]):
             raise ReuseError(f"segmented trailing IMU channels changed for {user}")
         summary = load_json(dst / f"{stem}_segmentation_summary.json")
         if not isinstance(summary.get("spike_encoder_spec_sha256"), str):
@@ -665,7 +692,7 @@ def source_transform(args: argparse.Namespace) -> str:
         transform = first_recursive(record.metadata, ("post_encode_transform",))
         if transform is None:
             values.add("none")
-        elif transform == "AbsRectify":
+        elif transform in {"AbsRectify", "PolaritySplitAbs"}:
             values.add("AbsRectify")
         else:
             raise ReuseError(f"unsupported source post_encode_transform: {transform!r}")
@@ -781,7 +808,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "contracts": {
             "preprocessed_reused": True,
             "alignment_offset_recomputed": False if args.boundary_mode == "aligned-board-events" else None,
-            "alignment_input_channels_15_21_equal": True,
+            "alignment_input_trailing_imu_channels_equal": True,
             "segment_geometry_equal": True,
             "destination_metadata_republished_for_new_encoder": True,
         },

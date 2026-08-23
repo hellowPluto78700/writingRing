@@ -6,6 +6,7 @@ The complete-recording pipeline is:
 Ring *_ring_0.bin
   → preprocess_ring_imu()
   → (N, 9) preprocessed artifact + canonical timestamps + JSON summary
+  → optional complete-recording resampling artifact
   → one independent Custom Wavelet encoding
   → (N, 15) events and (N, 21) spike IMU
 ```
@@ -22,8 +23,16 @@ outputs/preprocessedIMU/<user>/<action>/<data_id>/
 
 The feature and timestamp arrays have the same row count and preserve the
 source Ring order. Timestamps are validated as finite and nondecreasing;
-duplicate values are retained. No timestamp sorting, deduplication, or
-resampling is performed.
+duplicate values are retained. Preprocessing itself performs no timestamp
+sorting, deduplication, or resampling.
+
+When `RESAMPLE_RATE_HZ` is a lower numeric rate (the default `none` disables
+the stage), the pipeline writes a separate namespace under `resampledIMU/`.
+It filters the m/s² acceleration and gyro columns, interpolates onto a uniform
+target grid without extrapolation, and recomputes acceleration in `g` using
+`9.80665`. Duplicate canonical source timestamps remain provenance only; the
+interpolation work axis is internal and strictly increasing. The resampling
+summary hashes its sources and records both rates and filter settings.
 
 The exporter uses the repository's validated Ring loader. As in the upstream
 `vendor/WritingRing/ring_plot.py`, Ring samples are native-endian float64 rows

@@ -39,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--encoder", required=True)
     parser.add_argument("--encoder-settings", type=Path, required=True)
     parser.add_argument(
+        "--effective-sampling-rate-hz",
+        type=float,
+        help="override encoder settings with the sampling rate of the selected input artifact",
+    )
+    parser.add_argument(
         "--encoder-frequencies-hz",
         nargs=5,
         type=float,
@@ -187,6 +192,8 @@ def _run_one(
     )
 
     settings = load_encoder_settings(args.encoder_settings)
+    if args.effective_sampling_rate_hz is not None:
+        settings["sampling_rate_hz"] = args.effective_sampling_rate_hz
     if args.encoder_frequencies_hz is not None:
         settings["frequencies_hz"] = list(args.encoder_frequencies_hz)
     if args.post_encode_transform is not None:
@@ -352,6 +359,9 @@ def _resolve_summary_path(input_path: Path, explicit: Path | None) -> Path | Non
     if name.endswith("_preprocessedIMU.npy"):
         stem = name.removesuffix("_preprocessedIMU.npy")
         candidates.append(input_path.with_name(f"{stem}_preprocessing.json"))
+    if name.endswith("_resampledIMU.npy"):
+        stem = name.removesuffix("_resampledIMU.npy")
+        candidates.append(input_path.with_name(f"{stem}_resampling.json"))
     if name.endswith("_rawIMU.npy"):
         stem = name.removesuffix("_rawIMU.npy")
         candidates.append(input_path.with_name(f"{stem}_segmentation_summary.json"))
@@ -381,7 +391,7 @@ def _recording_identity(relative_path: Path) -> dict[str, object] | None:
 
 def _derived_stem(path: Path) -> str:
     name = path.name
-    for suffix in ("_preprocessedIMU.npy", "_rawIMU.npy", ".npy"):
+    for suffix in ("_preprocessedIMU.npy", "_resampledIMU.npy", "_rawIMU.npy", ".npy"):
         if name.endswith(suffix):
             return name.removesuffix(suffix)
     return path.stem

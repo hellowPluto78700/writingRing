@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # allowing BOTH of these variant dimensions to change independently:
 #
 #   1. five-band Custom Wavelet frequency sequence
-#   2. post-encode transform: none | AbsRectify
+#   2. post-encode transform: none | AbsRectify | PolaritySplitAbs
 #
 # Unlike rebuild_wavelet_variant.bash, this script intentionally allows the
 # destination post-encode transform to differ from the source transform.
@@ -14,8 +14,7 @@ set -Eeuo pipefail
 #   - source pipeline must pass the existing preflight checks;
 #   - source/destination recording sets must match exactly;
 #   - timestamp provenance must match;
-#   - SpikeIMU shape must match;
-#   - SpikeIMU[:, 15:21] must be EXACTLY equal (np.array_equal);
+#   - the six trailing IMU channels must be EXACTLY equal (np.array_equal);
 #   - encoder semantics other than frequency/width/post_encode_transform
 #     must remain unchanged;
 #   - alignment is reused only for aligned-board-events and is provenance-
@@ -72,7 +71,13 @@ ENCODER_FREQUENCIES_HZ="${ENCODER_FREQUENCIES_HZ:-1 2 3 4 8}"
 # Valid values:
 #   none
 #   AbsRectify
+#   PolaritySplitAbs
 POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
+
+# Reuse a completed resampling artifact instead of re-encoding the source-rate
+# preprocessing output. Use `none` for source-rate inputs or the source target
+# rate (for example `64`). This script never resamples in place.
+RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-none}"
 
 BOUNDARY_MODE="${BOUNDARY_MODE:-aligned-board-events}"
 SAMPLING_RATE="${SAMPLING_RATE:-200}"
@@ -153,8 +158,22 @@ case "$POST_ENCODE_TRANSFORM" in
     AbsRectify)
         TRANSFORM_SLUG="absrectify"
         ;;
+    PolaritySplitAbs)
+        TRANSFORM_SLUG="polaritysplitabs"
+        ;;
     *)
-        fail "POST_ENCODE_TRANSFORM must be none or AbsRectify"
+        fail "POST_ENCODE_TRANSFORM must be none, AbsRectify, or PolaritySplitAbs"
+        ;;
+esac
+
+case "$RESAMPLE_RATE_HZ" in
+    none) ;;
+    *)
+        [[ "$RESAMPLE_RATE_HZ" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+            fail "RESAMPLE_RATE_HZ must be none or a positive downsampling rate"
+        awk -v target="$RESAMPLE_RATE_HZ" -v source="$SAMPLING_RATE" \
+            'BEGIN { exit !(target > 0 && target < source) }' ||
+            fail "RESAMPLE_RATE_HZ must be lower than SAMPLING_RATE"
         ;;
 esac
 
@@ -328,7 +347,7 @@ def normalized_transform(meta: dict[str, Any]) -> str:
     value = mod.first_recursive(meta, ("post_encode_transform",))
     if value is None or value == "none":
         return "none"
-    if value == "AbsRectify":
+    if value in {"AbsRectify", "PolaritySplitAbs"}:
         return "AbsRectify"
     raise mod.ReuseError(
         f"unsupported post_encode_transform in metadata: {value!r}"
@@ -429,30 +448,26 @@ def relaxed_compare_new_encoding(
             mmap_mode="r",
         )
 
-        if old_values.shape != new_values.shape:
+        old_channels, old_events = mod.spike_layout(old.metadata)
+        new_channels, new_events = mod.spike_layout(new.metadata)
+        if old_values.ndim != 2 or new_values.ndim != 2 or old_values.shape[0] != new_values.shape[0]:
             raise mod.ReuseError(
-                f"SpikeIMU shape changed for {new.user}/{new.dataset_id}: "
+                f"SpikeIMU row count changed for {new.user}/{new.dataset_id}: "
                 f"{old_values.shape} -> {new_values.shape}"
             )
-
-        if (
-            old_values.ndim != 2
-            or old_values.shape[1] != mod.SPIKE_CHANNEL_COUNT
-        ):
-            raise mod.ReuseError(
-                f"unexpected SpikeIMU shape: {old_values.shape}"
-            )
+        if old_values.shape[1] != old_channels or new_values.shape[1] != new_channels:
+            raise mod.ReuseError(f"unexpected SpikeIMU layouts: {old_values.shape} -> {new_values.shape}")
 
         # Core reuse invariant:
         #
-        # wavelet event channels 0:15 may change because of BOTH frequency and
-        # rectification changes, but raw trailing IMU channels 15:21 must not.
+        # Event-channel width may change for PolaritySplitAbs, but the trailing
+        # six raw IMU channels must not.
         if not np.array_equal(
-            old_values[:, mod.EVENT_CHANNEL_COUNT:],
-            new_values[:, mod.EVENT_CHANNEL_COUNT:],
+            old_values[:, old_events:],
+            new_values[:, new_events:],
         ):
             raise mod.ReuseError(
-                f"trailing IMU channels 15:21 changed for "
+                f"trailing IMU channels changed for "
                 f"{new.user}/{new.dataset_id}; alignment reuse is unsafe"
             )
 
@@ -581,9 +596,7 @@ try:
         result["contracts"][
             "post_encode_transform_change_allowed"
         ] = True
-        result["contracts"][
-            "trailing_imu_channels_15_21_equal"
-        ] = True
+        result["contracts"]["trailing_imu_channels_equal"] = True
 
         output_path = dest_root / "wavelet_variant_validation.json"
         output_path.write_text(
@@ -658,6 +671,10 @@ rebuild_action() {
 
     local source_preprocess_root="$source_root/preprocessedIMU"
     local dest_preprocess_root="$dest_root/preprocessedIMU"
+    local source_encode_input_root="$source_preprocess_root"
+    local dest_encode_input_root="$dest_preprocess_root"
+    local encode_pattern='*_preprocessedIMU.npy'
+    local effective_sampling_rate="$SAMPLING_RATE"
 
     local dest_spike_output_root="$dest_root/spikeEncoding"
     local dest_spike_root="$dest_spike_output_root/custom-wavelet"
@@ -691,14 +708,38 @@ rebuild_action() {
 
     note "preprocessedIMU symlink tree created: $symlink_count files"
 
+    if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+        local source_resample_root="$source_root/resampledIMU"
+        local dest_resample_root="$dest_root/resampledIMU"
+        [[ -d "$source_resample_root" ]] ||
+            fail "source resampledIMU root is missing: $source_resample_root"
+        note "reuse resampledIMU by symbolic links (rate=${RESAMPLE_RATE_HZ} Hz)"
+        mkdir -p "$dest_resample_root"
+        symlink_count=0
+        while IFS= read -r -d '' src; do
+            rel="${src#"$source_resample_root"/}"
+            dst="$dest_resample_root/$rel"
+            mkdir -p "$(dirname -- "$dst")"
+            ln -s "$(realpath "$src")" "$dst"
+            symlink_count=$((symlink_count + 1))
+        done < <(find "$source_resample_root" -type f -print0)
+        [[ "$symlink_count" -gt 0 ]] ||
+            fail "no reusable resampledIMU files found under $source_resample_root"
+        source_encode_input_root="$source_resample_root"
+        dest_encode_input_root="$dest_resample_root"
+        encode_pattern='*_resampledIMU.npy'
+        effective_sampling_rate="$RESAMPLE_RATE_HZ"
+    fi
+
     note "encode destination Custom Wavelet variant"
     "${PYTHON_CMD[@]}" scripts/encode_spikes.py \
-        --input-root "$dest_preprocess_root" \
-        --pattern '*_preprocessedIMU.npy' \
+        --input-root "$dest_encode_input_root" \
+        --pattern "$encode_pattern" \
         --output-root "$dest_spike_output_root" \
         --encoder custom-wavelet \
         --encoder-settings "$ENCODER_SETTINGS" \
         --encoder-frequencies-hz "${ENCODER_FREQUENCIES[@]}" \
+        --effective-sampling-rate-hz "$effective_sampling_rate" \
         --post-encode-transform "$POST_ENCODE_TRANSFORM" \
         --overwrite
 
@@ -750,7 +791,7 @@ rebuild_action() {
             --input-kind spike-imu
             --spike-root "$dest_spike_root"
             --boundary-mode "$BOUNDARY_MODE"
-            --sampling-rate "$SAMPLING_RATE"
+            --sampling-rate "$effective_sampling_rate"
             --output-root "$dest_segment_root"
             --overwrite
         )
@@ -792,7 +833,7 @@ rebuild_action() {
                 --input-root "$dest_segment_root" \
                 --output-root "$dest_padding_root" \
                 --target-length "$source_padding_target" \
-                --sampling-rate "$SAMPLING_RATE" \
+                --sampling-rate "$effective_sampling_rate" \
                 --padding-value 0.0 \
                 --overwrite
         else

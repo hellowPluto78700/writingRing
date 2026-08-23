@@ -28,6 +28,7 @@ from writingring.imu_preprocessing import (
 
 PREPROCESSING_SCHEMA_VERSION: Final[int] = 1
 PREPROCESSED_IMU_ARTIFACT_TYPE: Final[str] = "preprocessed_imu"
+RESAMPLED_IMU_ARTIFACT_TYPE: Final[str] = "resampled_imu"
 DEFAULT_ACCELERATION_RTOL: Final[float] = 1e-6
 DEFAULT_ACCELERATION_ATOL: Final[float] = 1e-7
 PREPROCESSED_IMU_UNITS: Final[tuple[str, ...]] = (
@@ -369,9 +370,12 @@ def _parse_summary(
 ) -> PreprocessedIMUSummary:
     schema_version = _optional_positive_int(payload.get("schema_version"), name="schema_version")
     artifact_type = payload.get("artifact_type")
-    if artifact_type is not None and artifact_type != PREPROCESSED_IMU_ARTIFACT_TYPE:
+    if artifact_type is not None and artifact_type not in {
+        PREPROCESSED_IMU_ARTIFACT_TYPE,
+        RESAMPLED_IMU_ARTIFACT_TYPE,
+    }:
         raise PreprocessingIOError(
-            f"preprocessing summary artifact_type must be {PREPROCESSED_IMU_ARTIFACT_TYPE!r}"
+            "preprocessing summary artifact_type must be a supported complete IMU artifact"
         )
 
     channel_count = payload.get("channel_count")
@@ -649,17 +653,18 @@ def _parse_units(value: object, *, required: bool) -> tuple[str, ...] | None:
 
 def _summary_declares_preprocessed_artifact(payload: Mapping[str, object]) -> bool:
     return (
-        payload.get("artifact_type") == PREPROCESSED_IMU_ARTIFACT_TYPE
+        payload.get("artifact_type")
+        in {PREPROCESSED_IMU_ARTIFACT_TYPE, RESAMPLED_IMU_ARTIFACT_TYPE}
         or payload.get("schema_version") == PREPROCESSING_SCHEMA_VERSION
     )
 
 
 def _is_preprocessed_imu_artifact_path(path: Path) -> bool:
-    return path.name.endswith("_preprocessedIMU.npy")
+    return path.name.endswith(("_preprocessedIMU.npy", "_resampledIMU.npy"))
 
 
 def _is_preprocessing_summary_path(path: Path) -> bool:
-    return path.name.endswith("_preprocessing.json")
+    return path.name.endswith(("_preprocessing.json", "_resampling.json"))
 
 
 def _validate_method_semantics(method: object, semantics: object) -> None:
@@ -684,6 +689,8 @@ def _default_summary_path(path: Path) -> Path | None:
     name = path.name
     if name.endswith("_preprocessedIMU.npy"):
         return path.with_name(name.removesuffix("_preprocessedIMU.npy") + "_preprocessing.json")
+    if name.endswith("_resampledIMU.npy"):
+        return path.with_name(name.removesuffix("_resampledIMU.npy") + "_resampling.json")
     return None
 
 

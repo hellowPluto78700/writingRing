@@ -1,8 +1,9 @@
 # Spike encoding
 
-`scripts/encode_spikes.py` is a read-only consumer of one complete,
-preprocessed Ring IMU recording. Gravity removal, resampling, segmentation,
-and label-boundary handling happen outside the encoding layer.
+`scripts/encode_spikes.py` is a read-only consumer of one complete Ring IMU
+recording: either preprocessing output or optional resampling output. Gravity
+removal, resampling, segmentation, and label-boundary handling happen outside
+the encoding layer.
 
 The preprocessing timestamp sidecar is part of the handoff contract:
 `preprocessedIMU[i]`, `timestamps_us[i]`, and the published `spikeIMU[i]`
@@ -22,6 +23,13 @@ The preferred source is:
 <user>/<action>/<data_id>/<data_id>_preprocessedIMU.npy
 <user>/<action>/<data_id>/<data_id>_preprocessing.json
 ```
+
+With `RESAMPLE_RATE_HZ=<lower rate>`, the pipeline instead consumes the
+matching `*_resampledIMU.npy`, `*_resampled_timestamps_us.npy`, and
+`*_resampling.json` artifact. It passes that rate through
+`--effective-sampling-rate-hz`, so Custom Wavelet widths and encoder identity
+metadata use the actual rate. Published SpikeIMU metadata carries resampling
+provenance, making prior encodings stale when the target rate or source changes.
 
 The NPY must be a finite numeric `(N, 9)` array with this exact order:
 

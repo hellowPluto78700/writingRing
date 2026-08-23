@@ -543,6 +543,8 @@ def _build_summary(
             "event_density": nonzero / values.size,
         },
     }
+    if source_summary is not None and isinstance(source_summary.payload.get("resampling"), Mapping):
+        summary["resampling"] = dict(source_summary.payload["resampling"])
     if spike_imu is not None:
         trailing_channel_names = [
             "acceleration_x_m_s2",

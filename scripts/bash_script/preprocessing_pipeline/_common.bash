@@ -100,6 +100,7 @@ pipeline_note() {
 
 pipeline_configure_overwrite_args() {
     PREPROCESS_OVERWRITE_ARGS=()
+    RESAMPLE_OVERWRITE_ARGS=()
     ENCODE_OVERWRITE_ARGS=()
     ALIGN_OVERWRITE_ARGS=()
     SEGMENT_OVERWRITE_ARGS=()
@@ -107,6 +108,7 @@ pipeline_configure_overwrite_args() {
     PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
     if [[ "$OVERWRITE" == "1" ]]; then
         PREPROCESS_OVERWRITE_ARGS+=(--overwrite)
+        RESAMPLE_OVERWRITE_ARGS+=(--overwrite)
         ENCODE_OVERWRITE_ARGS+=(--overwrite)
         ALIGN_OVERWRITE_ARGS+=(
             --overwrite-offset
@@ -154,6 +156,7 @@ pipeline_init() {
     ENCODER_SETTINGS="${ENCODER_SETTINGS:-$(_pipeline_resolve_path configs/spike_encoding/custom_wavelet.json)}"
     ENCODER_FREQUENCIES=()
     POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
+    RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-none}"
     ENCODER_SETTINGS="$(_pipeline_resolve_path "${ENCODER_SETTINGS:-configs/spike_encoding/custom_wavelet.json}")"
     ENCODER_FREQUENCIES_HZ="${ENCODER_FREQUENCIES_HZ:-}"
     LEGACY_OVERWRITE="${OVERWRITE:-}"
@@ -190,6 +193,21 @@ pipeline_init() {
     PADDING_ROUND_TO="${PADDING_ROUND_TO:-1}"
     PADDING_VALUE="${PADDING_VALUE:-0.0}"
 
+    case "$RESAMPLE_RATE_HZ" in
+        none)
+            EFFECTIVE_SAMPLING_RATE="$SAMPLING_RATE"
+            ;;
+        *)
+            if [[ ! "$RESAMPLE_RATE_HZ" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$RESAMPLE_RATE_HZ" == 0 || "$RESAMPLE_RATE_HZ" == 0.0 ]]; then
+                pipeline_die "RESAMPLE_RATE_HZ must be none or a positive downsampling rate"
+            fi
+            if ! awk -v target="$RESAMPLE_RATE_HZ" -v source="$SAMPLING_RATE" 'BEGIN { exit !(target < source) }'; then
+                pipeline_die "RESAMPLE_RATE_HZ must be lower than SAMPLING_RATE; upsampling is unsupported"
+            fi
+            EFFECTIVE_SAMPLING_RATE="$RESAMPLE_RATE_HZ"
+            ;;
+    esac
+
     if [[ "$ENCODER" != "custom-wavelet" ]]; then
         pipeline_die "action-0 scripts require ENCODER=custom-wavelet"
     fi
@@ -223,6 +241,7 @@ pipeline_init() {
 
     COMBINATION_ROOT="$OUTPUT_BASE/$OUTPUT_METHOD/$BOUNDARY_MODE"
     PREPROCESS_ROOT="$COMBINATION_ROOT/preprocessedIMU"
+    RESAMPLE_ROOT="$COMBINATION_ROOT/resampledIMU"
     SPIKE_OUTPUT_ROOT="$COMBINATION_ROOT/spikeEncoding"
     SPIKE_ROOT="$SPIKE_OUTPUT_ROOT/$ENCODER"
     ALIGNMENT_ROOT="$COMBINATION_ROOT/alignment"
@@ -235,6 +254,7 @@ pipeline_init() {
     LOG_ROOT="$COMBINATION_ROOT/logs"
     DISCOVERY_LOG="$LOG_ROOT/discovery.log"
     ENCODE_LOG="$LOG_ROOT/encode.log"
+    RESAMPLE_LOG="$LOG_ROOT/resample.log"
     QA_LOG="$LOG_ROOT/qa.log"
     PADDING_LOG="$LOG_ROOT/padding.log"
 
@@ -245,15 +265,17 @@ pipeline_init() {
     if [[ "$PIPELINE_MODE" == "overwrite" ]]; then
         : >"$DISCOVERY_LOG"
         : >"$ENCODE_LOG"
+        : >"$RESAMPLE_LOG"
         : >"$QA_LOG"
         : >"$PADDING_LOG"
     else
-        touch "$DISCOVERY_LOG" "$ENCODE_LOG" "$QA_LOG" "$PADDING_LOG"
+        touch "$DISCOVERY_LOG" "$ENCODE_LOG" "$RESAMPLE_LOG" "$QA_LOG" "$PADDING_LOG"
     fi
     printf '\n=== pipeline invocation mode=%s ===\n' "$PIPELINE_MODE" >>"$DISCOVERY_LOG"
 
     export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/writingring-matplotlib}"
     export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/writingring-cache}"
+    export PIPELINE_EFFECTIVE_SAMPLING_RATE="$EFFECTIVE_SAMPLING_RATE"
     export PYTHONUNBUFFERED=1
     mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME"
 
@@ -296,6 +318,12 @@ pipeline_prepare_legacy_defaults() {
     ENCODER_SETTINGS="${ENCODER_SETTINGS:-$(_pipeline_resolve_path configs/spike_encoding/custom_wavelet.json)}"
     ENCODER_FREQUENCIES=()
     POST_ENCODE_TRANSFORM="${POST_ENCODE_TRANSFORM:-none}"
+    RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-none}"
+    if [[ "$RESAMPLE_RATE_HZ" == "none" ]]; then
+        EFFECTIVE_SAMPLING_RATE="${EFFECTIVE_SAMPLING_RATE:-$SAMPLING_RATE}"
+    else
+        EFFECTIVE_SAMPLING_RATE="${EFFECTIVE_SAMPLING_RATE:-$RESAMPLE_RATE_HZ}"
+    fi
     BOUNDARY_MODE="${BOUNDARY_MODE:-label}"
     OVERWRITE="${OVERWRITE:-0}"
     SEGMENT_VERIFICATION_DPI="${SEGMENT_VERIFICATION_DPI:-200}"
@@ -311,6 +339,7 @@ pipeline_prepare_legacy_defaults() {
     legacy_root="${COMBINATION_ROOT:-$(_pipeline_resolve_path outputs/action0_pipeline/$GRAVITY_METHOD/$BOUNDARY_MODE)}"
     COMBINATION_ROOT="$legacy_root"
     PREPROCESS_ROOT="${PREPROCESS_ROOT:-$legacy_root/preprocessedIMU}"
+    RESAMPLE_ROOT="${RESAMPLE_ROOT:-$legacy_root/resampledIMU}"
     SPIKE_OUTPUT_ROOT="${SPIKE_OUTPUT_ROOT:-$legacy_root/spikeEncoding}"
     SPIKE_ROOT="${SPIKE_ROOT:-$SPIKE_OUTPUT_ROOT/$ENCODER}"
     ALIGNMENT_ROOT="${ALIGNMENT_ROOT:-$legacy_root/alignment}"
@@ -323,6 +352,7 @@ pipeline_prepare_legacy_defaults() {
     LOG_ROOT="${LOG_ROOT:-$legacy_root/logs}"
     DISCOVERY_LOG="${DISCOVERY_LOG:-/dev/null}"
     ENCODE_LOG="${ENCODE_LOG:-/dev/null}"
+    RESAMPLE_LOG="${RESAMPLE_LOG:-/dev/null}"
     QA_LOG="${QA_LOG:-/dev/null}"
     PADDING_LOG="${PADDING_LOG:-/dev/null}"
 
@@ -459,13 +489,20 @@ pipeline_preprocess_legacy() {
 }
 
 pipeline_encode() {
+    local encode_input_root="$PREPROCESS_ROOT"
+    local encode_pattern='*_preprocessedIMU.npy'
+    if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+        encode_input_root="$RESAMPLE_ROOT"
+        encode_pattern='*_resampledIMU.npy'
+    fi
     local -a command_args=(
         "${PYTHON_CMD[@]}" scripts/encode_spikes.py
-        --input-root "$PREPROCESS_ROOT"
-        --pattern '*_preprocessedIMU.npy'
+        --input-root "$encode_input_root"
+        --pattern "$encode_pattern"
         --output-root "$SPIKE_OUTPUT_ROOT"
         --encoder "$ENCODER"
         --encoder-settings "$ENCODER_SETTINGS"
+        --effective-sampling-rate-hz "$EFFECTIVE_SAMPLING_RATE"
         --post-encode-transform "$POST_ENCODE_TRANSFORM"
     )
     command_args+=("${ENCODER_FREQUENCY_ARGS[@]}")
@@ -492,6 +529,27 @@ pipeline_encode() {
         pipeline_require_file \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/metadata.json" \
             "SpikeIMU metadata"
+    done
+}
+
+pipeline_resample_if_requested() {
+    if [[ "$RESAMPLE_RATE_HZ" == "none" ]]; then
+        return 0
+    fi
+    pipeline_run_logged "$RESAMPLE_LOG" "${PYTHON_CMD[@]}" scripts/resample_preprocessed_imu.py \
+        --input-root "$PREPROCESS_ROOT" \
+        --output-root "$RESAMPLE_ROOT" \
+        --target-rate-hz "$RESAMPLE_RATE_HZ" \
+        "${RESAMPLE_OVERWRITE_ARGS[@]}"
+    local index record_user record_action dataset_id directory
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        directory="$RESAMPLE_ROOT/$record_user/$record_action/$dataset_id"
+        pipeline_require_file "$directory/${dataset_id}_resampledIMU.npy" "resampled IMU artifact"
+        pipeline_require_file "$directory/${dataset_id}_resampled_timestamps_us.npy" "resampled timestamp sidecar"
+        pipeline_require_file "$directory/${dataset_id}_resampling.json" "resampling metadata"
     done
 }
 
@@ -808,7 +866,7 @@ pipeline_segment_legacy() {
             --input-kind spike-imu
             --spike-root "$SPIKE_ROOT"
             --boundary-mode "$BOUNDARY_MODE"
-            --sampling-rate "$SAMPLING_RATE"
+            --sampling-rate "$EFFECTIVE_SAMPLING_RATE"
             --output-root "$SEGMENT_ROOT"
         )
         if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
@@ -856,7 +914,7 @@ pipeline_padding_legacy() {
         "${PYTHON_CMD[@]}" scripts/analyze_segment_lengths.py
         --input-root "$SEGMENT_ROOT"
         --output-dir "$PADDING_ANALYSIS_DIR"
-        --sampling-rate "$SAMPLING_RATE"
+        --sampling-rate "$EFFECTIVE_SAMPLING_RATE"
         --minimum-coverage "$PADDING_COVERAGE"
         --round-to "$PADDING_ROUND_TO"
     )
@@ -873,7 +931,7 @@ pipeline_padding_legacy() {
         --output-root "$PADDING_OUTPUT_ROOT"
         --analysis-report "$analysis_report"
         --recommendation "$PADDING_RECOMMENDATION"
-        --sampling-rate "$SAMPLING_RATE"
+        --sampling-rate "$EFFECTIVE_SAMPLING_RATE"
         --padding-value "$PADDING_VALUE"
     )
     padding_args+=("${PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS[@]}")
@@ -898,6 +956,7 @@ pipeline_validate_spike_artifact() {
 from pathlib import Path
 import json
 import numpy as np
+import os
 import sys
 
 values_path, metadata_path, timestamps_path = map(Path, sys.argv[1:4])
@@ -940,6 +999,9 @@ if actual_transform != expected_transform:
 if settings_path is not None:
     from writingring.spike_encoding import create_encoder, load_encoder_settings
     encoder_settings = load_encoder_settings(settings_path)
+    effective_rate = os.environ.get("PIPELINE_EFFECTIVE_SAMPLING_RATE")
+    if effective_rate:
+        encoder_settings["sampling_rate_hz"] = float(effective_rate)
     if frequencies:
         encoder_settings["frequencies_hz"] = frequencies
     encoder_settings["post_encode_transform"] = expected_transform
@@ -1442,6 +1504,50 @@ pipeline_preprocess_has_any_output() {
     pipeline_path_has_files "$PREPROCESS_ROOT"
 }
 
+pipeline_resample_has_any_output() {
+    [[ -n "${RESAMPLE_ROOT:-}" ]] && pipeline_path_has_files "$RESAMPLE_ROOT"
+}
+
+pipeline_resample_outputs_valid() {
+    if [[ "$RESAMPLE_RATE_HZ" == "none" ]]; then
+        return 0
+    fi
+    local index record_user record_action dataset_id source_directory directory
+    for index in "${!RECORD_USERS[@]}"; do
+        record_user="${RECORD_USERS[$index]}"
+        record_action="${RECORD_ACTIONS[$index]}"
+        dataset_id="${RECORD_DATASET_IDS[$index]}"
+        source_directory="$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id"
+        directory="$RESAMPLE_ROOT/$record_user/$record_action/$dataset_id"
+        [[ -s "$directory/${dataset_id}_resampledIMU.npy" ]] || return 1
+        [[ -s "$directory/${dataset_id}_resampled_timestamps_us.npy" ]] || return 1
+        [[ -s "$directory/${dataset_id}_resampling.json" ]] || return 1
+        "${PYTHON_CMD[@]}" -c '
+from pathlib import Path
+import json
+import sys
+from writingring.preprocessing_io import sha256_file
+
+source_imu, source_summary, source_timestamps, output_imu, output_timestamps, output_summary, target = sys.argv[1:]
+payload = json.loads(Path(output_summary).read_text(encoding="utf-8"))
+resampling = payload.get("resampling")
+if payload.get("artifact_type") != "resampled_imu" or payload.get("sampling_rate_hz") != float(target):
+    raise SystemExit("invalid resampling artifact identity")
+if not isinstance(resampling, dict):
+    raise SystemExit("missing resampling metadata")
+expected = {
+    "source_imu_sha256": sha256_file(Path(source_imu)),
+    "source_summary_sha256": sha256_file(Path(source_summary)),
+    "source_timestamps_sha256": sha256_file(Path(source_timestamps)),
+}
+if resampling.get("target_sampling_rate_hz") != float(target) or any(resampling.get(key) != value for key, value in expected.items()):
+    raise SystemExit("resampling metadata is stale")
+if not Path(output_imu).is_file() or not Path(output_timestamps).is_file():
+    raise SystemExit("resampling files are missing")
+' "$source_directory/${dataset_id}_preprocessedIMU.npy" "$source_directory/${dataset_id}_preprocessing.json" "$source_directory/${dataset_id}_timestamps_us.npy" "$directory/${dataset_id}_resampledIMU.npy" "$directory/${dataset_id}_resampled_timestamps_us.npy" "$directory/${dataset_id}_resampling.json" "$RESAMPLE_RATE_HZ" || return 1
+    done
+}
+
 pipeline_encode_has_any_output() {
     pipeline_path_has_files "$SPIKE_ROOT"
 }
@@ -1490,7 +1596,7 @@ pipeline_preprocess_outputs_valid() {
 
 pipeline_encode_outputs_valid() {
     # Requested transform remains a hard validation gate: "$POST_ENCODE_TRANSFORM" || return 1
-    local index record_user record_action dataset_id directory timestamps_path
+    local index record_user record_action dataset_id directory timestamps_path input_directory timestamp_name
     local -a encoder_identity_args=()
     if [[ -n "${ENCODER_SETTINGS:-}" ]]; then
         encoder_identity_args=("$ENCODER_SETTINGS" "${ENCODER_FREQUENCIES[@]}")
@@ -1500,7 +1606,13 @@ pipeline_encode_outputs_valid() {
         record_action="${RECORD_ACTIONS[$index]}"
         dataset_id="${RECORD_DATASET_IDS[$index]}"
         directory="$SPIKE_ROOT/$record_user/$record_action/$dataset_id"
-        timestamps_path="$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy"
+        input_directory="$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id"
+        timestamp_name="${dataset_id}_timestamps_us.npy"
+        if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+            input_directory="$RESAMPLE_ROOT/$record_user/$record_action/$dataset_id"
+            timestamp_name="${dataset_id}_resampled_timestamps_us.npy"
+        fi
+        timestamps_path="$input_directory/$timestamp_name"
         [[ -s "$directory/spikes.npy" ]] || return 1
         [[ -s "$directory/spikeIMU.npy" ]] || return 1
         [[ -s "$directory/recording_offsets.npy" ]] || return 1
@@ -1616,14 +1728,16 @@ pipeline_prepare_encoder_rebuild() {
 }
 
 pipeline_plan_continue() {
-    local preprocess_any=0 encode_any=0 alignment_any=0 segment_any=0 padding_any=0
+    local preprocess_any=0 resample_any=0 encode_any=0 alignment_any=0 segment_any=0 padding_any=0
     local dependency_status=0
     PIPELINE_RESUME_STAGE="preprocess"
     PIPELINE_FORCE_REBUILD=0
     PIPELINE_DOWNSTREAM_SEGMENT_OVERWRITE_ARGS=()
     PIPELINE_DOWNSTREAM_PADDING_OVERWRITE_ARGS=()
+    RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-none}"
 
     pipeline_preprocess_has_any_output && preprocess_any=1
+    pipeline_resample_has_any_output && resample_any=1
     pipeline_encode_has_any_output && encode_any=1
     if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
         pipeline_alignment_has_any_output && alignment_any=1
@@ -1646,9 +1760,22 @@ pipeline_plan_continue() {
     fi
     pipeline_note "preprocess outputs are complete and valid; skipping preprocess"
 
+    if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+        if [[ "$resample_any" == "0" ]] || ! pipeline_resample_outputs_valid; then
+            RESAMPLE_OVERWRITE_ARGS=(--overwrite)
+            pipeline_prepare_encoder_rebuild
+            PIPELINE_RESUME_STAGE="resample"
+            pipeline_note "resampling outputs are absent or stale; reusing preprocessing and rebuilding downstream"
+            return 0
+        fi
+        pipeline_note "resampling outputs are complete and valid; skipping resampling"
+    fi
+
     if [[ "$encode_any" == "0" ]]; then
         if (( alignment_any || segment_any || padding_any )); then
-            pipeline_force_full_rebuild "encode outputs are absent while downstream outputs exist"
+            pipeline_prepare_encoder_rebuild
+            PIPELINE_RESUME_STAGE="encode"
+            pipeline_note "encode outputs are absent while downstream outputs exist; reusing valid upstream artifacts"
         else
             PIPELINE_RESUME_STAGE="encode"
             pipeline_note "encode outputs not found; resuming from encode"
@@ -1762,6 +1889,16 @@ pipeline_execute_from_stage() {
     case "$stage" in
         preprocess)
             pipeline_preprocess
+            pipeline_resample_if_requested
+            pipeline_encode
+            if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
+                pipeline_align
+            fi
+            pipeline_segment
+            pipeline_padding
+            ;;
+        resample)
+            pipeline_resample_if_requested
             pipeline_encode
             if [[ "$BOUNDARY_MODE" == "aligned-board-events" ]]; then
                 pipeline_align
@@ -1806,25 +1943,32 @@ pipeline_qa_legacy() {
         encoder_identity_args=("$ENCODER_SETTINGS" "${ENCODER_FREQUENCIES[@]}")
     fi
     local ring_count="${#RING_FILES[@]}"
-    local preprocessing_count spike_count summary_count padded_summary_count
+    local preprocessing_count resampling_count spike_count summary_count padded_summary_count
     local successful_user_action_count="${#PIPELINE_USERS[@]}"
     local segmentation_error_count=0
     local all_error_user_count=0
     local record_user
     local segment_directory
     preprocessing_count="$(pipeline_count_files "$PREPROCESS_ROOT" '*_preprocessing.json')"
+    resampling_count="$(pipeline_count_files "$RESAMPLE_ROOT" '*_resampling.json')"
     spike_count="$(pipeline_count_files "$SPIKE_ROOT" 'spikeIMU.npy')"
     summary_count="$(pipeline_count_files "$SEGMENT_ROOT" '*_segmentation_summary.json')"
     padded_summary_count="$(pipeline_count_files "$PADDING_OUTPUT_ROOT" 'padding_dataset_summary.json')"
 
     printf 'ring_0_recordings=%s\n' "$ring_count" >>"$QA_LOG"
     printf 'preprocessing_summaries=%s\n' "$preprocessing_count" >>"$QA_LOG"
+    printf 'resampling_summaries=%s\n' "$resampling_count" >>"$QA_LOG"
     printf 'spikeIMU_matrices=%s\n' "$spike_count" >>"$QA_LOG"
     printf 'segmentation_summaries=%s\n' "$summary_count" >>"$QA_LOG"
     printf 'padded_dataset_summaries=%s\n' "$padded_summary_count" >>"$QA_LOG"
 
     if [[ "$preprocessing_count" -ne "$ring_count" ]]; then
         pipeline_die "preprocessing summary count ${preprocessing_count} != ring_0 count ${ring_count}"
+    fi
+    if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+        if [[ "$resampling_count" -ne "$ring_count" ]] || ! pipeline_resample_outputs_valid; then
+            pipeline_die "resampling artifacts are missing, partial, or stale"
+        fi
     fi
     if [[ "$spike_count" -ne "$ring_count" ]]; then
         pipeline_die "SpikeIMU count ${spike_count} != ring_0 count ${ring_count}"
@@ -1915,6 +2059,13 @@ pipeline_qa_legacy() {
     printf 'segmentation_recording_errors=%s\n' "$segmentation_error_count" >>"$QA_LOG"
     printf 'segmentation_all_error_users=%s\n' "$all_error_user_count" >>"$QA_LOG"
 
+    local encoder_input_root encoder_timestamp_name
+    encoder_input_root="$PREPROCESS_ROOT"
+    encoder_timestamp_name='timestamps_us.npy'
+    if [[ "$RESAMPLE_RATE_HZ" != "none" ]]; then
+        encoder_input_root="$RESAMPLE_ROOT"
+        encoder_timestamp_name='resampled_timestamps_us.npy'
+    fi
     for index in "${!RECORD_USERS[@]}"; do
         record_user="${RECORD_USERS[$index]}"
         record_action="${RECORD_ACTIONS[$index]}"
@@ -1925,10 +2076,13 @@ pipeline_qa_legacy() {
         pipeline_require_file \
             "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy" \
             "canonical timestamp sidecar"
+        pipeline_require_file \
+            "$encoder_input_root/$record_user/$record_action/$dataset_id/${dataset_id}_${encoder_timestamp_name}" \
+            "encoder timestamp sidecar"
         pipeline_validate_spike_artifact \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/spikeIMU.npy" \
             "$SPIKE_ROOT/$record_user/$record_action/$dataset_id/metadata.json" \
-            "$PREPROCESS_ROOT/$record_user/$record_action/$dataset_id/${dataset_id}_timestamps_us.npy" \
+            "$encoder_input_root/$record_user/$record_action/$dataset_id/${dataset_id}_${encoder_timestamp_name}" \
             "$POST_ENCODE_TRANSFORM" \
             "${encoder_identity_args[@]}"
     done
@@ -2320,7 +2474,7 @@ pipeline_segment() {
     pipeline_note "batched segmentation: one Python process for ${#PIPELINE_USERS[@]} users"
     pipeline_batch_python_logged "$LOG_ROOT/segmentation/batch.log" \
         "$PIPELINE_PROJECT_ROOT/scripts/segment_ring_imu.py" \
-        "$DATA_ROOT" "$SPIKE_ROOT" "$BOUNDARY_MODE" "$SAMPLING_RATE" \
+        "$DATA_ROOT" "$SPIKE_ROOT" "$BOUNDARY_MODE" "$EFFECTIVE_SAMPLING_RATE" \
         "$SEGMENT_ROOT" "$OFFSET_ROOT" "$effective_overwrite" "$SEGMENT_VERIFICATION_DPI" \
         "$LOG_ROOT/segmentation" "$ACTION" "${PIPELINE_USERS[@]}" <<'PY_BATCH_SEGMENT'
 from contextlib import redirect_stderr, redirect_stdout
@@ -2665,7 +2819,7 @@ pipeline_padding() {
     pipeline_note "batched padding: validate/load segmented packages once, then analyze and pad"
     pipeline_batch_python_logged "$PADDING_LOG" \
         "$SEGMENT_ROOT" "$PADDING_ANALYSIS_DIR" "$PADDING_OUTPUT_ROOT" \
-        "$SAMPLING_RATE" "$PADDING_COVERAGE" "$PADDING_ROUND_TO" \
+        "$EFFECTIVE_SAMPLING_RATE" "$PADDING_COVERAGE" "$PADDING_ROUND_TO" \
         "$PADDING_RECOMMENDATION" "$PADDING_VALUE" "$effective_overwrite" <<'PY_BATCH_PADDING'
 from pathlib import Path
 import sys
@@ -2762,6 +2916,9 @@ pipeline_qa() {
     pipeline_log_command "$QA_LOG" "${PYTHON_CMD[@]}" - \
         --data-root "$DATA_ROOT" \
         --preprocess-root "$PREPROCESS_ROOT" \
+        --resample-root "$RESAMPLE_ROOT" \
+        --resample-rate-hz "$RESAMPLE_RATE_HZ" \
+        --effective-sampling-rate-hz "$EFFECTIVE_SAMPLING_RATE" \
         --spike-root "$SPIKE_ROOT" \
         --offset-root "$OFFSET_ROOT" \
         --alignment-verification-root "$ALIGNMENT_VERIFICATION_ROOT" \
@@ -2778,6 +2935,9 @@ pipeline_qa() {
     "${PYTHON_CMD[@]}" - \
         --data-root "$DATA_ROOT" \
         --preprocess-root "$PREPROCESS_ROOT" \
+        --resample-root "$RESAMPLE_ROOT" \
+        --resample-rate-hz "$RESAMPLE_RATE_HZ" \
+        --effective-sampling-rate-hz "$EFFECTIVE_SAMPLING_RATE" \
         --spike-root "$SPIKE_ROOT" \
         --offset-root "$OFFSET_ROOT" \
         --alignment-verification-root "$ALIGNMENT_VERIFICATION_ROOT" \
@@ -2823,6 +2983,9 @@ def args_parser():
     p = argparse.ArgumentParser()
     p.add_argument('--data-root', type=Path, required=True)
     p.add_argument('--preprocess-root', type=Path, required=True)
+    p.add_argument('--resample-root', type=Path, required=True)
+    p.add_argument('--resample-rate-hz', required=True)
+    p.add_argument('--effective-sampling-rate-hz', type=float, required=True)
     p.add_argument('--spike-root', type=Path, required=True)
     p.add_argument('--offset-root', type=Path, required=True)
     p.add_argument('--alignment-verification-root', type=Path, required=True)
@@ -2996,13 +3159,16 @@ def run(a):
 
     n = len(recordings)
     pre_count = count(a.preprocess_root, '*_preprocessing.json')
+    resample_count = count(a.resample_root, '*_resampling.json') if a.resample_rate_hz != 'none' else 0
     spike_count = count(a.spike_root, 'spikeIMU.npy')
     seg_count = count(a.segmentation_root, '*_segmentation_summary.json')
     padded_count = count(a.padding_output_root, 'padding_dataset_summary.json')
     print(f'[qa] batched QA started: recordings={n} users={len(users)} boundary={a.boundary_mode}', flush=True)
-    print(f'ring_0_recordings={n}\npreprocessing_summaries={pre_count}\nspikeIMU_matrices={spike_count}\nsegmentation_summaries={seg_count}\npadded_dataset_summaries={padded_count}')
+    print(f'ring_0_recordings={n}\npreprocessing_summaries={pre_count}\nresampling_summaries={resample_count}\nspikeIMU_matrices={spike_count}\nsegmentation_summaries={seg_count}\npadded_dataset_summaries={padded_count}')
     if pre_count != n or spike_count != n:
         raise QAError('preprocess/spike artifact count does not match recording count')
+    if a.resample_rate_hz != 'none' and resample_count != n:
+        raise QAError('resampling artifact count does not match recording count')
 
     deps = {u: {'source_recording_ids': [], 'outcomes_by_status': {'SUCCESS': [], 'SKIPPED': []}} for u in users}
     success = skipped = invalid = 0
@@ -3011,13 +3177,32 @@ def run(a):
         progress('recording validation', i, n, f'{r.user}/{r.action}/{r.dataset_id}')
         pre_dir = a.preprocess_root / r.user / r.action / str(r.dataset_id)
         spike_dir = a.spike_root / r.user / r.action / str(r.dataset_id)
-        timestamps = pre_dir / f'{r.dataset_id}_timestamps_us.npy'
+        input_dir = pre_dir
+        timestamp_name = f'{r.dataset_id}_timestamps_us.npy'
+        if a.resample_rate_hz != 'none':
+            input_dir = a.resample_root / r.user / r.action / str(r.dataset_id)
+            timestamp_name = f'{r.dataset_id}_resampled_timestamps_us.npy'
+            summary = load_json(input_dir / f'{r.dataset_id}_resampling.json')
+            resampling = summary.get('resampling')
+            if (
+                summary.get('artifact_type') != 'resampled_imu'
+                or summary.get('sampling_rate_hz') != a.effective_sampling_rate_hz
+                or not isinstance(resampling, dict)
+                or resampling.get('target_sampling_rate_hz') != a.effective_sampling_rate_hz
+                or resampling.get('source_imu_sha256') != sha256_file(pre_dir / f'{r.dataset_id}_preprocessedIMU.npy')
+            ):
+                raise QAError(f'invalid or stale resampling metadata for {r.user}/{r.dataset_id}')
+        timestamps = input_dir / timestamp_name
         metadata = spike_dir / 'metadata.json'
         require(pre_dir / f'{r.dataset_id}_preprocessing.json', 'preprocessing metadata')
+        require(input_dir / (f'{r.dataset_id}_resampledIMU.npy' if a.resample_rate_hz != 'none' else f'{r.dataset_id}_preprocessedIMU.npy'), 'encoder input IMU')
         require(timestamps, 'timestamp sidecar')
         require(spike_dir / 'spikeIMU.npy', 'SpikeIMU')
         require(metadata, 'SpikeIMU metadata')
         validate_transform(metadata, a.post_encode_transform)
+        settings = load_json(metadata).get('settings')
+        if not isinstance(settings, dict) or settings.get('sampling_rate_hz') != a.effective_sampling_rate_hz:
+            raise QAError(f'SpikeIMU effective sampling rate mismatch: {metadata}')
 
         if a.boundary_mode == 'label':
             values = np.load(spike_dir / 'spikeIMU.npy', allow_pickle=False)

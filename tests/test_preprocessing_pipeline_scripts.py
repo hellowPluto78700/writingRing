@@ -67,6 +67,19 @@ def test_preprocessing_pipeline_transform_control_is_validated_and_wired(tmp_pat
     assert "POST_ENCODE_TRANSFORM must be none, AbsRectify, or PolaritySplitAbs" in completed.stderr
 
 
+def test_resampled_pipeline_uses_effective_rate_for_segmentation_and_padding() -> None:
+    common = COMMON_PATH.read_text(encoding="utf-8")
+    segment_start = common.index("pipeline_segment_legacy()")
+    padding_start = common.index("pipeline_qa()")
+    downstream = common[segment_start:padding_start]
+    assert '--sampling-rate "$EFFECTIVE_SAMPLING_RATE"' in downstream
+    batch_segment_start = common.index("pipeline_segment()")
+    batch_padding_start = common.index("pipeline_qa()")
+    batch_downstream = common[batch_segment_start:batch_padding_start]
+    assert '"$BOUNDARY_MODE" "$EFFECTIVE_SAMPLING_RATE"' in batch_downstream
+    assert '"$EFFECTIVE_SAMPLING_RATE" "$PADDING_COVERAGE"' in batch_downstream
+
+
 def test_requested_transform_reaches_continue_and_qa_validation_sites() -> None:
     common = COMMON_PATH.read_text(encoding="utf-8")
     encode_start = common.index("pipeline_encode_outputs_valid()")

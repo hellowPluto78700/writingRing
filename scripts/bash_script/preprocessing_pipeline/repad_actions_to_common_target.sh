@@ -10,6 +10,10 @@ set -Eeuo pipefail
 #   3. Re-run padding ONLY for the action with the smaller target.
 #   4. Read from variable-length segmentation/, NOT segmentation_padded/.
 #
+# This is downstream of encoding: it does not need a RESAMPLE_RATE_HZ option.
+# It preserves either signed/rectified 21-channel SpikeIMU or polarity-split
+# 36-channel SpikeIMU, provided both action roots have the same encoder identity.
+#
 # Usage:
 #
 #   bash scripts/bash_script/repad_actions_to_common_target.sh
@@ -23,7 +27,7 @@ set -Eeuo pipefail
 # Optional environment variables:
 #
 #   CONDA_ENV=writingring-gpu
-#   SAMPLING_RATE=200
+#   SAMPLING_RATE=64  # optional; otherwise inferred from existing summaries
 #   PADDING_VALUE=0.0
 #   ENCODER_FREQUENCIES_HZ="1 2 4 8 16"  # validates existing inputs only
 # ------------------------------------------------------------
@@ -35,7 +39,7 @@ ACTION0_ROOT="${1:-outputs/action0_wavelets_1_2_4_8_16/low-pass/aligned-board-ev
 ACTION1_ROOT="${2:-outputs/action1_wavelets_1_2_4_8_16/low-pass/aligned-board-events}"
 
 CONDA_ENV="${CONDA_ENV:-writingring-gpu}"
-SAMPLING_RATE="${SAMPLING_RATE:-200}"
+SAMPLING_RATE="${SAMPLING_RATE:-}"
 PADDING_VALUE="${PADDING_VALUE:-0.0}"
 ENCODER_FREQUENCIES_HZ="${ENCODER_FREQUENCIES_HZ:-}"
 
@@ -77,6 +81,30 @@ if not isinstance(target, int) or target <= 0:
     )
 
 print(target)
+PY
+}
+
+
+read_sampling_rate() {
+    local summary="$1"
+
+    python3 - "$summary" <<'PY'
+import json
+import math
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+value = payload.get("sampling_rate_hz")
+if isinstance(value, bool):
+    raise SystemExit("sampling_rate_hz must be a finite positive number")
+try:
+    rate = float(value)
+except (TypeError, ValueError) as error:
+    raise SystemExit("missing sampling_rate_hz") from error
+if not math.isfinite(rate) or rate <= 0:
+    raise SystemExit("sampling_rate_hz must be a finite positive number")
+print(rate)
 PY
 }
 
@@ -133,10 +161,21 @@ validate_encoder_identity "$ACTION0_SUMMARY" "$ACTION1_SUMMARY" "$ENCODER_FREQUE
 
 ACTION0_TARGET="$(read_target_length "$ACTION0_SUMMARY")"
 ACTION1_TARGET="$(read_target_length "$ACTION1_SUMMARY")"
+ACTION0_RATE="$(read_sampling_rate "$ACTION0_SUMMARY")"
+ACTION1_RATE="$(read_sampling_rate "$ACTION1_SUMMARY")"
+
+awk -v left="$ACTION0_RATE" -v right="$ACTION1_RATE" 'BEGIN { exit !(left == right) }' ||
+    die "padding summaries use different sampling rates: $ACTION0_RATE vs $ACTION1_RATE"
+if [[ -z "$SAMPLING_RATE" ]]; then
+    SAMPLING_RATE="$ACTION0_RATE"
+elif ! awk -v requested="$SAMPLING_RATE" -v actual="$ACTION0_RATE" 'BEGIN { exit !(requested == actual) }'; then
+    die "SAMPLING_RATE=$SAMPLING_RATE does not match existing padding metadata ($ACTION0_RATE)"
+fi
 
 echo
 echo "Action 0 padding target: $ACTION0_TARGET"
 echo "Action 1 padding target: $ACTION1_TARGET"
+echo "Effective sampling rate: $SAMPLING_RATE Hz"
 echo
 
 
