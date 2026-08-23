@@ -1,13 +1,16 @@
 {
-  "experiment_id": "experiment_2_1",
-  "experiment_title": "Experiment 2.1 — SNN readout sanity check",
+  "experiment_id": "experiment_2_1_fixed_shared_backbone",
+  "experiment_title": "Experiment 2.1 — Shared-backbone SNN readout sanity check",
   "dataset_roots": [
     "/home/ted/project/writingring-viz/outputs/action0_wavelets_1_2_4_8_16",
     "/home/ted/project/writingring-viz/outputs/action1_wavelets_1_2_4_8_16"
   ],
   "seeds": [
+    23,
     11,
-    23
+    101,
+    40,
+    231
   ],
   "split_seed": 12345,
   "included_labels": [
@@ -57,14 +60,27 @@
   "threshold": 1.0,
   "surrogate_slope": 25.0,
   "reset_mechanism": "subtract",
+  "linear_bias": false,
   "batch_size": 64,
   "num_epochs": 50,
   "early_stopping_patience": 8,
   "learning_rate": 0.0005,
   "weight_decay": 0.0,
+  "spike_regularization": 0.0,
   "train_fraction": 0.7,
   "val_fraction": 0.15,
-  "primary_selection_metric": "validation balanced accuracy",
+  "backbone_training_objective": "masked per-valid-timestep cross entropy; repo-style Action0 objective",
+  "backbone_training_count_per_seed": 1,
+  "backbone_selection_metric": "val_loss",
+  "readout_training": {
+    "full_count": "none; direct frozen-backbone output spike count",
+    "temporal_10bin": "freeze backbone; train Linear(10K -> K) on frozen train features",
+    "final_membrane": "none; direct final-valid output membrane"
+  },
+  "temporal_head_epochs": 200,
+  "temporal_head_patience": 20,
+  "temporal_head_learning_rate": 0.01,
+  "temporal_head_weight_decay": 0.0,
   "primary_report_metric": "test balanced accuracy",
   "input_normalization": "none; direct weighted events preserved",
   "recurrence": false,

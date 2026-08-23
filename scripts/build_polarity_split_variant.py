@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -43,6 +44,10 @@ DEST_TOTAL_CHANNELS = 36
 SOURCE_FEATURE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
 DEST_FEATURE_SCHEMA = "polarity_split_wavelet_events_plus_imu_v1"
 TRANSFORM_NAME = "PolaritySplitAbs"
+DEST_EVENT_REPRESENTATION = "unsigned"
+DEST_EVENT_FEATURE_SCHEMA = "custom_wavelet_polarity_split_abs_events_v1"
+DEST_ENCODER_EVENT_REPRESENTATION = "polarity_split_sparse_wavelet_extrema"
+DEST_CHANNEL_ORDER = "axis_major_frequency_minor_pairwise_positive_negative"
 
 
 class PolaritySplitError(RuntimeError):
@@ -304,6 +309,70 @@ def split_units(value: Any) -> list[Any] | dict[str, Any] | None:
     return output_list
 
 
+def _canonical_sha256(value: dict[str, Any]) -> str:
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise PolaritySplitError("encoder metadata is not canonical JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _split_event_channel_names(value: Any) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or len(value) != SOURCE_EVENT_CHANNELS
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise PolaritySplitError(
+            f"source spike_encoder must declare {SOURCE_EVENT_CHANNELS} event_channel_names"
+        )
+    return [
+        transformed_name
+        for name in value
+        for transformed_name in (f"{name}_pos", f"{name}_neg_abs")
+    ]
+
+
+def _derive_polarity_split_encoder(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    source_encoder = payload.get("spike_encoder")
+    source_hash = payload.get("spike_encoder_spec_sha256")
+    if not isinstance(source_encoder, dict):
+        raise PolaritySplitError("source padding summary must declare spike_encoder")
+    if not isinstance(source_hash, str) or len(source_hash) != 64:
+        raise PolaritySplitError(
+            "source padding summary must declare spike_encoder_spec_sha256"
+        )
+    if _canonical_sha256(source_encoder) != source_hash:
+        raise PolaritySplitError(
+            "source spike_encoder_spec_sha256 does not match spike_encoder"
+        )
+    if source_encoder.get("schema") != "custom_wavelet_encoder_spec_v1":
+        raise PolaritySplitError("source spike_encoder is not a Custom Wavelet spec")
+    if source_encoder.get("post_encode_transform") is not None:
+        raise PolaritySplitError("source spike_encoder must be signed/untransformed")
+    if source_encoder.get("event_representation") != "signed_sparse_wavelet_extrema":
+        raise PolaritySplitError(
+            "source spike_encoder must declare signed_sparse_wavelet_extrema"
+        )
+
+    derived = dict(source_encoder)
+    derived["channel_order"] = DEST_CHANNEL_ORDER
+    derived["event_channel_names"] = _split_event_channel_names(
+        source_encoder.get("event_channel_names")
+    )
+    derived["post_encode_transform"] = TRANSFORM_NAME
+    derived["event_representation"] = DEST_ENCODER_EVENT_REPRESENTATION
+    return derived, _canonical_sha256(derived)
+
+
 def patch_summary(payload: dict[str, Any]) -> None:
     source_count = payload.get("channel_count")
     if source_count is not None and source_count != SOURCE_TOTAL_CHANNELS:
@@ -321,8 +390,23 @@ def patch_summary(payload: dict[str, Any]) -> None:
     payload["source_channel_count"] = SOURCE_TOTAL_CHANNELS
     payload["feature_schema"] = DEST_FEATURE_SCHEMA
     payload["channel_count"] = DEST_TOTAL_CHANNELS
+    payload["event_representation"] = DEST_EVENT_REPRESENTATION
+    payload["event_feature_schema"] = DEST_EVENT_FEATURE_SCHEMA
     payload["event_channel_count"] = DEST_EVENT_CHANNELS
     payload["trailing_imu_channel_count"] = 6
+    payload["event_encoding"] = DEST_ENCODER_EVENT_REPRESENTATION
+
+    derived_encoder, derived_encoder_hash = _derive_polarity_split_encoder(payload)
+    payload["source_spike_encoder"] = payload["spike_encoder"]
+    payload["source_spike_encoder_spec_sha256"] = payload[
+        "spike_encoder_spec_sha256"
+    ]
+    payload["spike_encoder"] = derived_encoder
+    payload["spike_encoder_spec_sha256"] = derived_encoder_hash
+    if "encoder_spec" in payload:
+        payload["encoder_spec"] = derived_encoder
+    if "encoder_spec_sha256" in payload:
+        payload["encoder_spec_sha256"] = derived_encoder_hash
     payload["derived_event_transform"] = {
         "name": TRANSFORM_NAME,
         "source_event_channel_count": SOURCE_EVENT_CHANNELS,
@@ -360,6 +444,15 @@ def patch_manifest(path: Path) -> None:
             changed = True
         if "feature_schema" in row:
             row["feature_schema"] = DEST_FEATURE_SCHEMA
+            changed = True
+        if "event_representation" in row:
+            row["event_representation"] = DEST_EVENT_REPRESENTATION
+            changed = True
+        if "event_feature_schema" in row:
+            row["event_feature_schema"] = DEST_EVENT_FEATURE_SCHEMA
+            changed = True
+        if "event_channel_count" in row:
+            row["event_channel_count"] = str(DEST_EVENT_CHANNELS)
             changed = True
 
     if not changed:
@@ -402,7 +495,6 @@ def validate_source_padded_root(
             "source padded root is not signed-wavelet SpikeIMU: "
             f"feature_schema={summary.get('feature_schema')!r}"
         )
-
     arrays = sorted(padded_root.rglob("*_paddedSpikeIMU.npy"))
     if not arrays:
         raise PolaritySplitError(
@@ -570,6 +662,28 @@ def build_variant(
         if final_summary.get("feature_schema") != DEST_FEATURE_SCHEMA:
             raise PolaritySplitError(
                 "staged root summary has wrong feature_schema"
+            )
+        if final_summary.get("event_representation") != DEST_EVENT_REPRESENTATION:
+            raise PolaritySplitError(
+                "staged root summary does not declare unsigned event values"
+            )
+        if final_summary.get("event_feature_schema") != DEST_EVENT_FEATURE_SCHEMA:
+            raise PolaritySplitError(
+                "staged root summary has wrong event_feature_schema"
+            )
+        if final_summary.get("event_channel_count") != DEST_EVENT_CHANNELS:
+            raise PolaritySplitError(
+                "staged root summary does not declare 30 event channels"
+            )
+        derived_encoder = final_summary.get("spike_encoder")
+        derived_hash = final_summary.get("spike_encoder_spec_sha256")
+        if (
+            not isinstance(derived_encoder, dict)
+            or not isinstance(derived_hash, str)
+            or _canonical_sha256(derived_encoder) != derived_hash
+        ):
+            raise PolaritySplitError(
+                "staged root summary has an invalid polarity-split encoder identity"
             )
 
         safe_publish(staging, output_root, overwrite=overwrite)

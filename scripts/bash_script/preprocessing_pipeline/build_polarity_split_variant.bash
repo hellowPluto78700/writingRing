@@ -19,7 +19,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 
-SOURCE_ROOT="${1:-outputs/action1_wavelets_1_2_4_8_16/low-pass/aligned-board-events}"
+SOURCE_ROOT="${1:-outputs/action1_wavelets_0e5_1_2_4_8/low-pass/aligned-board-events}"
 OUTPUT_ROOT="${2:-}"
 OVERWRITE_DEST="${OVERWRITE_DEST:-0}"
 
