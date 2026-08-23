@@ -35,8 +35,8 @@ set -Eeuo pipefail
 PROJECT_ROOT="$(git rev-parse --show-toplevel)"
 cd "$PROJECT_ROOT"
 
-ACTION0_ROOT="${1:-outputs/action0_wavelets_1_2_4_8_16/low-pass/aligned-board-events}"
-ACTION1_ROOT="${2:-outputs/action1_wavelets_1_2_4_8_16/low-pass/aligned-board-events}"
+ACTION0_ROOT="${1:-outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events}"
+ACTION1_ROOT="${2:-outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events}"
 
 CONDA_ENV="${CONDA_ENV:-writingring-gpu}"
 SAMPLING_RATE="${SAMPLING_RATE:-}"
