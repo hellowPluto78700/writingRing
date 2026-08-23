@@ -22,6 +22,7 @@ from writingring.event_alignment import (
     detect_transient_peak_regions,
     match_shifted_events_to_peaks,
     normalized_peak_region_distance,
+    peak_detection_config_for_rate,
     plot_alignment_residuals,
     plot_imu_with_board_events,
     plot_transient_with_event_raster,
@@ -449,6 +450,22 @@ def test_peak_detection_merges_near_duplicate_peaks() -> None:
 
     assert len(peaks) == 1
     assert peaks.iloc[0]["peak_index"] == 20
+
+
+def test_peak_detection_config_scales_sample_windows_from_200_hz() -> None:
+    reference = peak_detection_config_for_rate(200.0)
+    rate_64 = peak_detection_config_for_rate(64.0)
+
+    assert reference == PeakDetectionConfig()
+    assert rate_64.smoothing_window_samples == 3
+    assert rate_64.prominence_window_samples == 26
+    assert rate_64.merge_gap_samples == 1
+    assert rate_64.prominence_mad_multiplier == reference.prominence_mad_multiplier
+    assert rate_64.minimum_prominence == reference.minimum_prominence
+    assert (
+        rate_64.boundary_prominence_fraction
+        == reference.boundary_prominence_fraction
+    )
 
 
 def test_normalized_distance_covers_region_and_prefers_center() -> None:

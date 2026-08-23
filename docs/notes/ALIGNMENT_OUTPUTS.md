@@ -96,6 +96,12 @@ the declared domain, and projection diagnostics/status. Legacy
 canonical-domain offsets remain a compatibility input; they are not the
 current schema-v2 CLI output contract.
 
+The CLI report also records the `peak_detection` sample-window provenance.
+Its `sampling_rate_hz` is the feature rate used for alignment, while the
+three reported sample windows are scaled from the 200 Hz reference detector
+configuration. Prominence thresholds and boundary fractions are unchanged by
+this scaling.
+
 ## CLI
 
 ```bash

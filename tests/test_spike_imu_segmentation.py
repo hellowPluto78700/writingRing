@@ -1036,6 +1036,7 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
     captured: dict[str, np.ndarray] = {}
+    captured_peak_configs: list[object] = []
     board_chunk = tmp_path / "0_board_0.gz"
     board_chunk.write_bytes(b"board provenance")
     board = SimpleNamespace(
@@ -1066,9 +1067,19 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     monkeypatch.setattr(
         "writingring.event_alignment.compute_transient_score_array", capture_score
     )
+
+    def capture_peak_config(
+        _score: np.ndarray,
+        _timestamps: np.ndarray,
+        *,
+        config: object,
+    ) -> pd.DataFrame:
+        captured_peak_configs.append(config)
+        return pd.DataFrame()
+
     monkeypatch.setattr(
         "writingring.event_alignment.detect_transient_peak_regions",
-        lambda _score, _timestamps: pd.DataFrame(),
+        capture_peak_config,
     )
     alignment_result = SequenceAlignmentResult(
         success=True,
@@ -1121,6 +1132,11 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     ) == 0
 
     feature_input = load_spike_imu_features(recording, spike_root=spike_root)
+    assert len(captured_peak_configs) == 1
+    peak_config = captured_peak_configs[0]
+    assert peak_config.smoothing_window_samples == 25
+    assert peak_config.prominence_window_samples == 400
+    assert peak_config.merge_gap_samples == 20
     np.testing.assert_array_equal(
         captured["transient_values"], feature_input.values[:, 15:21]
     )
@@ -1158,6 +1174,13 @@ def test_spike_alignment_uses_canonical_timestamps_and_imu_channels(
     assert report["feature_sampling_rate_hz"] == pytest.approx(
         feature_input.sampling_rate_hz
     )
+    assert report["peak_detection"] == {
+        "sampling_rate_hz": feature_input.sampling_rate_hz,
+        "reference_sampling_rate_hz": 200.0,
+        "smoothing_window_samples": 25,
+        "prominence_window_samples": 400,
+        "merge_gap_samples": 20,
+    }
     assert report["alignment_time_axis"]["strategy"] == "endpoint_reconstruction"
     assert report["alignment_time_axis"]["canonical_start_us"] == pytest.approx(
         timestamps[0]
@@ -1257,7 +1280,7 @@ def _patch_failed_alignment_cli(
     )
     monkeypatch.setattr(
         "writingring.event_alignment.detect_transient_peak_regions",
-        lambda _score, _timestamps: pd.DataFrame(),
+        lambda _score, _timestamps, **_kwargs: pd.DataFrame(),
     )
     total_valid_touch_pair_count = (
         3

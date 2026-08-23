@@ -177,6 +177,51 @@ class PeakDetectionConfig:
     merge_gap_samples: int = 4
 
 
+PEAK_DETECTION_REFERENCE_RATE_HZ: Final[float] = 200.0
+
+
+def peak_detection_config_for_rate(
+    sampling_rate_hz: float,
+    reference_rate_hz: float = PEAK_DETECTION_REFERENCE_RATE_HZ,
+) -> PeakDetectionConfig:
+    """Return peak-detector windows scaled from the reference sample rate.
+
+    The default :class:`PeakDetectionConfig` remains the 200 Hz-compatible
+    configuration.  Only parameters that represent a duration in samples are
+    scaled; prominence thresholds and boundary fractions remain unchanged.
+    Smoothing is rounded up to the next odd sample count when necessary.
+    """
+
+    sampling_rate = _finite_float(
+        sampling_rate_hz,
+        name="peak detection sampling rate hz",
+    )
+    reference_rate = _finite_float(
+        reference_rate_hz,
+        name="peak detection reference rate hz",
+    )
+    if sampling_rate <= 0.0 or reference_rate <= 0.0:
+        raise EventAlignmentError(
+            "peak detection sampling rates must be positive"
+        )
+    scale = sampling_rate / reference_rate
+
+    def scaled_samples(reference_samples: int, *, odd: bool = False) -> int:
+        value = max(1, int(round(reference_samples * scale)))
+        if odd and value % 2 == 0:
+            value += 1
+        return value
+
+    return PeakDetectionConfig(
+        smoothing_window_samples=scaled_samples(5, odd=True),
+        prominence_window_samples=scaled_samples(80),
+        prominence_mad_multiplier=4.0,
+        minimum_prominence=1.0,
+        boundary_prominence_fraction=0.5,
+        merge_gap_samples=scaled_samples(4),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AlignmentConfig:
     """Candidate generation, ranking, and confidence parameters."""

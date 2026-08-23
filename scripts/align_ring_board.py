@@ -126,11 +126,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         AlignmentFailureError,
         EventAlignmentError,
         InitialIntervalNoUsablePairError,
+        PEAK_DETECTION_REFERENCE_RATE_HZ,
         align_events_to_transient_peaks,
         compute_transient_score,
         compute_transient_score_array,
         detect_board_events,
         detect_transient_peak_regions,
+        peak_detection_config_for_rate,
         select_board_interval_from_presses,
     )
     from writingring.gravity import GravityRemovalConfig
@@ -230,6 +232,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         canonical_timestamps = time_axes.canonical_timestamps_us
         alignment_timestamps = time_axes.work_timestamps_us
         alignment_time_axis = dict(time_axes.metadata)
+        peak_detection_config = peak_detection_config_for_rate(
+            feature_sampling_rate_hz,
+            reference_rate_hz=PEAK_DETECTION_REFERENCE_RATE_HZ,
+        )
+        peak_detection_report = {
+            "sampling_rate_hz": float(feature_sampling_rate_hz),
+            "reference_sampling_rate_hz": float(
+                PEAK_DETECTION_REFERENCE_RATE_HZ
+            ),
+            "smoothing_window_samples": int(
+                peak_detection_config.smoothing_window_samples
+            ),
+            "prominence_window_samples": int(
+                peak_detection_config.prominence_window_samples
+            ),
+            "merge_gap_samples": int(peak_detection_config.merge_gap_samples),
+        }
         detection = detect_board_events(board_data.frames)
         try:
             interval = select_board_interval_from_presses(
@@ -265,6 +284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "board_provenance": [
                     chunk.to_dict() for chunk in board_provenance
                 ],
+                "peak_detection": peak_detection_report,
             }
             publish_alignment_outcome(
                 outcome_paths,
@@ -280,7 +300,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Alignment report: {outcome_paths.report_path}")
             return 0
         peak_regions = detect_transient_peak_regions(
-            transient_score, alignment_timestamps
+            transient_score,
+            alignment_timestamps,
+            config=peak_detection_config,
         )
         result = align_events_to_transient_peaks(
             interval.events,
@@ -306,6 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 projection_error = str(error)
                 projection_diagnostics = getattr(error, "projection_diagnostics", None)
         alignment_report = result.report | {
+            "peak_detection": peak_detection_report,
             "recording": {
                 "user": args.user,
                 "action": args.action,
