@@ -9,9 +9,10 @@ segmentation packages under ``<root>/segmentation/<user>/action_*``.
 For every discovered user/action package it:
   1. validates the aggregate ``*_spikeIMU.npy`` and authoritative segment
      offsets/lengths;
-  2. reconstructs x/y/z acceleration independently inside each segment from
-     SpikeIMU channels 0:15 using the Custom Wavelet reconstruction used by
-     the comparison notebook;
+  2. decodes each supported SpikeIMU event schema to canonical signed (T, 15)
+     events, then reconstructs x/y/z acceleration independently inside each
+     segment using the Custom Wavelet reconstruction used by the comparison
+     notebook;
   3. concatenates the per-segment reconstructions back into one row-aligned
      ``(N, 3)`` array; and
   4. writes that derived array next to the source SpikeIMU, plus JSON metadata
@@ -37,9 +38,29 @@ from typing import Iterable, Sequence
 import numpy as np
 from scipy import signal
 
+try:
+    from scripts.reconstruction_schema import (
+        CANONICAL_SIGNED_EVENT_CHANNEL_COUNT,
+        EventSchemaContract,
+        SIGNED_WAVELET_SCHEMA,
+        event_contract_metadata,
+        extract_signed_event_channels,
+        resolve_event_schema_contract,
+        validate_spike_imu_array,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/<entrypoint>.py`` execution.
+    from reconstruction_schema import (  # type: ignore[no-redef]
+        CANONICAL_SIGNED_EVENT_CHANNEL_COUNT,
+        EventSchemaContract,
+        SIGNED_WAVELET_SCHEMA,
+        event_contract_metadata,
+        extract_signed_event_channels,
+        resolve_event_schema_contract,
+        validate_spike_imu_array,
+    )
 
-SPIKE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
-EVENT_CHANNEL_COUNT = 15
+SPIKE_SCHEMA = SIGNED_WAVELET_SCHEMA
+EVENT_CHANNEL_COUNT = CANONICAL_SIGNED_EVENT_CHANNEL_COUNT
 EVENTS_PER_AXIS = 5
 AXIS_NAMES = ("x", "y", "z")
 DEFAULT_SCALE_DIVISOR = 2.5
@@ -74,6 +95,7 @@ class LoadedPackage:
     offsets: np.ndarray
     lengths: np.ndarray
     summary: dict[str, object]
+    schema_contract: EventSchemaContract
     sampling_rate_hz: float
     sampling_rate_source: str
     encoder_spec: dict[str, object]
@@ -92,8 +114,8 @@ class ReconstructionPaths:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Reconstruct per-segment acceleration from the first 15 channels "
-            "of variable-length WritingRing SpikeIMU segmentation outputs."
+            "Reconstruct per-segment acceleration from schema-aware "
+            "variable-length WritingRing SpikeIMU segmentation outputs."
         )
     )
     parser.add_argument(
@@ -321,9 +343,28 @@ def load_package(
     summary = load_json(package.summary_path)
 
     spike_imu = np.asarray(spike_imu)
-    if spike_imu.ndim != 2 or spike_imu.shape[1] != 21:
+    observed_channel_count = spike_imu.shape[-1] if spike_imu.ndim >= 1 else None
+    if summary.get("input_kind") not in (None, "spike-imu"):
         raise ReconstructionError(
-            f"{package.spike_path}: expected shape (N, 21), got {spike_imu.shape}"
+            f"{package.summary_path}: expected input_kind='spike-imu', "
+            f"got {summary.get('input_kind')!r}"
+        )
+    try:
+        schema_contract = resolve_event_schema_contract(
+            summary.get("feature_schema"),
+            summary.get("channel_count", observed_channel_count),
+            context=str(package.summary_path),
+        )
+        validate_spike_imu_array(
+            spike_imu,
+            schema_contract,
+            context=str(package.spike_path),
+        )
+    except ValueError as error:
+        raise ReconstructionError(str(error)) from error
+    if spike_imu.ndim != 2:
+        raise ReconstructionError(
+            f"{package.spike_path}: expected shape (N, channels), got {spike_imu.shape}"
         )
     if len(spike_imu) == 0:
         raise ReconstructionError(f"{package.spike_path}: SpikeIMU aggregate is empty")
@@ -353,18 +394,6 @@ def load_package(
             f"{package.lengths_path}: segment_lengths must equal diff(segment_offsets)"
         )
 
-    input_kind = summary.get("input_kind")
-    if input_kind not in (None, "spike-imu"):
-        raise ReconstructionError(
-            f"{package.summary_path}: expected input_kind='spike-imu', got {input_kind!r}"
-        )
-    feature_schema = summary.get("feature_schema")
-    if feature_schema not in (None, SPIKE_SCHEMA):
-        raise ReconstructionError(
-            f"{package.summary_path}: expected feature_schema={SPIKE_SCHEMA!r}, "
-            f"got {feature_schema!r}"
-        )
-
     if sampling_rate_override is not None:
         sampling_rate_hz = finite_positive(sampling_rate_override, name="--sampling-rate-hz")
         sampling_rate_source = "cli_override"
@@ -386,6 +415,7 @@ def load_package(
         offsets=offsets,
         lengths=lengths,
         summary=summary,
+        schema_contract=schema_contract,
         sampling_rate_hz=sampling_rate_hz,
         sampling_rate_source=sampling_rate_source,
         encoder_spec=encoder_spec,
@@ -484,10 +514,12 @@ def reconstruct_package(loaded: LoadedPackage) -> np.ndarray:
     for segment_index in range(len(loaded.labels)):
         start = int(loaded.offsets[segment_index])
         stop = int(loaded.offsets[segment_index + 1])
-        reconstructed[start:stop] = reconstruct_segment_events(
-            loaded.spike_imu[start:stop, :EVENT_CHANNEL_COUNT],
-            kernels=kernels,
+        signed_events = extract_signed_event_channels(
+            loaded.spike_imu[start:stop],
+            loaded.schema_contract,
+            context=f"{loaded.package.summary_path} segment {segment_index}",
         )
+        reconstructed[start:stop] = reconstruct_segment_events(signed_events, kernels=kernels)
     if not np.isfinite(reconstructed).all():
         raise ReconstructionError(
             f"Non-finite reconstruction produced for {loaded.package.prefix}"
@@ -630,7 +662,11 @@ def manifest_text(loaded: LoadedPackage) -> str:
     for segment_index, label in enumerate(loaded.labels.tolist()):
         start = int(loaded.offsets[segment_index])
         stop = int(loaded.offsets[segment_index + 1])
-        events = np.asarray(loaded.spike_imu[start:stop, :EVENT_CHANNEL_COUNT], dtype=np.float64)
+        events = extract_signed_event_channels(
+            loaded.spike_imu[start:stop],
+            loaded.schema_contract,
+            context=f"{loaded.package.summary_path} segment {segment_index}",
+        ).astype(np.float64, copy=False)
         writer.writerow(
             {
                 "segment_index": segment_index,
@@ -672,6 +708,7 @@ def metadata_object(
             "package_prefix": package.prefix,
         },
         "source": {
+            **event_contract_metadata(loaded.schema_contract),
             "dataset_root": str(dataset_root),
             "spike_imu_path": relative_or_absolute(package.spike_path, dataset_root),
             "spike_imu_sha256": sha256_file(package.spike_path),
@@ -686,8 +723,10 @@ def metadata_object(
             "input_kind": loaded.summary.get("input_kind"),
             "feature_schema": loaded.summary.get("feature_schema"),
             "spike_imu_shape": [int(v) for v in loaded.spike_imu.shape],
-            "event_channel_slice": [0, 15],
-            "event_channel_order": "axis-major_frequency-minor",
+            "event_channel_slice": [
+                0,
+                loaded.schema_contract.stored_event_channel_count,
+            ],
             "published_event_values_used_as_is": True,
         },
         "segmentation": {
@@ -698,6 +737,7 @@ def metadata_object(
             "outside_segment_context": "zero",
         },
         "reconstruction": {
+            **event_contract_metadata(loaded.schema_contract),
             "method": "custom_wavelet_event_convolution_sum",
             "wavelet": "accelerationWavelet",
             "frequencies_hz": list(loaded.frequencies_hz),

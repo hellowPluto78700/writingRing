@@ -16,10 +16,11 @@ and requires the matching canonical padded package under:
     <dataset_root>/segmentation_padded/
 
 For each retained padded segment, reconstruction is performed from the original
-UNPADDED SpikeIMU event channels 0:15, independently inside that segment.  The
-resulting (T, 3) acceleration is then right-padded to the exact target length
-used by the matching ``*_paddedSpikeIMU.npy`` package.  Convolution never sees
-padding samples and never crosses segment boundaries.
+UNPADDED SpikeIMU event channels after schema-specific decoding to canonical
+signed (T, 15) events, independently inside that segment.  The resulting
+(T, 3) acceleration is then right-padded to the exact target length used by the
+matching ``*_paddedSpikeIMU.npy`` package.  Convolution never sees padding
+samples and never crosses segment boundaries.
 
 Output
 ------
@@ -47,9 +48,27 @@ from typing import Sequence
 import numpy as np
 from scipy import signal
 
+try:
+    from scripts.reconstruction_schema import (
+        CANONICAL_SIGNED_EVENT_CHANNEL_COUNT,
+        SIGNED_WAVELET_SCHEMA,
+        event_contract_metadata,
+        extract_signed_event_channels,
+        resolve_event_schema_contract,
+        validate_spike_imu_array,
+    )
+except ModuleNotFoundError:  # Direct ``python scripts/<entrypoint>.py`` execution.
+    from reconstruction_schema import (  # type: ignore[no-redef]
+        CANONICAL_SIGNED_EVENT_CHANNEL_COUNT,
+        SIGNED_WAVELET_SCHEMA,
+        event_contract_metadata,
+        extract_signed_event_channels,
+        resolve_event_schema_contract,
+        validate_spike_imu_array,
+    )
 
-SPIKE_SCHEMA = "signed_wavelet_events_plus_imu_v1"
-EVENT_CHANNEL_COUNT = 15
+SPIKE_SCHEMA = SIGNED_WAVELET_SCHEMA
+EVENT_CHANNEL_COUNT = CANONICAL_SIGNED_EVENT_CHANNEL_COUNT
 EVENTS_PER_AXIS = 5
 DEFAULT_SCALE_DIVISOR = 2.5
 STANDARD_GRAVITY_M_S2 = 9.80665
@@ -392,8 +411,34 @@ def process_package(
         source_summary, path=source_summary_path
     )
 
-    if spike_imu.ndim != 2 or spike_imu.shape[1] != 21:
-        raise ReconstructionError(f"{spike_path}: expected (N,21), got {spike_imu.shape}")
+    if source_summary.get("input_kind") not in (None, "spike-imu"):
+        raise ReconstructionError(f"{source_summary_path}: not a SpikeIMU segmentation summary")
+    try:
+        source_contract = resolve_event_schema_contract(
+            source_summary.get("feature_schema"),
+            source_summary.get("channel_count", spike_imu.shape[-1]),
+            context=str(source_summary_path),
+        )
+        padded_contract = resolve_event_schema_contract(
+            padding_summary.get("feature_schema"),
+            padding_summary.get("channel_count", padded_spike.shape[-1]),
+            context=str(padding_summary_path),
+        )
+        validate_spike_imu_array(
+            spike_imu,
+            source_contract,
+            context=str(spike_path),
+        )
+        validate_spike_imu_array(
+            padded_spike,
+            padded_contract,
+            context=str(padded_spike_path),
+        )
+    except ValueError as error:
+        raise ReconstructionError(str(error)) from error
+
+    if spike_imu.ndim != 2:
+        raise ReconstructionError(f"{spike_path}: expected (N, channels), got {spike_imu.shape}")
     if labels.ndim != 1 or lengths.ndim != 1 or labels.shape != lengths.shape:
         raise ReconstructionError(f"{stem}: source labels/lengths shapes are inconsistent")
     if offsets.ndim != 1 or len(offsets) != len(labels) + 1:
@@ -403,14 +448,9 @@ def process_package(
     if not np.array_equal(np.diff(offsets), lengths):
         raise ReconstructionError(f"{lengths_path}: lengths != diff(offsets)")
 
-    if source_summary.get("input_kind") not in (None, "spike-imu"):
-        raise ReconstructionError(f"{source_summary_path}: not a SpikeIMU segmentation summary")
-    if source_summary.get("feature_schema") not in (None, SPIKE_SCHEMA):
-        raise ReconstructionError(f"{source_summary_path}: unexpected feature schema")
-
-    if padded_spike.ndim != 3 or padded_spike.shape[2] != 21:
+    if padded_spike.ndim != 3:
         raise ReconstructionError(
-            f"{padded_spike_path}: expected (S,target,21), got {padded_spike.shape}"
+            f"{padded_spike_path}: expected (S,target,channels), got {padded_spike.shape}"
         )
     retained_count, target_length, _ = padded_spike.shape
     if padded_labels.shape != (retained_count,):
@@ -499,7 +539,12 @@ def process_package(
 
         start = int(offsets[source_index])
         stop = int(offsets[source_index + 1])
-        rec = reconstruct_segment_events(spike_imu[start:stop, :EVENT_CHANNEL_COUNT], kernels=kernels)
+        signed_events = extract_signed_event_channels(
+            spike_imu[start:stop],
+            source_contract,
+            context=f"{source_summary_path} segment {source_index}",
+        )
+        rec = reconstruct_segment_events(signed_events, kernels=kernels)
         reconstructed[output_index, :original_length] = rec
         # [original_length:] intentionally remains exact zero padding.
 
@@ -525,6 +570,7 @@ def process_package(
             "created_utc": datetime.now(timezone.utc).isoformat(),
             "identity": {"user": user, "action": action, "package_prefix": stem},
             "source": {
+                **event_contract_metadata(source_contract),
                 "variable_spike_imu": str(spike_path.relative_to(dataset_root)),
                 "variable_spike_imu_sha256": sha256_file(spike_path),
                 "segment_offsets": str(offsets_path.relative_to(dataset_root)),
@@ -545,8 +591,8 @@ def process_package(
                 "padding_summary_sha256": sha256_file(padding_summary_path),
             },
             "reconstruction": {
-                "input_event_slice": [0, 15],
-                "event_channel_order": "axis-major_frequency-minor",
+                "input_event_slice": [0, source_contract.stored_event_channel_count],
+                **event_contract_metadata(source_contract),
                 "method": "custom_wavelet_event_convolution_sum",
                 "wavelet": "accelerationWavelet",
                 "frequencies_hz": list(frequencies_hz),
@@ -564,6 +610,8 @@ def process_package(
             },
             "padding": {
                 "source": "existing WritingRing segmentation_padded package",
+                "input_feature_schema": padded_contract.feature_schema,
+                "stored_channel_count": padded_contract.total_channel_count,
                 "target_length": target_length,
                 "padding_side": "right",
                 "padding_value_m_s2": 0.0,

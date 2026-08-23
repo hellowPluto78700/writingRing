@@ -53,7 +53,7 @@ Each package must contain the following files, where `<prefix>` is
 `<user>_action_<action>`:
 
 ```text
-<prefix>_spikeIMU.npy              # finite, nonempty (N, 21)
+<prefix>_spikeIMU.npy              # finite, nonempty (N, 21) or (N, 36)
 <prefix>_labels.npy                # (segment_count,)
 <prefix>_segment_offsets.npy       # (segment_count + 1,)
 <prefix>_segment_lengths.npy       # (segment_count,)
@@ -65,8 +65,21 @@ increasing, and have differences exactly equal to `segment_lengths`. The
 summary must provide a positive `sampling_rate_hz` unless an explicit
 `--sampling-rate-hz` override is supplied. When the summary declares the
 SpikeIMU identity fields, they must be `input_kind=spike-imu` and
-`feature_schema=signed_wavelet_events_plus_imu_v1`; other declared values are
-rejected.
+`feature_schema` and `channel_count` must identify one of the supported
+contracts:
+
+```text
+signed_wavelet_events_plus_imu_v1
+  15 signed event channels + 6 IMU channels = 21 total channels
+
+polarity_split_wavelet_events_plus_imu_v1
+  30 pairwise positive/negative event channels + 6 IMU channels = 36 total channels
+```
+
+The 36-channel event order is
+`e0_pos, e0_neg_abs, e1_pos, e1_neg_abs, ..., e14_pos, e14_neg_abs`.
+Missing `feature_schema` remains a legacy alias for the 21-channel signed
+layout only; a 36-channel package must declare its schema explicitly.
 
 The reconstruction uses the published `spike_encoder.wavelet_widths_samples`
 and frequencies, not hard-coded defaults or a newly inferred width. Under the
@@ -78,16 +91,19 @@ selected with `ENCODER_FREQUENCIES_HZ="1 2 4 8 16"` or
 
 ### Reconstruction semantics
 
-Only `spikeIMU[:, 0:15]` is used. Those event channels are interpreted as
-three axes with five frequency bands per axis, in axis-major,
-frequency-minor order. The script uses the same Custom Wavelet reconstruction
-method as the comparison notebook:
+The schema-specific event prefix is decoded first into canonical signed
+`(T, 15)` events. The 21-channel signed layout is passed through unchanged;
+the 36-channel layout is decoded as `positive - negative_abs` for each pair.
+The downstream reconstruction therefore always interprets three axes with five
+frequency bands per axis, in axis-major, frequency-minor order. The script
+uses the same Custom Wavelet reconstruction method as the comparison notebook:
 
 ```text
 frequencies_hz = [0.5, 1, 2, 4, 8]
 
 for each segment:
-    reconstruct spikeIMU[start:stop, 0:15] independently
+    decode source SpikeIMU events to signed spikeIMU[start:stop, 0:15]
+    reconstruct the canonical signed events independently
     convolve each event band with the reversed accelerationWavelet kernel
     sum the five bands for each axis, dividing each by 2.5
     convert the result from g to m/s² by multiplying by 9.80665
@@ -202,9 +218,16 @@ SpikeIMU, labels, valid lengths, valid mask, padding manifest, and padding
 summary. It validates that the padded package is canonical right padding with
 `overflow_policy=skip`.
 
+The padded reconstruction reads and validates the source segmentation schema
+and padded-package schema independently. Thus signed-to-signed (21→21),
+signed-to-polarity-split (21→36), and polarity-split-to-polarity-split
+(36→36) packages are valid as long as each package declares its own matching
+schema and channel count. Only the source schema is decoded for reconstruction;
+the padded schema controls shape and provenance validation.
+
 The reconstruction itself always reads the original unpadded
-`spikeIMU[start:stop, 0:15]` selected by the authoritative source offsets. The
-padding manifest maps the source `segment_index` to each retained
+the schema-decoded canonical signed events selected by the authoritative
+source offsets. The padding manifest maps the source `segment_index` to each retained
 `output_segment_index`; `valid_lengths`, labels, and the boolean `valid_mask`
 must agree with that mapping. The output has the same segment and time axes as
 `*_paddedSpikeIMU.npy`:
