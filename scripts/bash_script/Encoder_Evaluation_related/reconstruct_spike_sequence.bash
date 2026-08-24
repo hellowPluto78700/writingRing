@@ -2,11 +2,11 @@
 set -Eeuo pipefail
 
 # Pass one or more completed action roots explicitly. With no arguments, use
-# the current 64 Hz Action 0/Action 1 pair as the convenience default.
+# the current full-rate Action 0/Action 1 pair as the convenience default.
 if (($# == 0)); then
   DATASET_ROOTS=(
-    "${ACTION0_ROOT:-outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events}"
-    "${ACTION1_ROOT:-outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events}"
+    "${ACTION0_ROOT:-outputs/action0_wavelets_0e5_1_2_4_8/low-pass/aligned-board-events}"
+    "${ACTION1_ROOT:-outputs/action1_wavelets_0e5_1_2_4_8/low-pass/aligned-board-events}"
   )
 else
   DATASET_ROOTS=("$@")
