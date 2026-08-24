@@ -1,0 +1,71 @@
+{
+  "experiment": "1.0_sampling_rate_information_preservation",
+  "dataset_groups": {
+    "sr_200": [
+      "/home/ted/project/writingring-viz/outputs/action0_wavelets_0e5_1_2_4_8",
+      "/home/ted/project/writingring-viz/outputs/action1_wavelets_0e5_1_2_4_8"
+    ],
+    "sr_64": [
+      "/home/ted/project/writingring-viz/outputs/action0_wavelets_0e5_1_2_4_8_sr_64",
+      "/home/ted/project/writingring-viz/outputs/action1_wavelets_0e5_1_2_4_8_sr_64"
+    ]
+  },
+  "sampling_rates_hz": {
+    "sr_200": 200.0,
+    "sr_64": 64.0
+  },
+  "common_sample_count": 516,
+  "class_to_idx": {
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "X": 5,
+    "G": 6,
+    "H": 7,
+    "I": 8,
+    "J": 9,
+    "K": 10,
+    "L": 11
+  },
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "split_seed": 12345,
+  "cnn_variants": [
+    "cnn_s",
+    "cnn_m",
+    "cnn_l"
+  ],
+  "training": {
+    "batch_size": 128,
+    "max_epochs": 50,
+    "early_stopping_patience": 10,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.0
+  },
+  "common_grid": {
+    "enabled": true,
+    "rate_hz": 200.0,
+    "variants": [
+      "cnn_s",
+      "cnn_m",
+      "cnn_l"
+    ],
+    "pad_length": 600
+  },
+  "event_10bin": {
+    "enabled": true,
+    "n_bins": 10,
+    "signatures": {
+      "sr_200": "(('polarity_split_wavelet_events_plus_imu_v1',), 30, ('event_x_0_pos', 'event_x_0_neg_abs', 'event_x_1_pos', 'event_x_1_neg_abs', 'event_x_2_pos', 'event_x_2_neg_abs', 'event_x_3_pos', 'event_x_3_neg_abs', 'event_x_4_pos', 'event_x_4_neg_abs', 'event_y_0_pos', 'event_y_0_neg_abs', 'event_y_1_pos', 'event_y_1_neg_abs', 'event_y_2_pos', 'event_y_2_neg_abs', 'event_y_3_pos', 'event_y_3_neg_abs', 'event_y_4_pos', 'event_y_4_neg_abs', 'event_z_0_pos', 'event_z_0_neg_abs', 'event_z_1_pos', 'event_z_1_neg_abs', 'event_z_2_pos', 'event_z_2_neg_abs', 'event_z_3_pos', 'event_z_3_neg_abs', 'event_z_4_pos', 'event_z_4_neg_abs'))",
+      "sr_64": "(('polarity_split_wavelet_events_plus_imu_v1',), 30, ('event_x_0_pos', 'event_x_0_neg_abs', 'event_x_1_pos', 'event_x_1_neg_abs', 'event_x_2_pos', 'event_x_2_neg_abs', 'event_x_3_pos', 'event_x_3_neg_abs', 'event_x_4_pos', 'event_x_4_neg_abs', 'event_y_0_pos', 'event_y_0_neg_abs', 'event_y_1_pos', 'event_y_1_neg_abs', 'event_y_2_pos', 'event_y_2_neg_abs', 'event_y_3_pos', 'event_y_3_neg_abs', 'event_y_4_pos', 'event_y_4_neg_abs', 'event_z_0_pos', 'event_z_0_neg_abs', 'event_z_1_pos', 'event_z_1_neg_abs', 'event_z_2_pos', 'event_z_2_neg_abs', 'event_z_3_pos', 'event_z_3_neg_abs', 'event_z_4_pos', 'event_z_4_neg_abs'))"
+    }
+  },
+  "practical_ba_margin": 0.03
+}
