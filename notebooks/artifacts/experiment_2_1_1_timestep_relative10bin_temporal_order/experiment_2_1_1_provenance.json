@@ -1,0 +1,99 @@
+{
+  "experiment_id": "experiment_2_1_1_timestep_relative10bin_temporal_order",
+  "parent_experiment": "experiment_2_1_snn_training_objective_ablation",
+  "dataset_roots": [
+    "/home/ted/project/writingring-viz/outputs/action0_wavelets_0e5_1_2_4_8_sr_64",
+    "/home/ted/project/writingring-viz/outputs/action1_wavelets_0e5_1_2_4_8_sr_64"
+  ],
+  "seeds": [
+    11,
+    23
+  ],
+  "split_seed": 12345,
+  "included_labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "X",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L"
+  ],
+  "class_to_idx": {
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "G": 5,
+    "H": 6,
+    "I": 7,
+    "J": 8,
+    "K": 9,
+    "L": 10,
+    "X": 11
+  },
+  "sampling_rate_hz": 64.0,
+  "event_representation": "unsigned",
+  "event_feature_schema": "custom_wavelet_polarity_split_abs_events_v1",
+  "encoder_spec_sha256": "2c4ca9f0fc3429510aa0bd38ada7b3ec1eca70e4dfa1115fecb7d09124e52ebf",
+  "input_channels": 30,
+  "hidden_width": 64,
+  "num_classes": 12,
+  "objectives": [
+    "timestep_ce",
+    "relative_10bin_ce"
+  ],
+  "objective_definitions": {
+    "timestep_ce": "masked per-valid-timestep CE on output spikes",
+    "relative_10bin_ce": "relative 10-bin output counts -> Linear -> CE"
+  },
+  "relative_bin_count": 10,
+  "tau_syn_ms": 77.47,
+  "tau_mem_ms": 22.54,
+  "alpha": 0.8173474679618995,
+  "beta": 0.4999675576146916,
+  "threshold": 0.5,
+  "surrogate_slope": 25.0,
+  "reset_mechanism": "subtract",
+  "snn_linear_bias": false,
+  "learn_alpha": false,
+  "learn_beta": false,
+  "learn_threshold": false,
+  "num_epochs": 120,
+  "early_stopping": false,
+  "checkpoint_selection": "maximum validation balanced accuracy after full fixed epoch budget; tie-break by lower validation loss",
+  "learning_rate": 0.0005,
+  "weight_decay": 0.0,
+  "spike_regularization": 0.0,
+  "firing_onset_threshold": 0.001,
+  "input_order_ablation": {
+    "block_ms": [
+      200.0,
+      500.0
+    ],
+    "shuffle_repeats": 5,
+    "valid_region_only": true,
+    "within_block_order_preserved": true,
+    "sample_specific_deterministic_permutations": true
+  },
+  "timestep_bin_diagnostic": {
+    "relative_bins": 10,
+    "prediction": "argmax output-spike count within each bin",
+    "reports_silent_fraction": true
+  },
+  "relative10bin_readout_order_ablation": {
+    "conditions": [
+      "original",
+      "reverse_10bins",
+      "shuffle_10bins"
+    ],
+    "random_shuffle_repeats": 20,
+    "backbone_output_unchanged": true
+  }
+}
