@@ -1,0 +1,78 @@
+{
+  "batch_size": 128,
+  "checkpoint_selection": "maximum validation balanced accuracy; lower validation loss as tie-break",
+  "classes": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "dataset_roots": [
+    "/home/ted/project/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64",
+    "/home/ted/project/writingRing/outputs/action1_wavelets_0e5_1_2_4_8_sr_64"
+  ],
+  "early_stopping": false,
+  "encoder_spec_sha256": "2c4ca9f0fc3429510aa0bd38ada7b3ec1eca70e4dfa1115fecb7d09124e52ebf",
+  "event_feature_schema": "custom_wavelet_polarity_split_abs_events_v1",
+  "event_representation": "unsigned",
+  "expected_training_runs": 12,
+  "experiment_id": "experiment_2_1_2_single_tau_objective_comparison",
+  "firing_onset_threshold": 0.001,
+  "fixed_bin_count": 16,
+  "fixed_bin_effective_ms": 250.0,
+  "fixed_bin_requested_ms": 250.0,
+  "fixed_bin_steps": 16,
+  "hidden_alpha": 0.75,
+  "hidden_layers": 2,
+  "hidden_shift_syn": 2,
+  "hidden_tau_syn_ms": 54.31342963722199,
+  "input_channels": 30,
+  "learn_alpha": false,
+  "learn_beta": false,
+  "learn_threshold": false,
+  "learning_rate": 0.001,
+  "n_relative_bins": 10,
+  "neurons_per_layer": [
+    128,
+    128
+  ],
+  "num_classes": 12,
+  "num_epochs": 100,
+  "objective_uses_valid_length": {
+    "fixed_250ms_ce": false,
+    "relative_10bin_ce": true,
+    "timestep_ce": true,
+    "whole_window_count_ce": false
+  },
+  "objectives": [
+    "timestep_ce",
+    "relative_10bin_ce",
+    "whole_window_count_ce",
+    "fixed_250ms_ce"
+  ],
+  "padded_length": 256,
+  "reset_mechanism": "subtract",
+  "sampling_rate_hz": 64.0,
+  "snn_linear_bias": false,
+  "spike_regularization": 0.0,
+  "split_seed": 12345,
+  "surrogate_slope": 25.0,
+  "tau_mem_ms": 22.54,
+  "tau_syn_output_ms": 77.47,
+  "threshold": 0.5,
+  "title": "Experiment 2.1.2 - Single-Tau SNN Training-Objective Comparison",
+  "training_seeds": [
+    11,
+    23,
+    101
+  ],
+  "weight_decay": 0.0
+}
