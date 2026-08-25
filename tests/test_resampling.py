@@ -60,12 +60,46 @@ def test_resampling_preserves_provenance_and_recomputes_gravity_columns(tmp_path
         output_root=tmp_path / "resampledIMU", relative_recording=Path("user/0/3"), target_rate_hz=64.0,
     )
     assert result.summary["sampling_rate_hz"] == 64.0
-    assert result.summary["resampling"]["source_imu_sha256"] == sha256_file(imu)  # type: ignore[index]
+    resampling = result.summary["resampling"]
+    assert resampling["source_imu_sha256"] == sha256_file(imu)  # type: ignore[index]
+    assert resampling["resampling_method"] == "scipy.signal.resample_poly"  # type: ignore[index]
+    assert resampling["rate_conversion"] == {"up": 8, "down": 25}  # type: ignore[index]
+    assert resampling["anti_alias_filter"] == {  # type: ignore[index]
+        "family": "polyphase_fir",
+        "implementation": "scipy.signal.resample_poly",
+        "window": "kaiser",
+        "kaiser_beta": 5.0,
+        "padtype": "line",
+    }
     assert result.timestamps[0] == 0.0
     assert result.timestamps[-1] <= np.load(timestamps, allow_pickle=False)[-1]
     assert np.all(np.diff(result.timestamps) > 0)
-    np.testing.assert_allclose(result.imu[:, :3] * STANDARD_GRAVITY_M_S2, result.imu[:, 3:6], rtol=1e-6, atol=1e-7)
+    assert len(result.imu) == len(result.timestamps) == 129
+    np.testing.assert_allclose(
+        result.imu[:, :3] * STANDARD_GRAVITY_M_S2,
+        result.imu[:, 3:6],
+        rtol=1e-6,
+        atol=1e-7,
+    )
     assert result.paths.summary_path.name == "3_resampling.json"
+
+
+def test_polyphase_resampling_preserves_low_frequency_amplitude(tmp_path: Path) -> None:
+    imu, summary, timestamps = _source_artifact(tmp_path)
+    source = np.load(imu, allow_pickle=False)
+    result = resample_recording(
+        input_imu_path=imu, input_summary_path=summary, input_timestamps_path=timestamps,
+        output_root=tmp_path / "resampledIMU", relative_recording=Path("user/0/3"), target_rate_hz=64.0,
+    )
+
+    # Compare the 3 Hz acceleration channel away from the recording boundaries.
+    # The resampler should preserve passband amplitude rather than introducing a
+    # sample-rate-dependent gain change.
+    source_margin = 40
+    target_margin = 13
+    source_rms = float(np.sqrt(np.mean(source[source_margin:-source_margin, 0] ** 2)))
+    target_rms = float(np.sqrt(np.mean(result.imu[target_margin:-target_margin, 0] ** 2)))
+    assert target_rms / source_rms == pytest.approx(1.0, rel=0.02)
 
 
 def test_resampling_rejects_upsampling(tmp_path: Path) -> None:
@@ -94,6 +128,7 @@ def test_encoder_uses_resampled_rate_and_carries_resampling_provenance(tmp_path:
     assert published["settings"]["sampling_rate_hz"] == 64.0
     assert published["spike_encoder"]["wavelet_widths_samples"] == [128, 64, 32, 16, 8]
     assert published["resampling"]["target_sampling_rate_hz"] == 64.0
+    assert published["resampling"]["rate_conversion"] == {"up": 8, "down": 25}
 
 
 def test_continue_rebuilds_resampling_and_downstream_when_rate_changes(tmp_path: Path) -> None:
