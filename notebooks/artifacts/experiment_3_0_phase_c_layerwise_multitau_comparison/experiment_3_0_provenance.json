@@ -1,0 +1,177 @@
+{
+  "batch_size": 128,
+  "configurations": [
+    {
+      "configuration_id": "single_scale_2",
+      "label": "Single-scale 2",
+      "layer_1": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          128
+        ],
+        "shift_syn": [
+          2
+        ],
+        "tau_syn_ms": [
+          54.31342963722199
+        ]
+      },
+      "layer_2": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          128
+        ],
+        "shift_syn": [
+          2
+        ],
+        "tau_syn_ms": [
+          54.31342963722199
+        ]
+      }
+    },
+    {
+      "configuration_id": "single_scale_3",
+      "label": "Single-scale 3",
+      "layer_1": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          128
+        ],
+        "shift_syn": [
+          3
+        ],
+        "tau_syn_ms": [
+          117.0136826471659
+        ]
+      },
+      "layer_2": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          128
+        ],
+        "shift_syn": [
+          3
+        ],
+        "tau_syn_ms": [
+          117.0136826471659
+        ]
+      }
+    },
+    {
+      "configuration_id": "short_to_multi_scale",
+      "label": "Short \u2192 Multi-scale",
+      "layer_1": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          64,
+          64
+        ],
+        "shift_syn": [
+          2,
+          3
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659
+        ]
+      },
+      "layer_2": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          22,
+          21,
+          21,
+          21,
+          21,
+          22
+        ],
+        "shift_syn": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ]
+      }
+    },
+    {
+      "configuration_id": "multi_scale_to_short",
+      "label": "Multi-scale \u2192 Short",
+      "layer_1": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          22,
+          21,
+          21,
+          21,
+          21,
+          22
+        ],
+        "shift_syn": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ]
+      },
+      "layer_2": {
+        "neurons": 128,
+        "neurons_per_tau_group": [
+          64,
+          64
+        ],
+        "shift_syn": [
+          2,
+          3
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659
+        ]
+      }
+    }
+  ],
+  "encoder_spec_sha256": "2c4ca9f0fc3429510aa0bd38ada7b3ec1eca70e4dfa1115fecb7d09124e52ebf",
+  "event_feature_schema": "custom_wavelet_polarity_split_abs_events_v1",
+  "event_representation": "unsigned",
+  "expected_training_runs": 24,
+  "experiment_id": "experiment_3_0_phase_c_layerwise_multitau_comparison",
+  "hidden_width": 128,
+  "input_channels": 30,
+  "learning_rate": 0.001,
+  "num_classes": 12,
+  "num_epochs": 100,
+  "objectives": [
+    "timestep_ce",
+    "relative_10bin_ce"
+  ],
+  "sampling_rate_hz": 64.0,
+  "seeds": [
+    11,
+    23,
+    101
+  ],
+  "split_seed": 12345,
+  "tau_mem_ms": 22.54,
+  "tau_syn_out_ms": 77.47,
+  "threshold": 0.5
+}
