@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 import json
 import math
 import os
@@ -48,6 +49,9 @@ class ResamplingResult:
 
 
 TIMESTAMP_UNIT: Final[str] = "microseconds"
+POLYPHASE_WINDOW: Final[tuple[str, float]] = ("kaiser", 5.0)
+POLYPHASE_PADTYPE: Final[str] = "line"
+MAX_RATE_RATIO_DENOMINATOR: Final[int] = 1_000_000
 
 
 def resampling_output_paths(output_root: Path, relative_recording: Path) -> ResamplingOutputPaths:
@@ -103,11 +107,14 @@ def resample_recording(
     if target_rate_hz >= source_rate_hz:
         raise ResamplingError("target_rate_hz must be lower than source sampling_rate_hz; upsampling is unsupported")
 
+    rate_up, rate_down = _polyphase_rate_ratio(source_rate_hz, target_rate_hz)
     values, timestamps = _resample_values(
         artifact.imu,
         source_timestamps,
         source_rate_hz=source_rate_hz,
         target_rate_hz=target_rate_hz,
+        rate_up=rate_up,
+        rate_down=rate_down,
     )
     paths = resampling_output_paths(output_root, relative_recording)
     output_summary = _build_summary(
@@ -123,6 +130,8 @@ def resample_recording(
         source_summary=summary.payload,
         source_rate_hz=source_rate_hz,
         target_rate_hz=target_rate_hz,
+        rate_up=rate_up,
+        rate_down=rate_down,
     )
     _publish(paths, values=values, timestamps=timestamps, summary=output_summary, overwrite=overwrite)
     try:
@@ -136,12 +145,27 @@ def resample_recording(
     return ResamplingResult(paths=paths, imu=values, timestamps=timestamps, summary=output_summary)
 
 
+def _polyphase_rate_ratio(source_rate_hz: float, target_rate_hz: float) -> tuple[int, int]:
+    ratio = (
+        Fraction(str(target_rate_hz)) / Fraction(str(source_rate_hz))
+    ).limit_denominator(MAX_RATE_RATIO_DENOMINATOR)
+    if ratio.numerator <= 0 or ratio.denominator <= 0:
+        raise ResamplingError("could not derive a positive polyphase rate ratio")
+    represented_rate = source_rate_hz * ratio.numerator / ratio.denominator
+    tolerance = max(1e-12, abs(target_rate_hz) * 1e-12)
+    if not math.isclose(represented_rate, target_rate_hz, rel_tol=1e-12, abs_tol=tolerance):
+        raise ResamplingError("target sampling rate cannot be represented accurately for polyphase resampling")
+    return ratio.numerator, ratio.denominator
+
+
 def _resample_values(
     source: np.ndarray,
     timestamps_us: np.ndarray,
     *,
     source_rate_hz: float,
     target_rate_hz: float,
+    rate_up: int,
+    rate_down: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     if len(source) < 2 or timestamps_us[-1] <= timestamps_us[0]:
         raise ResamplingError("resampling requires at least two samples with a positive timestamp span")
@@ -154,16 +178,27 @@ def _resample_values(
     target_timestamps = target_timestamps[target_timestamps <= timestamps_us[-1]]
     if len(target_timestamps) < 2 or np.any(np.diff(target_timestamps) <= 0.0):
         raise ResamplingError("target timestamps are not strictly increasing")
-    # Canonical source timestamps may contain duplicates.  They remain immutable
-    # provenance; the endpoint-reconstructed axis exists only for interpolation.
-    working_axis = np.linspace(timestamps_us[0], timestamps_us[-1], len(source), dtype=np.float64)
-    cutoff_hz = target_rate_hz * 0.45
-    sos = signal.butter(8, cutoff_hz, btype="lowpass", fs=source_rate_hz, output="sos")
+
+    # Canonical timestamps remain immutable provenance and may contain duplicates.
+    # The continuous values are sampled on the source artifact's declared nominal
+    # sampling grid; resample_poly performs anti-alias FIR filtering and rational
+    # rate conversion in one operation. The timestamp-domain output contract is
+    # still the uniform target grid derived above.
     continuous = np.asarray(source[:, 3:9], dtype=np.float64)
-    filtered = signal.sosfiltfilt(sos, continuous, axis=0, padlen=0)
-    output_continuous = np.column_stack(
-        [np.interp(target_timestamps, working_axis, filtered[:, column]) for column in range(6)]
+    output_continuous = signal.resample_poly(
+        continuous,
+        up=rate_up,
+        down=rate_down,
+        axis=0,
+        window=POLYPHASE_WINDOW,
+        padtype=POLYPHASE_PADTYPE,
     )
+    if len(output_continuous) < len(target_timestamps):
+        raise ResamplingError(
+            "polyphase resampling produced fewer samples than the target timestamp grid"
+        )
+    output_continuous = output_continuous[: len(target_timestamps)]
+
     output = np.empty((len(target_timestamps), 9), dtype=np.float64)
     output[:, 3:9] = output_continuous
     output[:, :3] = output_continuous[:, :3] / STANDARD_GRAVITY_M_S2
@@ -188,6 +223,8 @@ def _build_summary(
     source_summary: dict[str, object],
     source_rate_hz: float,
     target_rate_hz: float,
+    rate_up: int,
+    rate_down: int,
 ) -> dict[str, object]:
     recording = source_summary.get("recording")
     if not isinstance(recording, dict):
@@ -221,9 +258,17 @@ def _build_summary(
             "source_sampling_rate_hz": source_rate_hz,
             "target_sampling_rate_hz": target_rate_hz,
             "source_timestamp_axis": "canonical_non_decreasing",
-            "working_timestamp_axis": "endpoint_reconstruction_strictly_increasing",
+            "source_value_time_axis": "nominal_uniform_from_declared_sampling_rate",
             "target_timestamp_grid": "uniform_from_first_source_timestamp_without_extrapolation",
-            "anti_alias_filter": {"family": "butterworth", "order": 8, "cutoff_hz": target_rate_hz * 0.45, "zero_phase": True},
+            "resampling_method": "scipy.signal.resample_poly",
+            "rate_conversion": {"up": rate_up, "down": rate_down},
+            "anti_alias_filter": {
+                "family": "polyphase_fir",
+                "implementation": "scipy.signal.resample_poly",
+                "window": POLYPHASE_WINDOW[0],
+                "kaiser_beta": POLYPHASE_WINDOW[1],
+                "padtype": POLYPHASE_PADTYPE,
+            },
             "resampled_columns": ["acceleration_m_s2", "gyro"],
             "acceleration_g_recomputed_from_m_s2": True,
         },
