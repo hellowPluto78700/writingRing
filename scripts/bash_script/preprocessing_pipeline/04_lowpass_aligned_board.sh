@@ -4,10 +4,10 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATA_ROOT="data"
-ACTION=1
+ACTION=0
 POST_ENCODE_TRANSFORM="PolaritySplitAbs"  #none, AbsRectify, PolaritySplitAbs
-RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-none}"  # none, or a lower rate such as 64
-OUTPUT_BASE="outputs/action1_wavelets_0e5_1_2_4_8"
+RESAMPLE_RATE_HZ="${RESAMPLE_RATE_HZ:-64}"  # none, or a lower rate such as 64
+OUTPUT_BASE="outputs/action0_wavelets_0e5_1_2_4_8_sr_64"
 PIPELINE_MODE="${PIPELINE_MODE:-overwrite}"  # "continue" or "overwrite"
 # Five Custom Wavelet bands. Leave unset to use custom_wavelet.json defaults.
 #ENCODER_FREQUENCIES_HZ="1 2 4 8 16"

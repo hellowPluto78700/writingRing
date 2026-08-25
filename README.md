@@ -334,9 +334,9 @@ probe provides the held-out-user test metrics.
 ### Experiment 1.3 — Event temporal-binning probe
 
 [Experiment 1.3 notebook](notebooks/experiment_1_3_event_temporal_binning_probe.ipynb)
-uses the same 15-channel event representation but does not train a CNN or
-shuffle blocks. For each segment, it sums weighted event values within
-1, 2, 4, 10, or 20 relative-time bins defined over that segment's valid
+uses the 30-channel polarity-split unsigned event representation but does not
+train a CNN or shuffle blocks. For each segment, it sums weighted event values
+within 1, 2, 4, 10, or 20 relative-time bins defined over that segment's valid
 prefix, then fits a fresh linear probe for each seed and bin count. This is a
 low-capacity baseline for testing whether coarse temporal position alone is
 enough to explain the classification signal.
