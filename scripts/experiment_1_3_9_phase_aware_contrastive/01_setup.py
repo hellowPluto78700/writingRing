@@ -41,7 +41,7 @@ EXPECTED_EVENT_FEATURE_SCHEMA = "custom_wavelet_polarity_split_abs_events_v1"
 EVENT_CHANNEL_COUNT = 30
 TOTAL_CHANNEL_COUNT = 36
 EXPECTED_SAMPLING_RATE_HZ = 64.0
-INCLUDED_LABELS = ("A","B","C","D","E","X","G","H","I","J","K","L")
+INCLUDED_LABELS = ("A", "B", "C", "D", "E", "X", "G", "H", "I", "J", "K", "L")
 
 SPLIT_SEED = 12345
 TRAIN_FRACTION = 0.70
@@ -65,15 +65,22 @@ LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 0.0
 GRAD_CLIP_NORM = None
 
+# Revised contrastive protocol after the first 1.3.9 run showed an immediate
+# high-firing solution when SupCon was applied to silent / near-silent bins.
 CONTRASTIVE_TEMPERATURE = 0.1
-LAMBDA_CON_GRID = (0.01, 0.03, 0.10)
+CONTRASTIVE_WARMUP_EPOCHS = 25
+CONTRASTIVE_RAMP_EPOCHS = 10
+ACTIVE_ITEM_MIN_SPIKES = 1.0
+NORMALIZE_EPS = 1e-6
+LAMBDA_CON_GRID = (0.0, 0.01, 0.03, 0.10)
 LOGREG_C_GRID = (1e-3, 1e-2, 1e-1, 1.0, 10.0)
 LOGREG_MAX_ITER = 5000
-EPS = 1e-8
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EXPERIMENT_ID = "experiment_1_3_9_phase_aware_cross_user_contrastive_local_features"
-RESULTS_DIR = REPO_ROOT / "notebooks/artifacts" / EXPERIMENT_ID
+RUN_VARIANT = "active_warmup_v2"
+BASE_RESULTS_DIR = REPO_ROOT / "notebooks/artifacts" / EXPERIMENT_ID
+RESULTS_DIR = BASE_RESULTS_DIR / RUN_VARIANT
 CHECKPOINT_DIR = RESULTS_DIR / "checkpoints"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
@@ -195,8 +202,8 @@ def make_user_split(split_seed: int):
     n_train = int(round(TRAIN_FRACTION * len(users)))
     n_val = int(round(VAL_FRACTION * len(users)))
     train_users = set(users[:n_train])
-    val_users = set(users[n_train:n_train+n_val])
-    test_users = set(users[n_train+n_val:])
+    val_users = set(users[n_train:n_train + n_val])
+    test_users = set(users[n_train + n_val:])
     part = lambda us: manifest[manifest.user.isin(us)].reset_index(drop=True)
     return part(train_users), part(val_users), part(test_users), {
         "train_users": tuple(sorted(train_users)),
@@ -280,6 +287,7 @@ META = {
 
 print("Repository root:", REPO_ROOT)
 print("Experiment:", EXPERIMENT_ID)
+print("Run variant:", RUN_VARIANT)
 print("Device:", DEVICE)
 print(f"samples={len(manifest)}, users={manifest.user.nunique()}, classes={N_CLASSES}")
 print("labels:", labels_sorted)
@@ -287,4 +295,8 @@ print("train/val/test:", X_train.shape, X_val.shape, X_test.shape)
 print("split:", split_info)
 print("250 ms readout:", BIN_SAMPLES, "samples; bins=", N_BINS)
 print("contrastive temperature:", CONTRASTIVE_TEMPERATURE)
-print("lambda grid:", LAMBDA_CON_GRID)
+print("CE-only warm-up epochs:", CONTRASTIVE_WARMUP_EPOCHS)
+print("contrastive ramp epochs:", CONTRASTIVE_RAMP_EPOCHS)
+print("active item threshold (spikes):", ACTIVE_ITEM_MIN_SPIKES)
+print("lambda grid including no-contrastive control:", LAMBDA_CON_GRID)
+print("results dir:", RESULTS_DIR)
