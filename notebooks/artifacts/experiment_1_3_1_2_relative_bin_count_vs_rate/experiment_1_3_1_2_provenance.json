@@ -1,0 +1,36 @@
+{
+  "experiment_id": "experiment_1_3_1_2_relative_bin_count_vs_rate",
+  "reference_experiment": "experiment_1_3_1_event_temporal_representation_probe",
+  "sampling_rate_hz": 64.0,
+  "event_channels": 30,
+  "event_representation": "unsigned",
+  "event_feature_schema": "custom_wavelet_polarity_split_abs_events_v1",
+  "split_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "train_fraction": 0.6,
+  "val_fraction": 0.2,
+  "relative_n_bins": [
+    1,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    16,
+    20
+  ],
+  "representation_modes": [
+    "relative_bin_count",
+    "relative_bin_rate"
+  ],
+  "rate_definition": "weighted event sum divided by exact bin duration in seconds",
+  "knn_k": 5,
+  "logreg_max_iter": 5000,
+  "feature_scaling": "train-only per-feature z-score"
+}
