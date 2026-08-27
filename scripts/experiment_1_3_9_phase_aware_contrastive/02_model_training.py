@@ -73,7 +73,8 @@ def make_loader(split: str, seed: int, shuffle: bool):
         "val": (X_val, y_val, user_val, valid_val),
         "test": (X_test, y_test, user_test, valid_test),
     }[split]
-    ds = TensorDataset(*(torch.from_numpy(a) for a in arrays))
+    tensors = tuple(torch.from_numpy(np.array(a, copy=True)) for a in arrays)
+    ds = TensorDataset(*tensors)
     g = torch.Generator(); g.manual_seed(derive_seed(seed, split, "loader"))
     return DataLoader(ds, batch_size=BATCH_SIZE, shuffle=shuffle, num_workers=NUM_WORKERS, pin_memory=torch.cuda.is_available(), worker_init_fn=worker_init_fn if NUM_WORKERS > 0 else None, generator=g)
 
@@ -81,12 +82,12 @@ def make_loader(split: str, seed: int, shuffle: bool):
 def make_contrastive_items(z250, labels, users, valid_lengths, mode: str):
     batch = z250.shape[0]
     if mode == "250":
-        rep = torch.log1p(z250)
+        raw_rep = z250
         n_items = N_BINS
         ends = (torch.arange(n_items, device=z250.device) + 1) * BIN_SAMPLES
         centers = torch.arange(n_items, device=z250.device, dtype=z250.dtype) * BIN_SAMPLES + BIN_SAMPLES / 2.0
     elif mode == "500":
-        rep = torch.cat([z250[:, :-1], z250[:, 1:]], dim=-1)
+        raw_rep = torch.cat([z250[:, :-1], z250[:, 1:]], dim=-1)
         n_items = N_BINS - 1
         ends = (torch.arange(n_items, device=z250.device) + 2) * BIN_SAMPLES
         centers = (torch.arange(n_items, device=z250.device, dtype=z250.dtype) + 1.0) * BIN_SAMPLES
@@ -99,12 +100,24 @@ def make_contrastive_items(z250, labels, users, valid_lengths, mode: str):
     label_grid = labels.unsqueeze(1).expand(batch, n_items)
     user_grid = users.unsqueeze(1).expand(batch, n_items)
 
-    rep = rep[full]
-    label_flat = label_grid[full]
-    user_flat = user_grid[full]
-    phase_flat = phase[full]
-    rep = F.normalize(rep, p=2, dim=-1, eps=EPS)
-    return rep, label_flat, user_flat, phase_flat
+    # Only active motifs enter SupCon. This prevents zero/near-zero spike-count
+    # vectors from being normalized and from driving the network toward the
+    # high-firing pathological regime observed in the first 1.3.9 run.
+    activity = raw_rep.sum(dim=-1)
+    active = activity >= ACTIVE_ITEM_MIN_SPIKES
+    keep = full & active
+    full_count = int(full.sum().item())
+    active_full_count = int(keep.sum().item())
+    active_fraction = float(active_full_count / max(full_count, 1))
+
+    rep = torch.log1p(raw_rep[keep])
+    label_flat = label_grid[keep]
+    user_flat = user_grid[keep]
+    phase_flat = phase[keep]
+    if rep.numel() == 0:
+        return rep, label_flat, user_flat, phase_flat, active_fraction
+    rep = F.normalize(rep, p=2, dim=-1, eps=NORMALIZE_EPS)
+    return rep, label_flat, user_flat, phase_flat, active_fraction
 
 
 def cross_user_phase_supcon(rep, labels, users, phases, temperature=CONTRASTIVE_TEMPERATURE):
@@ -134,11 +147,32 @@ def cross_user_phase_supcon(rep, labels, users, phases, temperature=CONTRASTIVE_
     return loss, float(valid_anchor.float().mean().item()), n_valid
 
 
-def run_epoch(model, loader, condition: str, lambda_con: float, optimizer=None):
+def effective_lambda(lambda_con: float, epoch: int | None):
+    if lambda_con <= 0.0:
+        return 0.0
+    if epoch is None:
+        return float(lambda_con)
+    if epoch <= CONTRASTIVE_WARMUP_EPOCHS:
+        return 0.0
+    if CONTRASTIVE_RAMP_EPOCHS <= 0:
+        return float(lambda_con)
+    ramp_step = epoch - CONTRASTIVE_WARMUP_EPOCHS
+    scale = min(max(ramp_step / float(CONTRASTIVE_RAMP_EPOCHS), 0.0), 1.0)
+    return float(lambda_con) * scale
+
+
+def run_epoch(model, loader, condition: str, lambda_con: float, optimizer=None, epoch: int | None = None):
     training = optimizer is not None
     model.train(training)
     total_n = 0
-    totals = {"loss": 0.0, "loss_cls": 0.0, "loss_con": 0.0, "valid_anchor_fraction": 0.0}
+    totals = {
+        "loss": 0.0,
+        "loss_cls": 0.0,
+        "loss_con": 0.0,
+        "effective_lambda_con": 0.0,
+        "active_item_fraction": 0.0,
+        "valid_anchor_fraction": 0.0,
+    }
     all_y, all_pred = [], []
     widths = SNN_LAYER_WIDTHS
     spike_sums = [torch.zeros(w, dtype=torch.float64) for w in widths]
@@ -150,17 +184,20 @@ def run_epoch(model, loader, condition: str, lambda_con: float, optimizer=None):
         with torch.set_grad_enabled(training):
             out = model(xb)
             l_cls = F.cross_entropy(out["logits"], yb)
-            if condition == "cls_only":
-                l_con = out["z250"].sum() * 0.0; valid_frac = 0.0
+            lambda_eff = effective_lambda(lambda_con, epoch) if condition != "cls_only" else 0.0
+            if condition == "cls_only" or lambda_con <= 0.0 or lambda_eff <= 0.0:
+                l_con = out["z250"].sum() * 0.0
+                active_frac = 0.0
+                valid_frac = 0.0
             elif condition == "con250":
-                items = make_contrastive_items(out["z250"], yb, ub, vb, "250")
-                l_con, valid_frac, _ = cross_user_phase_supcon(*items)
+                rep, lab, usr, ph, active_frac = make_contrastive_items(out["z250"], yb, ub, vb, "250")
+                l_con, valid_frac, _ = cross_user_phase_supcon(rep, lab, usr, ph)
             elif condition == "con500":
-                items = make_contrastive_items(out["z250"], yb, ub, vb, "500")
-                l_con, valid_frac, _ = cross_user_phase_supcon(*items)
+                rep, lab, usr, ph, active_frac = make_contrastive_items(out["z250"], yb, ub, vb, "500")
+                l_con, valid_frac, _ = cross_user_phase_supcon(rep, lab, usr, ph)
             else:
                 raise ValueError(condition)
-            loss = l_cls + lambda_con * l_con
+            loss = l_cls + lambda_eff * l_con
             if training:
                 loss.backward()
                 if GRAD_CLIP_NORM is not None:
@@ -168,7 +205,12 @@ def run_epoch(model, loader, condition: str, lambda_con: float, optimizer=None):
                 optimizer.step()
 
         n = len(xb); total_n += n
-        totals["loss"] += float(loss.detach()) * n; totals["loss_cls"] += float(l_cls.detach()) * n; totals["loss_con"] += float(l_con.detach()) * n; totals["valid_anchor_fraction"] += valid_frac * n
+        totals["loss"] += float(loss.detach()) * n
+        totals["loss_cls"] += float(l_cls.detach()) * n
+        totals["loss_con"] += float(l_con.detach()) * n
+        totals["effective_lambda_con"] += float(lambda_eff) * n
+        totals["active_item_fraction"] += float(active_frac) * n
+        totals["valid_anchor_fraction"] += float(valid_frac) * n
         pred = out["logits"].argmax(dim=1)
         all_y.append(yb.detach().cpu().numpy()); all_pred.append(pred.detach().cpu().numpy())
         for i, key in enumerate(("spike_sum_l1", "spike_sum_l2", "spike_sum_l3")):
@@ -188,12 +230,29 @@ def run_epoch(model, loader, condition: str, lambda_con: float, optimizer=None):
 
 def run_config_dict(condition, seed, lambda_con):
     return {
-        "experiment_id": EXPERIMENT_ID, "condition": condition, "seed": int(seed), "split_seed": SPLIT_SEED,
-        "fs": float(SAMPLING_RATE_HZ), "event_channels": EVENT_CHANNEL_COUNT, "padded_length": PADDED_LENGTH,
-        "bin_samples": BIN_SAMPLES, "widths": tuple(SNN_LAYER_WIDTHS), "shifts": tuple(tuple(v) for v in SNN_LAYER_SHIFTS),
-        "tau_mem_ms": TAU_MEM_MS, "threshold": THRESHOLD, "temperature": CONTRASTIVE_TEMPERATURE,
-        "n_phase_buckets": N_PHASE_BUCKETS, "lambda_con": float(lambda_con), "learning_rate": LEARNING_RATE,
-        "weight_decay": WEIGHT_DECAY, "num_epochs": NUM_EPOCHS,
+        "experiment_id": EXPERIMENT_ID,
+        "run_variant": RUN_VARIANT,
+        "condition": condition,
+        "seed": int(seed),
+        "split_seed": SPLIT_SEED,
+        "fs": float(SAMPLING_RATE_HZ),
+        "event_channels": EVENT_CHANNEL_COUNT,
+        "padded_length": PADDED_LENGTH,
+        "bin_samples": BIN_SAMPLES,
+        "widths": tuple(SNN_LAYER_WIDTHS),
+        "shifts": tuple(tuple(v) for v in SNN_LAYER_SHIFTS),
+        "tau_mem_ms": TAU_MEM_MS,
+        "threshold": THRESHOLD,
+        "temperature": CONTRASTIVE_TEMPERATURE,
+        "n_phase_buckets": N_PHASE_BUCKETS,
+        "lambda_con": float(lambda_con),
+        "contrastive_warmup_epochs": CONTRASTIVE_WARMUP_EPOCHS,
+        "contrastive_ramp_epochs": CONTRASTIVE_RAMP_EPOCHS,
+        "active_item_min_spikes": ACTIVE_ITEM_MIN_SPIKES,
+        "normalize_eps": NORMALIZE_EPS,
+        "learning_rate": LEARNING_RATE,
+        "weight_decay": WEIGHT_DECAY,
+        "num_epochs": NUM_EPOCHS,
     }
 
 
@@ -203,6 +262,7 @@ def train_run(condition, seed, lambda_con, checkpoint_path: Path):
         payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         if payload.get("config") != cfg:
             raise ValueError(f"Stale checkpoint config mismatch: {checkpoint_path}")
+        print("Loaded completed checkpoint:", checkpoint_path)
         return payload
 
     seed_everything(seed)
@@ -212,24 +272,39 @@ def train_run(condition, seed, lambda_con, checkpoint_path: Path):
     history = []; best_state = None; best_epoch = None; best_val_ba = -np.inf; best_val_loss = np.inf
 
     for epoch in range(1, NUM_EPOCHS + 1):
-        tr = run_epoch(model, train_loader, condition, lambda_con, opt)
+        tr = run_epoch(model, train_loader, condition, lambda_con, opt, epoch=epoch)
         with torch.no_grad():
-            va = run_epoch(model, val_loader, condition, lambda_con, None)
+            va = run_epoch(model, val_loader, condition, lambda_con, None, epoch=epoch)
         history.append({"epoch": epoch, **{f"train_{k}": v for k, v in tr.items()}, **{f"val_{k}": v for k, v in va.items()}})
         improved = va["balanced_accuracy"] > best_val_ba + 1e-12 or (abs(va["balanced_accuracy"] - best_val_ba) <= 1e-12 and va["loss"] < best_val_loss)
         if improved:
             best_val_ba = va["balanced_accuracy"]; best_val_loss = va["loss"]; best_epoch = epoch
             best_state = copy.deepcopy({k: v.detach().cpu() for k, v in model.state_dict().items()})
         if epoch == 1 or epoch % 10 == 0 or epoch == NUM_EPOCHS:
-            print(f"{condition:8s} seed={seed:3d} lambda={lambda_con:.3f} epoch={epoch:3d} | train BA={tr['balanced_accuracy']:.4f} val BA={va['balanced_accuracy']:.4f} | con={tr['loss_con']:.4f} anchors={tr['valid_anchor_fraction']:.3f} | L3 FR={tr['l3_fr']:.4f}")
+            print(
+                f"{condition:8s} seed={seed:3d} lambda={lambda_con:.3f} epoch={epoch:3d} | "
+                f"train BA={tr['balanced_accuracy']:.4f} val BA={va['balanced_accuracy']:.4f} | "
+                f"lambda_eff={tr['effective_lambda_con']:.4f} con={tr['loss_con']:.4f} "
+                f"active={tr['active_item_fraction']:.3f} anchors={tr['valid_anchor_fraction']:.3f} | "
+                f"L3 FR={tr['l3_fr']:.4f}"
+            )
 
     model.load_state_dict(best_state, strict=True); model.eval()
     with torch.no_grad():
-        train_best = run_epoch(model, make_loader("train", seed, False), condition, lambda_con, None)
-        val_best = run_epoch(model, make_loader("val", seed, False), condition, lambda_con, None)
-    payload = {"config": cfg, "best_epoch": int(best_epoch), "best_val_ba": float(best_val_ba), "model_state_dict": best_state, "history": history, "train_best": train_best, "val_best": val_best}
+        train_best = run_epoch(model, make_loader("train", seed, False), condition, lambda_con, None, epoch=best_epoch)
+        val_best = run_epoch(model, make_loader("val", seed, False), condition, lambda_con, None, epoch=best_epoch)
+    payload = {
+        "config": cfg,
+        "best_epoch": int(best_epoch),
+        "best_val_ba": float(best_val_ba),
+        "model_state_dict": best_state,
+        "history": history,
+        "train_best": train_best,
+        "val_best": val_best,
+    }
     if SAVE_CHECKPOINTS:
         torch.save(payload, checkpoint_path)
+        print("Saved:", checkpoint_path)
     del model
     if torch.cuda.is_available(): torch.cuda.empty_cache()
     return payload
@@ -244,7 +319,7 @@ def model_from_payload(payload):
 @torch.no_grad()
 def extract_features(model, X):
     model = model.to(DEVICE); model.eval()
-    loader = DataLoader(TensorDataset(torch.from_numpy(X)), batch_size=BATCH_SIZE, shuffle=False)
+    loader = DataLoader(TensorDataset(torch.from_numpy(np.array(X, copy=True))), batch_size=BATCH_SIZE, shuffle=False)
     z250, z125 = [], []
     for (xb,) in loader:
         out = model(xb.to(DEVICE).float(), return_fine=True)
