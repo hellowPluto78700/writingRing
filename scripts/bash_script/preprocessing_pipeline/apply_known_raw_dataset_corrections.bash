@@ -198,8 +198,10 @@ if len(frames) != 6:
 
 print(f"[FIX ] replacing known 6-frame Board chunk with serialized empty list: {path}")
 
+# compress_pickle infers the compressor from the file extension, so the
+# temporary replacement must also end in .gz.
 fd, tmp_name = tempfile.mkstemp(
-    prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    prefix=f".{path.name}.", suffix=".tmp.gz", dir=str(path.parent)
 )
 os.close(fd)
 tmp_path = Path(tmp_name)
