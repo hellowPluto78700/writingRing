@@ -1,0 +1,41 @@
+name: writingring-gpu
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Core Python environment
+  - python=3.11
+  - pip
+  - setuptools
+  - wheel
+
+  # Scientific Python stack
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - joblib
+
+  # Notebook / development
+  - ipykernel
+  - jupyterlab
+  - pytest
+
+  # Install GPU PyTorch and project-specific Python packages with pip.
+  # Do not explicitly list CUDA runtime libraries (nvidia-*, triton, cudnn, etc.);
+  # the official PyTorch CUDA wheel resolves those dependencies.
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.11.0+cu128
+      - torchvision==0.26.0+cu128
+      - torchaudio==2.11.0+cu128
+      - snntorch==0.9.4
+      - rockpool==2.9.1
+      - compress-pickle==2.1.0
+      - huggingface_hub
+      - fsspec
+      - psutil
+      - -e .
