@@ -31,8 +31,8 @@ def tau_table(fs): return pd.DataFrame([{'shift':s,'alpha':alpha(s),'tau_syn_ms'
 
 @dataclass
 class Data:
-    Xtr:np.ndarray; Xva:np.ndarray; Xte:np.ndarray; ytr:np.ndarray; yva:np.ndarray; yte:np.ndarray
-    ltr:np.ndarray; lva:np.ndarray; lte:np.ndarray; labels:tuple; fs:float; T:int; bin_steps:int; n_bins:int; split:dict
+    Xtr:np.ndarray; ytr:np.ndarray; ltr:np.ndarray; Xva:np.ndarray; yva:np.ndarray; lva:np.ndarray
+    Xte:np.ndarray; yte:np.ndarray; lte:np.ndarray; labels:tuple; fs:float; T:int; bin_steps:int; n_bins:int; split:dict
 
 @dataclass(frozen=True)
 class Config:
@@ -140,4 +140,7 @@ def run_sweep(data:Data,cfg:Config,n_jobs=1):
     pd.DataFrame([{'shift':r['shift'],'objective':r['objective'],'seed':r['seed'],**h} for r in rs for h in r['history']]).to_csv(cfg.results_dir/'experiment_3_0_1_history.csv',index=False); return df
 
 def aggregate(df):
-    cols=['test_balanced_accuracy','test_macro_f1','test_accuracy','probe_test_balanced_accuracy','probe_test_macro_f1','val_balanced_accuracy','train_test_ba_gap','best_epoch','test_l1_firing_rate','test_l2_firing_rate','test_l3_firing_rate']; g=df.groupby(['objective','shift','tau_syn_ms'])[cols]; return g.agg(['mean','std'])
+    cols=['test_balanced_accuracy','test_macro_f1','test_accuracy','probe_test_balanced_accuracy','probe_test_macro_f1','val_balanced_accuracy','train_test_ba_gap','best_epoch','test_l1_firing_rate','test_l2_firing_rate','test_l3_firing_rate']
+    g=df.groupby(['objective','shift','tau_syn_ms'],as_index=False)[cols]
+    mean=g.mean().rename(columns={c:'mean_'+c for c in cols}); std=g.std(ddof=1).rename(columns={c:'sd_'+c for c in cols})
+    return mean.merge(std,on=['objective','shift','tau_syn_ms'])
