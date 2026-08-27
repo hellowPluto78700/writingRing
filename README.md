@@ -159,6 +159,8 @@ notebooks, install the relevant optional dependencies as needed:
 python -m pip install -e ".[snn,notebook]"
 ```
 
+**SNN execution note:** when independent random seeds can be scheduled separately, prefer multi-CPU execution with one CPU core per seed when possible; on Unity, Experiment 1.3.9 (`con500`, `lambda=0.1`, 40 epochs, seeds `11/23/101`) completed three seeds in parallel on `3 × 1` CPU cores in ~468 s (7.8 min), while one RTX 2080 Ti running the same three seeds sequentially took ~1045 s (17.4 min), making the multi-CPU strategy ~2.2× faster in time-to-results.
+
 ## Entry points
 
 Inspection and visualization:
