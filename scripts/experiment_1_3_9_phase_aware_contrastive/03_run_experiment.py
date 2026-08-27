@@ -15,7 +15,12 @@ for condition in CONTRASTIVE_CONDITIONS:
             model = model_from_payload(payload)
             ztr250, _ = extract_features(model, X_train)
             zva250, _ = extract_features(model, X_val)
-            probe = fit_logreg_probe(ztr250, zva250, None, seed_tag=(RUN_VARIANT, "dev", condition, lambda_con, seed))
+            probe = fit_logreg_probe(
+                ztr250,
+                zva250,
+                None,
+                seed_tag=(RUN_VARIANT, "dev", condition, lambda_con, seed),
+            )
             development_rows.append({
                 "condition": condition,
                 "lambda_con": lambda_con,
@@ -57,19 +62,71 @@ for condition in CONTRASTIVE_CONDITIONS:
 print("Selected lambdas from validation only:", BEST_LAMBDA)
 for condition in CONTRASTIVE_CONDITIONS:
     if BEST_LAMBDA[condition] == 0.0:
-        print(f"{condition}: lambda=0 won development; contrastive regularization did not beat the control.")
+        print(
+            f"{condition}: lambda=0 won development; "
+            "contrastive regularization did not beat the control."
+        )
 display(development_summary)
 
 # -----------------------------------------------------------------------------
-# Final confirmation. Only after validation-only lambda selection do we access
-# test. Keep cls_only as the common architecture baseline even if a contrastive
-# condition selects lambda=0.
+# Final confirmation: REUSE the already-trained development checkpoints.
+#
+# Hyperparameter selection is finished using validation only. There is no reason
+# to retrain an identical seed / lambda / architecture a second time before test.
+# The selected development checkpoint is therefore frozen and loaded directly,
+# and test is accessed for the first time only after BEST_LAMBDA is fixed.
+#
+# cls_only reuses dev_con250_lambda_0 because lambda=0 makes that run exactly
+# CE-only: no contrastive items are constructed and the objective is L_cls.
+# No final_*.pt training checkpoints are created by this stage.
 # -----------------------------------------------------------------------------
 FINAL_CONDITIONS = {
-    "cls_only": 0.0,
-    "con250": BEST_LAMBDA["con250"],
-    "con500": BEST_LAMBDA["con500"],
+    "cls_only": {
+        "source_condition": "con250",
+        "lambda_con": 0.0,
+    },
+    "con250": {
+        "source_condition": "con250",
+        "lambda_con": BEST_LAMBDA["con250"],
+    },
+    "con500": {
+        "source_condition": "con500",
+        "lambda_con": BEST_LAMBDA["con500"],
+    },
 }
+
+
+def load_selected_development_checkpoint(
+    report_condition: str,
+    source_condition: str,
+    seed: int,
+    lambda_con: float,
+):
+    """Load one frozen development checkpoint; never train in final evaluation."""
+    ckpt = CHECKPOINT_DIR / (
+        f"dev_{source_condition}_lambda_{lambda_con:g}_seed_{seed}.pt"
+    )
+    if not ckpt.exists():
+        raise FileNotFoundError(
+            "Final evaluation requires the selected development checkpoint, but it "
+            f"does not exist: {ckpt}. Complete/resume the development sweep first; "
+            "the final stage intentionally does not retrain models."
+        )
+
+    payload = torch.load(ckpt, map_location="cpu", weights_only=False)
+    expected_config = run_config_dict(source_condition, seed, lambda_con)
+    if payload.get("config") != expected_config:
+        raise ValueError(
+            f"Selected development checkpoint config mismatch: {ckpt}. "
+            "Refusing to evaluate a stale/incompatible checkpoint."
+        )
+
+    print(
+        f"Final {report_condition:8s} seed={seed:3d} lambda={lambda_con:g} "
+        f"<- reuse {ckpt.name}"
+    )
+    return payload, ckpt
+
 
 training_rows = []
 history_rows = []
@@ -77,13 +134,25 @@ probe_rows = []
 probe_sweeps = []
 feature_cache = {}
 
-raw_probe = fit_logreg_probe(RAW250["train"], RAW250["val"], RAW250["test"], seed_tag=(RUN_VARIANT, "raw250"))
+raw_probe = fit_logreg_probe(
+    RAW250["train"],
+    RAW250["val"],
+    RAW250["test"],
+    seed_tag=(RUN_VARIANT, "raw250"),
+)
 RAW_TEST_BA = float(raw_probe["test"]["balanced_accuracy"])
 
-for condition, lambda_con in FINAL_CONDITIONS.items():
+for condition, final_spec in FINAL_CONDITIONS.items():
+    source_condition = final_spec["source_condition"]
+    lambda_con = float(final_spec["lambda_con"])
+
     for seed in SEEDS:
-        ckpt = CHECKPOINT_DIR / f"final_{condition}_lambda_{lambda_con:g}_seed_{seed}.pt"
-        payload = train_run(condition, seed, lambda_con, ckpt)
+        payload, ckpt = load_selected_development_checkpoint(
+            condition,
+            source_condition,
+            seed,
+            lambda_con,
+        )
         model = model_from_payload(payload)
 
         ztr250, ztr125 = extract_features(model, X_train)
@@ -92,14 +161,22 @@ for condition, lambda_con in FINAL_CONDITIONS.items():
         feature_cache[(condition, seed, "250")] = (ztr250, zva250, zte250)
         feature_cache[(condition, seed, "125")] = (ztr125, zva125, zte125)
 
+        # Evaluate the objective associated with the checkpoint source. For the
+        # cls_only report row this is con250 with lambda=0, which is exactly CE-only.
         with torch.no_grad():
             test_metrics = run_epoch(
-                model.to(DEVICE), make_loader("test", seed, False), condition, lambda_con, None,
+                model.to(DEVICE),
+                make_loader("test", seed, False),
+                source_condition,
+                lambda_con,
+                None,
                 epoch=payload["best_epoch"],
             )
 
         training_rows.append({
             "condition": condition,
+            "checkpoint_source_condition": source_condition,
+            "checkpoint_file": ckpt.name,
             "seed": seed,
             "lambda_con": lambda_con,
             "best_epoch": payload["best_epoch"],
@@ -120,13 +197,22 @@ for condition, lambda_con in FINAL_CONDITIONS.items():
             "val_valid_anchor_fraction": payload["val_best"]["valid_anchor_fraction"],
         })
         for row in payload["history"]:
-            history_rows.append({"condition": condition, "seed": seed, "lambda_con": lambda_con, **row})
+            history_rows.append({
+                "condition": condition,
+                "checkpoint_source_condition": source_condition,
+                "seed": seed,
+                "lambda_con": lambda_con,
+                **row,
+            })
 
         for readout, arrays in (
             ("SNN250", (ztr250, zva250, zte250)),
             ("SNN125", (ztr125, zva125, zte125)),
         ):
-            probe = fit_logreg_probe(*arrays, seed_tag=(RUN_VARIANT, "final", readout, condition, seed))
+            probe = fit_logreg_probe(
+                *arrays,
+                seed_tag=(RUN_VARIANT, "final", readout, condition, seed),
+            )
             probe_rows.append({
                 "representation": readout,
                 "condition": condition,
@@ -137,10 +223,17 @@ for condition, lambda_con in FINAL_CONDITIONS.items():
                 "test_accuracy": probe["test"]["accuracy"],
                 "test_BA": probe["test"]["balanced_accuracy"],
                 "test_macro_f1": probe["test"]["macro_f1"],
-                "delta_test_BA_vs_Raw250": probe["test"]["balanced_accuracy"] - RAW_TEST_BA,
+                "delta_test_BA_vs_Raw250": (
+                    probe["test"]["balanced_accuracy"] - RAW_TEST_BA
+                ),
             })
             for sweep_row in probe["sweep"]:
-                probe_sweeps.append({"representation": readout, "condition": condition, "seed": seed, **sweep_row})
+                probe_sweeps.append({
+                    "representation": readout,
+                    "condition": condition,
+                    "seed": seed,
+                    **sweep_row,
+                })
 
         del model
         if torch.cuda.is_available():
