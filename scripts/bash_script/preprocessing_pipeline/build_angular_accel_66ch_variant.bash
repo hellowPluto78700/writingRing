@@ -20,6 +20,7 @@ set -Eeuo pipefail
 #   MODE=finalize internal/final aggregation
 #
 # Unity environment policy matches the SNN Bash launchers:
+#   resolve the repository from SLURM_SUBMIT_DIR when running under Slurm
 #   module load conda/latest
 #   eval "$(conda shell.bash hook)"
 #   conda activate writingring-gpu
@@ -31,8 +32,13 @@ set -Eeuo pipefail
 # Default OUTPUT_ROOT is a sibling named <SOURCE_COMBINATION_ROOT>_angular_accel66.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
-SCRIPT_PATH="${SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]}")"
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
+if REPO_CANDIDATE="$(git -C "$SUBMIT_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
+    REPO_ROOT="$REPO_CANDIDATE"
+else
+    REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+SCRIPT_PATH="${REPO_ROOT}/scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash"
 PYTHON_HELPER="${REPO_ROOT}/scripts/build_angular_accel_66ch_variant.py"
 
 SOURCE_ROOT="${1:-}"
@@ -44,6 +50,7 @@ FREQUENCIES_HZ="${FREQUENCIES_HZ:-0.5 1 2 4 8}"
 MAX_FILTER_TIME_S="${MAX_FILTER_TIME_S:-0.3}"
 JOBS="${JOBS:-}"
 SLURM_MAX_CONCURRENCY="${SLURM_MAX_CONCURRENCY:-50}"
+SLURM_PARTITION="${SLURM_PARTITION:-cpu}"
 SLURM_TIME="${SLURM_TIME:-02:00:00}"
 SLURM_MEM="${SLURM_MEM:-4G}"
 USER_NAME="${USER_NAME:-}"
@@ -76,6 +83,7 @@ Environment:
   FREQUENCIES_HZ="0.5 1 2 4 8"        exactly five Custom Wavelet frequencies
   MAX_FILTER_TIME_S=0.3                extrema max-filter duration
   SLURM_MAX_CONCURRENCY=50             maximum simultaneous user tasks, hard-capped at 50
+  SLURM_PARTITION=cpu                  Slurm partition
   SLURM_TIME=02:00:00
   SLURM_MEM=4G
 
@@ -83,6 +91,10 @@ On Unity the launcher owns its Python environment, matching the repository's
 SNN Bash launchers. Every invocation, including Slurm workers and the finalizer,
 loads conda/latest and activates writingring-gpu before running Python. Manual
 `conda activate` is not required.
+
+Slurm copies submitted scripts into its spool directory before executing them.
+Workers therefore recover the real Git repository from SLURM_SUBMIT_DIR instead
+of treating BASH_SOURCE as a repository path.
 
 The source root must already contain a completed 64 Hz 36-channel
 PolaritySplitAbs pipeline, including recording-level spikeEncoding,
@@ -108,9 +120,11 @@ esac
     fail "SLURM_MAX_CONCURRENCY must be a positive integer"
 (( SLURM_MAX_CONCURRENCY <= 50 )) ||
     fail "SLURM_MAX_CONCURRENCY may not exceed the repository default cap of 50"
+[[ -n "$SLURM_PARTITION" ]] || fail "SLURM_PARTITION may not be empty"
 
 cd "$REPO_ROOT"
 [[ -f "$PYTHON_HELPER" ]] || fail "missing Python helper: $PYTHON_HELPER"
+[[ -f "$SCRIPT_PATH" ]] || fail "missing canonical Bash entry point: $SCRIPT_PATH"
 
 activate_writingring_environment() {
     # Match scripts/bash_script/SNN_Bash/run_exp_3_4_cpu_array.bash.
@@ -124,8 +138,8 @@ activate_writingring_environment() {
 
     python "$PYTHON_HELPER" --help >/dev/null 2>&1 ||
         fail "writingring-gpu cannot import the AngularAccel66 dependencies"
-    printf '[angular66] conda=%s python=%s\n' \
-        "${CONDA_DEFAULT_ENV:-unknown}" "$(command -v python)"
+    printf '[angular66] repo=%s conda=%s python=%s\n' \
+        "$REPO_ROOT" "${CONDA_DEFAULT_ENV:-unknown}" "$(command -v python)"
 }
 
 activate_writingring_environment
@@ -254,10 +268,11 @@ case "$MODE" in
         command -v sbatch >/dev/null 2>&1 || fail "sbatch is required for MODE=submit"
         mkdir -p "$OUTPUT_ROOT/logs"
         array_last=$((${#USERS[@]} - 1))
-        export_spec="ALL,MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
+        export_spec="ALL,MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
         worker_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66 \
+                --partition="$SLURM_PARTITION" \
                 --array="0-${array_last}%${SLURM_MAX_CONCURRENCY}" \
                 --cpus-per-task=1 \
                 --mem="$SLURM_MEM" \
@@ -270,10 +285,11 @@ case "$MODE" in
         worker_job="${worker_job%%;*}"
         [[ "$worker_job" =~ ^[0-9]+$ ]] || fail "could not parse worker Slurm job id"
 
-        finalize_export="ALL,MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
+        finalize_export="ALL,MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
         final_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66-final \
+                --partition="$SLURM_PARTITION" \
                 --dependency="afterok:${worker_job}" \
                 --cpus-per-task=1 \
                 --mem="$SLURM_MEM" \
@@ -286,8 +302,8 @@ case "$MODE" in
         final_job="${final_job%%;*}"
         [[ "$final_job" =~ ^[0-9]+$ ]] || fail "could not parse finalizer Slurm job id"
 
-        printf '[angular66] submitted worker array job %s (%d users, max %s concurrent)\n' \
-            "$worker_job" "${#USERS[@]}" "$SLURM_MAX_CONCURRENCY"
+        printf '[angular66] submitted worker array job %s (%d users, max %s concurrent, partition=%s)\n' \
+            "$worker_job" "${#USERS[@]}" "$SLURM_MAX_CONCURRENCY" "$SLURM_PARTITION"
         printf '[angular66] submitted afterok finalizer job %s\n' "$final_job"
         ;;
 esac
