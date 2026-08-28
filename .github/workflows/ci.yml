@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test,snn]'
+          python -m pip install scikit-learn
+
+      - name: Repository syntax checks
+        run: |
+          python -m pytest -q tests/test_repository_source_syntax.py
+
+      - name: Experiment 3.0.2 contract checks
+        run: |
+          python -m pytest -q tests/test_experiment_3_0_2_contract.py
