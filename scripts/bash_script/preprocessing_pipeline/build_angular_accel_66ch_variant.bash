@@ -19,6 +19,11 @@ set -Eeuo pipefail
 #   MODE=worker   internal/user-specific worker
 #   MODE=finalize internal/final aggregation
 #
+# Unity environment policy matches the SNN Bash launchers:
+#   module load conda/latest
+#   eval "$(conda shell.bash hook)"
+#   conda activate writingring-gpu
+#
 # Usage:
 #   bash scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash \
 #       SOURCE_COMBINATION_ROOT [OUTPUT_ROOT]
@@ -42,7 +47,6 @@ SLURM_MAX_CONCURRENCY="${SLURM_MAX_CONCURRENCY:-50}"
 SLURM_TIME="${SLURM_TIME:-02:00:00}"
 SLURM_MEM="${SLURM_MEM:-4G}"
 USER_NAME="${USER_NAME:-}"
-PYTHON_BIN="${PYTHON_BIN:-}"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -68,7 +72,6 @@ Environment:
   MODE=local|submit|worker|finalize     default: local
   JOBS=<positive integer>              local concurrent users; default: min(nproc, 50)
   OVERWRITE_DEST=0|1                   replace this derived variant when 1
-  PYTHON_BIN=/path/to/python           optional explicit interpreter override
   SAMPLING_RATE_HZ=64                  fixed contract; non-64 values are rejected
   FREQUENCIES_HZ="0.5 1 2 4 8"        exactly five Custom Wavelet frequencies
   MAX_FILTER_TIME_S=0.3                extrema max-filter duration
@@ -76,10 +79,10 @@ Environment:
   SLURM_TIME=02:00:00
   SLURM_MEM=4G
 
-Python selection is fail-fast. The launcher first honors PYTHON_BIN, then the
-currently active Conda environment, then the current python on PATH, and then
-tries the writingring-gpu and writingring-viz Conda environments. A candidate
-is accepted only when it can import and start the AngularAccel66 helper.
+On Unity the launcher owns its Python environment, matching the repository's
+SNN Bash launchers. Every invocation, including Slurm workers and the finalizer,
+loads conda/latest and activates writingring-gpu before running Python. Manual
+`conda activate` is not required.
 
 The source root must already contain a completed 64 Hz 36-channel
 PolaritySplitAbs pipeline, including recording-level spikeEncoding,
@@ -109,6 +112,25 @@ esac
 cd "$REPO_ROOT"
 [[ -f "$PYTHON_HELPER" ]] || fail "missing Python helper: $PYTHON_HELPER"
 
+activate_writingring_environment() {
+    # Match scripts/bash_script/SNN_Bash/run_exp_3_4_cpu_array.bash.
+    if command -v module >/dev/null 2>&1; then
+        module load conda/latest
+    fi
+    command -v conda >/dev/null 2>&1 ||
+        fail "conda is unavailable; on Unity, conda/latest must be loadable"
+    eval "$(conda shell.bash hook)"
+    conda activate writingring-gpu
+
+    python "$PYTHON_HELPER" --help >/dev/null 2>&1 ||
+        fail "writingring-gpu cannot import the AngularAccel66 dependencies"
+    printf '[angular66] conda=%s python=%s\n' \
+        "${CONDA_DEFAULT_ENV:-unknown}" "$(command -v python)"
+}
+
+activate_writingring_environment
+PYTHON_CMD=(python)
+
 if [[ "$SOURCE_ROOT" != /* ]]; then
     SOURCE_ROOT="$REPO_ROOT/$SOURCE_ROOT"
 fi
@@ -122,65 +144,6 @@ elif [[ "$OUTPUT_ROOT" != /* ]]; then
 fi
 OUTPUT_ROOT="${OUTPUT_ROOT%/}"
 [[ "$OUTPUT_ROOT" != "$SOURCE_ROOT" ]] || fail "output root must differ from source root"
-
-python_candidate_works() {
-    local candidate="$1"
-    [[ -n "$candidate" && -x "$candidate" ]] || return 1
-    "$candidate" "$PYTHON_HELPER" --help >/dev/null 2>&1
-}
-
-select_python() {
-    local candidate=""
-    local env_name=""
-
-    if [[ -n "$PYTHON_BIN" ]]; then
-        if [[ "$PYTHON_BIN" == */* ]]; then
-            candidate="$PYTHON_BIN"
-        else
-            candidate="$(command -v "$PYTHON_BIN" 2>/dev/null || true)"
-        fi
-        python_candidate_works "$candidate" ||
-            fail "PYTHON_BIN does not provide the required WritingRing dependencies: $PYTHON_BIN"
-        PYTHON_BIN="$candidate"
-        return
-    fi
-
-    if [[ -n "${CONDA_PREFIX:-}" ]]; then
-        candidate="${CONDA_PREFIX}/bin/python"
-        if python_candidate_works "$candidate"; then
-            PYTHON_BIN="$candidate"
-            return
-        fi
-    fi
-
-    candidate="$(command -v python 2>/dev/null || true)"
-    if python_candidate_works "$candidate"; then
-        PYTHON_BIN="$candidate"
-        return
-    fi
-
-    if command -v conda >/dev/null 2>&1; then
-        for env_name in writingring-gpu writingring-viz; do
-            candidate="$(
-                conda run --no-capture-output -n "$env_name" \
-                    python -c 'import sys; print(sys.executable)' 2>/dev/null \
-                    | tr -d '\r' \
-                    | tail -n 1
-            )"
-            if python_candidate_works "$candidate"; then
-                PYTHON_BIN="$candidate"
-                return
-            fi
-        done
-    fi
-
-    fail "could not find a Python interpreter with the AngularAccel66 dependencies. Activate writingring-gpu/writingring-viz, or set PYTHON_BIN=/path/to/env/bin/python"
-}
-
-select_python
-export PYTHON_BIN
-PYTHON_CMD=("$PYTHON_BIN")
-printf '[angular66] python=%s\n' "$PYTHON_BIN"
 
 read -r -a FREQUENCY_ARGS <<<"$FREQUENCIES_HZ"
 [[ "${#FREQUENCY_ARGS[@]}" -eq 5 ]] ||
@@ -218,7 +181,7 @@ run_finalizer() {
 
 USERS_OUTPUT=""
 if ! USERS_OUTPUT="$(list_users)"; then
-    fail "user discovery failed with Python interpreter $PYTHON_BIN; see the Python traceback above"
+    fail "user discovery failed in writingring-gpu; see the Python traceback above"
 fi
 [[ -n "$USERS_OUTPUT" ]] || fail "no users discovered in source root: $SOURCE_ROOT"
 mapfile -t USERS <<<"$USERS_OUTPUT"
@@ -291,7 +254,7 @@ case "$MODE" in
         command -v sbatch >/dev/null 2>&1 || fail "sbatch is required for MODE=submit"
         mkdir -p "$OUTPUT_ROOT/logs"
         array_last=$((${#USERS[@]} - 1))
-        export_spec="ALL,PYTHON_BIN=${PYTHON_BIN},MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
+        export_spec="ALL,MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
         worker_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66 \
@@ -307,7 +270,7 @@ case "$MODE" in
         worker_job="${worker_job%%;*}"
         [[ "$worker_job" =~ ^[0-9]+$ ]] || fail "could not parse worker Slurm job id"
 
-        finalize_export="ALL,PYTHON_BIN=${PYTHON_BIN},MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
+        finalize_export="ALL,MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S}"
         final_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66-final \
