@@ -1,0 +1,19 @@
+{
+  "causality_guardrail": "No relative-progress or final-duration normalization is used to form periodic prefix predictions.",
+  "criterion_1_mean_final_ba_gain_positive": false,
+  "criterion_2_at_least_two_seeds_positive": true,
+  "experiment_id": "experiment_3_4_causal_fixed250_objectives",
+  "hypothesis": "Progressive causal-prefix supervision will improve fixed-duration SNN classification by aligning training with streaming evidence accumulation.",
+  "mean_causal_minus_whole_final_ba": -0.009283540533540543,
+  "mean_streaming_ba_delta_500_to_1500ms": 0.1229398364715825,
+  "partial_final_bin_policy": "The final non-empty Fixed250 bin is retained even when partial; samples after valid_length are masked to zero. It contributes to final endpoint prediction only, not to the non-final prefix-loss average.",
+  "positive_final_ba_seeds": 2,
+  "primary_hypothesis_supported": false,
+  "primary_question": "Does causal Fixed250 prefix supervision improve final balanced accuracy over parameter-matched whole-segment Fixed250 supervision?",
+  "protocol_version": "causal_prefix_v1",
+  "validation_standard": {
+    "criterion_1": "mean(Causal250 final test BA - Whole250 final test BA) > 0",
+    "criterion_2": "Causal250 final test BA > Whole250 in at least 2 of 3 paired seeds",
+    "decision_rule": "both criteria must pass"
+  }
+}

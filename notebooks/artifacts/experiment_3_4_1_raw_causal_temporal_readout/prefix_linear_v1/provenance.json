@@ -1,0 +1,44 @@
+{
+  "event_channel_count": 30,
+  "expected_runs": 25,
+  "experiment_id": "experiment_3_4_1_raw_causal_temporal_readout",
+  "final_weight": 0.5,
+  "methods": [
+    [
+      "relative10",
+      "whole"
+    ],
+    [
+      "fixed250",
+      "whole"
+    ],
+    [
+      "fixed500",
+      "whole"
+    ],
+    [
+      "fixed250",
+      "prefix"
+    ],
+    [
+      "fixed500",
+      "prefix"
+    ]
+  ],
+  "model_selection": "predefined methods; future Fixed250-vs-Fixed500 choice must use mean validation BA, not test BA",
+  "normalization": "whole-training samples fit one per-feature z-score scaler shared by Whole and Prefix for each fixed duration",
+  "padded_length": 256,
+  "prefix_order": "zero future raw bins -> flatten -> apply whole-training scaler",
+  "prefix_weight": 0.5,
+  "primary_support_rule": "mean delta250 > 0 and at least 4/5 split deltas positive",
+  "protocol_version": "prefix_linear_v1",
+  "relative10_role": "offline phase-normalized oracle/reference",
+  "sampling_rate_hz": 64.0,
+  "split_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ]
+}
