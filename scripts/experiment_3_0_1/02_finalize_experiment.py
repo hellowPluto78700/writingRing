@@ -23,9 +23,11 @@ from scripts.experiment_3_0_1_single_tau_objectives import (  # noqa: E402
     EXPECTED_RUNS,
     EXPERIMENT_ID,
     OBJECTIVES,
+    PROTOCOL_VERSION,
     SEEDS,
     SHIFTS,
     aggregate,
+    protocol_results_dir,
 )
 
 
@@ -34,7 +36,7 @@ def checkpoint_path(results_dir: Path, shift: int, objective: str, seed: int) ->
 
 
 def main() -> None:
-    results_dir = REPO_ROOT / "notebooks" / "artifacts" / EXPERIMENT_ID
+    results_dir = protocol_results_dir(REPO_ROOT)
     rows: list[dict] = []
     history_rows: list[dict] = []
     missing: list[str] = []
@@ -48,12 +50,21 @@ def main() -> None:
                     continue
 
                 payload = torch.load(path, map_location="cpu", weights_only=False)
+                if payload.get("experiment_id") != EXPERIMENT_ID:
+                    raise ValueError(f"Wrong experiment_id in {path}")
+                if payload.get("protocol_version") != PROTOCOL_VERSION:
+                    raise ValueError(
+                        f"Wrong protocol version in {path}: "
+                        f"{payload.get('protocol_version')!r} != {PROTOCOL_VERSION!r}"
+                    )
+
                 result = payload.get("result")
                 if not isinstance(result, dict):
                     raise ValueError(f"Checkpoint has no result dict: {path}")
 
-                expected = (shift, objective, seed)
+                expected = (PROTOCOL_VERSION, shift, objective, seed)
                 actual = (
+                    str(result.get("protocol_version")),
                     int(result.get("shift")),
                     str(result.get("objective")),
                     int(result.get("seed")),
@@ -63,7 +74,15 @@ def main() -> None:
                         f"Checkpoint identity mismatch for {path}: {actual} != {expected}"
                     )
 
+                provenance = payload.get("provenance")
+                if not isinstance(provenance, dict):
+                    raise ValueError(f"Checkpoint has no provenance dict: {path}")
+                if provenance.get("protocol_version") != PROTOCOL_VERSION:
+                    raise ValueError(f"Checkpoint provenance mismatch: {path}")
+
                 history = result.get("history", [])
+                if len(history) == 0:
+                    raise ValueError(f"Checkpoint has empty training history: {path}")
                 row = {key: value for key, value in result.items() if key != "history"}
                 rows.append(row)
                 for epoch_row in history:
@@ -87,6 +106,9 @@ def main() -> None:
     if len(results) != EXPECTED_RUNS:
         raise RuntimeError((len(results), EXPECTED_RUNS))
 
+    if set(results["protocol_version"].unique()) != {PROTOCOL_VERSION}:
+        raise ValueError("Mixed protocol versions in finalized results")
+
     history = pd.DataFrame(history_rows).sort_values(
         ["objective", "shift", "seed", "epoch"]
     )
@@ -100,6 +122,8 @@ def main() -> None:
     history.to_csv(history_path, index=False)
     summary.to_csv(summary_path, index=False)
 
+    print("Experiment:", EXPERIMENT_ID)
+    print("Protocol:", PROTOCOL_VERSION)
     print(f"Completed checkpoints: {len(results)}/{EXPECTED_RUNS}")
     print("Wrote:", results_path.relative_to(REPO_ROOT))
     print("Wrote:", history_path.relative_to(REPO_ROOT))
