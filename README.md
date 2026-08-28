@@ -161,6 +161,67 @@ python -m pip install -e ".[snn,notebook]"
 
 **SNN execution note:** when independent random seeds can be scheduled separately, prefer multi-CPU execution with one CPU core per seed when possible; on Unity, Experiment 1.3.9 (`con500`, `lambda=0.1`, 40 epochs, seeds `11/23/101`) completed three seeds in parallel on `3 × 1` CPU cores in ~468 s (7.8 min), while one RTX 2080 Ti running the same three seeds sequentially took ~1045 s (17.4 min), making the multi-CPU strategy ~2.2× faster in time-to-results.
 
+## Default multi-CPU experiment workflow
+
+Unless an experiment has a concrete reason to use another execution model,
+independent runs should be parallelized at the task level on Unity. Independent
+run dimensions include random seed, objective, architecture, configuration,
+and ablation condition.
+
+The default execution pattern is:
+
+```text
+independent experiment conditions
+        -> one Slurm array task per run
+        -> one CPU core per task
+        -> train
+        -> select/save best checkpoint
+        -> immediately evaluate that checkpoint when evaluation is run-local
+        -> save per-run artifacts
+all required jobs complete
+        -> finalizer/aggregator
+        -> analysis-only notebook for tables and plots
+```
+
+Repository defaults:
+
+- Prefer Slurm arrays instead of sequentially looping over independent runs in
+  one process.
+- Use one CPU core per independent run unless profiling demonstrates a real
+  benefit from multiple cores per run.
+- Cap simultaneous experiment tasks at **50 CPUs** by default, for example
+  `#SBATCH --array=0-N%50`. Do not exceed 50 concurrent experiment CPU tasks
+  unless explicitly requested.
+- Split sweeps over seed/objective/architecture/configuration into separate
+  array tasks whenever those runs are independent.
+- If evaluation depends only on the checkpoint produced by the current run,
+  keep `train -> evaluate -> save artifacts` in the same Slurm task. This
+  avoids waiting for the slowest training run before starting a second full
+  evaluation array.
+- Keep training and evaluation implemented as separate Python functions or
+  entry points even when one Slurm task executes them consecutively, so probes
+  and metrics can be rerun without retraining.
+- Small reused/frozen baseline sets may be evaluated sequentially on one CPU
+  while the main array runs.
+- Use Slurm `afterok` dependencies when a finalizer depends on multiple job
+  groups.
+- Finalizers aggregate existing run artifacts only; missing runs should fail
+  explicitly rather than being silently regenerated.
+- Notebooks should be analysis-only whenever practical: read finalized
+  CSV/JSON artifacts, aggregate, rank, and plot. Do not make notebooks the
+  primary training or multiprocessing driver.
+- For one-core tasks, set `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`,
+  `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` to avoid hidden CPU
+  oversubscription.
+- Size Slurm memory and walltime for the complete atomic run, including any
+  evaluation performed after training.
+
+Valid reasons to deviate include a demonstrably GPU-bound workload, materially
+higher per-run memory requirements, unavoidable shared mutable state, a true
+serial dependency between runs, unsafe concurrent artifact writes, or measured
+benchmark evidence that another execution model is better. Document the reason
+for a deviation in the experiment README or runner comments.
+
 ## Entry points
 
 Inspection and visualization:
