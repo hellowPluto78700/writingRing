@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=wr302-train
+#SBATCH --job-name=wr302-train-eval
 #SBATCH --partition=cpu
 #SBATCH --array=0-35%50
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=6G
-#SBATCH --time=04:00:00
-#SBATCH --output=unity_exp302_train_%A_%a.out
-#SBATCH --error=unity_exp302_train_%A_%a.err
+#SBATCH --time=06:00:00
+#SBATCH --output=unity_exp302_train_eval_%A_%a.out
+#SBATCH --error=unity_exp302_train_eval_%A_%a.err
 
 set -euo pipefail
 
@@ -32,7 +32,7 @@ export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
 printf 'Node: %s\n' "$(hostname)"
-printf 'Training array job/task: %s/%s\n' "${SLURM_ARRAY_JOB_ID:-none}" "$TASK_ID"
+printf 'Train+eval array job/task: %s/%s\n' "${SLURM_ARRAY_JOB_ID:-none}" "$TASK_ID"
 printf 'CPUs per task: %s\n' "${SLURM_CPUS_PER_TASK:-1}"
 
 python -u scripts/experiment_3_0_2/01_train_one_run.py \
