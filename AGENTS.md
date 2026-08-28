@@ -23,6 +23,26 @@ Knowledge priority:
 
 When sources materially disagree, resolve the conflict instead of guessing.
 
+## Mandatory fast checks before delivery
+
+For any change that creates or edits Python or Bash source, run the relevant fast checks before claiming the change is ready:
+
+```bash
+python -m pytest -q tests/test_repository_source_syntax.py
+```
+
+This test compiles repository Python sources and runs `bash -n` on repository Bash scripts, so truncated or malformed source must be caught before delivery.
+
+For Experiment 3.0.2 changes, also run:
+
+```bash
+python -m pytest -q tests/test_experiment_3_0_2_contract.py
+```
+
+For other experiment-specific changes, add or update focused contract tests when run mapping, architecture definitions, protocol constants, checkpoint identity, or durable experiment behavior changes.
+
+Do not describe a change as tested or passing if the checks were not actually executed. If the current environment cannot execute them, say explicitly that the change was only statically reviewed and leave the GitHub CI result as the remaining verification gate.
+
 # Roles
 
 * PRIMARY: intent, routing, planning, orchestration, documentation.
