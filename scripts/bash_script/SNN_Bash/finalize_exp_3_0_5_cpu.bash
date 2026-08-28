@@ -16,4 +16,4 @@ eval "$(conda shell.bash hook)"
 conda activate writingring-gpu
 export CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONUNBUFFERED=1
-python -u scripts/experiment_3_0_5_frozen_representation_accessibility.py finalize
+python -u -m scripts.experiment_3_0_5_frozen_representation_accessibility finalize
