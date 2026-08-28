@@ -91,6 +91,25 @@ At a tick with `k` observed samples, only gestures whose reference valid length 
 
 The reference endpoint is used only to decide whether a gesture has enough recorded samples to contribute at a given tick; it is not supplied to the representation or classifier.
 
+## Analysis notebook
+
+After the five CPU runs and finalizer complete, use:
+
+```text
+notebooks/experiment_0_1_growing_prefix_relative10.ipynb
+```
+
+The notebook is analysis-only. It reads finalized CSV/JSON/model artifacts and does not retrain any classifier. It provides:
+
+- complete-gesture Relative10 baseline table across the five splits;
+- baseline-parity verification against Experiment 1.3.3;
+- growing-prefix Balanced Accuracy trajectories for every split and mean ± SD;
+- accuracy and macro-F1 trajectories;
+- active-gesture coverage versus observed time;
+- a matched active-cohort control that compares prefix BA against complete-gesture BA on exactly the same test samples at each tick;
+- `prefix BA - matched full BA`, which separates genuine prefix information loss from changing-cohort selection effects;
+- a decision-oriented summary near 0.5, 1.0, 1.5, and 2.0 seconds.
+
 ## Multi-CPU execution
 
 There are five independent tasks, one per user split seed:
