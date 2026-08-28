@@ -1,0 +1,42 @@
+name: Angular Accel 66ch Contract
+
+on:
+  push:
+    paths:
+      - 'scripts/build_angular_accel_66ch_variant.py'
+      - 'scripts/angular_accel66/**'
+      - 'scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash'
+      - 'scripts/bash_script/preprocessing_pipeline/README.md'
+      - 'tests/test_angular_accel_66ch_variant.py'
+      - '.github/workflows/angular-accel-66ch.yml'
+  pull_request:
+    paths:
+      - 'scripts/build_angular_accel_66ch_variant.py'
+      - 'scripts/angular_accel66/**'
+      - 'scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash'
+      - 'scripts/bash_script/preprocessing_pipeline/README.md'
+      - 'tests/test_angular_accel_66ch_variant.py'
+      - '.github/workflows/angular-accel-66ch.yml'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[test,snn]'
+
+      - name: Repository source syntax
+        run: python -m pytest -q tests/test_repository_source_syntax.py
+
+      - name: Angular-acceleration 66-channel contract
+        run: python -m pytest -q tests/test_angular_accel_66ch_variant.py
