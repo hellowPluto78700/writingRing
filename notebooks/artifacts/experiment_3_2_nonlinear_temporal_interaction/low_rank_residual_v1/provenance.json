@@ -1,0 +1,31 @@
+{
+  "event_channels": 30,
+  "expected_runs": 45,
+  "experiment_id": "experiment_3_2_nonlinear_temporal_interaction",
+  "linear_protocol": "1.3.3 train-only per-feature z-score + lbfgs LogisticRegression",
+  "model_init_seed": 2026,
+  "protocol_version": "low_rank_residual_v1",
+  "reference_experiment": "experiment_1_3_3_temporal_decoder_comparison",
+  "representations": [
+    "relative10",
+    "fixed250",
+    "fixed500"
+  ],
+  "residual_decoders": [
+    "local",
+    "transition",
+    "local_transition"
+  ],
+  "residual_rank": 16,
+  "residual_scaling": "train-only valid-bin channel RMS",
+  "sampling_rate_hz": 64.0,
+  "selection_metric": "validation balanced accuracy; tie break validation CE then earlier epoch",
+  "split_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "test_policy": "test evaluated only after best validation checkpoint is selected"
+}
