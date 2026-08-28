@@ -34,7 +34,9 @@ A contributes 9 reused runs. B/C/D/E add 36 training runs.
 
 ## Evaluation protocol
 
-All A-E checkpoints (5 x 3 objectives x 3 seeds = 45 evaluations) are evaluated independently in a Slurm array.
+Every B/C/D/E Slurm array task trains exactly one run and then immediately freezes and evaluates that run on the same allocated CPU. This avoids a global train/evaluation barrier and reuses the already loaded dataset and checkpoint context.
+
+Architecture A is not retrained. One separate single-CPU job sequentially evaluates its 9 reused Experiment 3.0.1 checkpoints.
 
 For each frozen SNN:
 
@@ -47,15 +49,21 @@ Probe regularization C is selected on validation BA from `{1e-3, 1e-2, 1e-1, 1, 
 
 Subgroup probes should primarily be compared within the same layer/configuration because subgroup neuron counts may differ between architectures.
 
+The standalone `02_evaluate_one_run.py` and evaluation-array Slurm script are retained as maintenance tools for re-evaluating saved checkpoints without retraining, but they are not part of the formal submission pipeline.
+
 ## CPU execution
 
-Each Slurm task uses one CPU core. Array concurrency is capped at 50 tasks:
+Each Slurm task uses one CPU core.
 
-- Training: `0-35%50` -> at most 36 simultaneous CPU cores.
-- Evaluation: `0-44%50` -> at most 45 simultaneous CPU cores.
-- Finalizer: one CPU core.
+Formal pipeline:
 
-No GPU is used by the formal pipeline.
+- B/C/D/E Train+Eval array: `0-35%50` -> 36 tasks total, at most 36 CPU cores actually used.
+- A baseline evaluation: one CPU core, sequentially evaluates 9 checkpoints.
+- Finalizer: one CPU core, starts only after both of the above jobs complete successfully.
+
+Therefore the formal pipeline uses at most 37 CPU cores concurrently, below the requested 50-core ceiling. No GPU is used.
+
+The Train+Eval tasks have a 6-hour Slurm walltime to leave room for frozen probe evaluation after training.
 
 ## Submit
 
@@ -65,10 +73,12 @@ From the repository root after `git pull`:
 bash scripts/bash_script/SNN_Bash/submit_exp_3_0_2_pipeline.bash
 ```
 
-The submitter creates dependencies:
+The submitter creates this dependency structure:
 
 ```text
-training array -> evaluation array -> finalizer
+36-task B/C/D/E Train+Eval array ----\
+                                      -> finalizer
+1-core A baseline evaluation --------/
 ```
 
 Monitor with:
