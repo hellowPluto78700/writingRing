@@ -6,6 +6,7 @@ from scripts import experiment_3_0_1_single_tau_objectives as base
 from scripts import experiment_3_0_5_frozen_representation_accessibility as exp305
 from scripts import experiment_3_0_6_causal_temporal_decoding as exp306
 from scripts import experiment_3_0_7_online_early_decision as exp307
+from scripts.experiment_3_0_6.streaming_prefix import streaming_prefix_logits
 
 
 def test_experiment_3_0_5_contract() -> None:
@@ -87,6 +88,35 @@ def test_exp306_samplewise_weights_sum_to_one_per_gesture() -> None:
     for labels, weights in ((y_uniform, w_uniform), (y_weighted, w_weighted)):
         for label in (0, 1):
             assert np.isclose(weights[labels == label].sum(), 1.0)
+
+
+def test_exp306_streaming_prefix_logits_match_full_prefix_linear_model() -> None:
+    rng = np.random.default_rng(7)
+    n_bins = 4
+    width = 3
+    n_classes = 2
+    feature_dim = n_bins * width
+    counts = rng.normal(size=(n_bins, width))
+    mean = rng.normal(size=feature_dim)
+    scale = rng.uniform(0.3, 2.0, size=feature_dim)
+    coef = rng.normal(size=(n_classes, feature_dim))
+    intercept = rng.normal(size=n_classes)
+
+    streaming = streaming_prefix_logits(
+        counts,
+        scaler_mean=mean,
+        scaler_scale=scale,
+        coef=coef,
+        intercept=intercept,
+    )
+    full_rows = []
+    for prefix_index in range(n_bins):
+        prefix = np.zeros((n_bins, width), dtype=np.float64)
+        prefix[: prefix_index + 1] = counts[: prefix_index + 1]
+        x = prefix.reshape(-1)
+        full_rows.append(coef @ ((x - mean) / scale) + intercept)
+    expected = np.stack(full_rows)
+    assert np.allclose(streaming, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_experiment_3_0_7_policy_grid_contract() -> None:
