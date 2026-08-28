@@ -53,15 +53,19 @@ def test_angular_encoder_uses_planned_64_hz_wavelet_contract() -> None:
     assert len(encoder.output_channel_names) == 30
 
 
-def test_bash_entrypoint_declares_one_user_per_cpu_contract() -> None:
+def _bash_entrypoint() -> str:
     repo_root = Path(__file__).resolve().parents[1]
-    script = (
+    return (
         repo_root
         / "scripts"
         / "bash_script"
         / "preprocessing_pipeline"
         / "build_angular_accel_66ch_variant.bash"
     ).read_text(encoding="utf-8")
+
+
+def test_bash_entrypoint_declares_one_user_per_cpu_contract() -> None:
+    script = _bash_entrypoint()
 
     assert "--array=" in script
     assert "--cpus-per-task=1" in script
@@ -72,22 +76,17 @@ def test_bash_entrypoint_declares_one_user_per_cpu_contract() -> None:
     assert "NUMEXPR_NUM_THREADS=1" in script
 
 
-def test_bash_entrypoint_validates_python_and_propagates_it_to_slurm() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    script = (
-        repo_root
-        / "scripts"
-        / "bash_script"
-        / "preprocessing_pipeline"
-        / "build_angular_accel_66ch_variant.bash"
-    ).read_text(encoding="utf-8")
+def test_bash_entrypoint_auto_activates_writingring_gpu_like_exp34() -> None:
+    script = _bash_entrypoint()
 
-    assert 'candidate="${CONDA_PREFIX}/bin/python"' in script
-    assert '"$candidate" "$PYTHON_HELPER" --help' in script
-    assert "PYTHON_BIN=${PYTHON_BIN},MODE=worker" in script
-    assert "PYTHON_BIN=${PYTHON_BIN},MODE=finalize" in script
+    assert "module load conda/latest" in script
+    assert 'eval "$(conda shell.bash hook)"' in script
+    assert "conda activate writingring-gpu" in script
+    assert 'PYTHON_CMD=(python)' in script
+    assert 'python "$PYTHON_HELPER" --help' in script
     assert 'if ! USERS_OUTPUT="$(list_users)"' in script
-    assert "user discovery failed with Python interpreter" in script
+    assert "user discovery failed in writingring-gpu" in script
+    assert "PYTHON_BIN=" not in script
 
 
 def test_output_schema_and_channel_counts_are_stable() -> None:
