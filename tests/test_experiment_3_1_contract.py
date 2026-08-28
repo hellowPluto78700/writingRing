@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from scripts import experiment_3_0_1_single_tau_objectives as base
@@ -34,6 +36,47 @@ def test_experiment_3_1_protocol_contract() -> None:
     )
 
 
+def test_exp31_slurm_array_is_one_seed_per_cpu_and_uses_module_launch() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    runner = (
+        repo_root
+        / "scripts"
+        / "bash_script"
+        / "SNN_Bash"
+        / "run_exp_3_1_cpu_array.bash"
+    ).read_text(encoding="utf-8")
+    finalizer = (
+        repo_root
+        / "scripts"
+        / "bash_script"
+        / "SNN_Bash"
+        / "finalize_exp_3_1_cpu.bash"
+    ).read_text(encoding="utf-8")
+    submitter = (
+        repo_root
+        / "scripts"
+        / "bash_script"
+        / "SNN_Bash"
+        / "submit_exp_3_1_pipeline.bash"
+    ).read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-2%50" in runner
+    assert "#SBATCH --cpus-per-task=1" in runner
+    assert "OMP_NUM_THREADS=1" in runner
+    assert "MKL_NUM_THREADS=1" in runner
+    assert "OPENBLAS_NUM_THREADS=1" in runner
+    assert "NUMEXPR_NUM_THREADS=1" in runner
+    assert (
+        "python -u -m scripts.experiment_3_1_raw_vs_snn_representation_value "
+        "run-one --array-task-id \"$TASK_ID\" --device cpu"
+    ) in runner
+    assert (
+        "python -u -m scripts.experiment_3_1_raw_vs_snn_representation_value finalize"
+        in finalizer
+    )
+    assert "--dependency=afterok:${EXP31_ARRAY}" in submitter
+
+
 def test_exp31_fixed_shuffle_pairs_raw_and_snn_and_preserves_invalid_tail() -> None:
     raw = np.arange(2 * 4 * 2, dtype=np.float64).reshape(2, 4, 2)
     snn = (100 + np.arange(2 * 4 * 3, dtype=np.float64)).reshape(2, 4, 3)
@@ -48,7 +91,10 @@ def test_exp31_fixed_shuffle_pairs_raw_and_snn_and_preserves_invalid_tail() -> N
     assert np.array_equal(snn_shuffled[0, 2:], snn[0, 2:])
 
     # The paired permutation is recoverable from raw and must match the SNN order.
-    raw_order0 = [int(np.where((raw[0, :2] == row).all(axis=1))[0][0]) for row in raw_shuffled[0, :2]]
+    raw_order0 = [
+        int(np.where((raw[0, :2] == row).all(axis=1))[0][0])
+        for row in raw_shuffled[0, :2]
+    ]
     snn_expected0 = snn[0, raw_order0]
     assert np.array_equal(snn_shuffled[0, :2], snn_expected0)
 
@@ -90,7 +136,9 @@ def test_exp31_compose_features_is_matched_and_fusion_is_concatenation() -> None
 
     raw = exp31._compose_features(partition, "raw", "relative10_ordered")
     snn = exp31._compose_features(partition, "snn_l2", "relative10_ordered")
-    fusion = exp31._compose_features(partition, "raw_plus_snn", "relative10_ordered")
+    fusion = exp31._compose_features(
+        partition, "raw_plus_snn", "relative10_ordered"
+    )
 
     assert raw.shape == (2, 2)
     assert snn.shape == (2, 1)
