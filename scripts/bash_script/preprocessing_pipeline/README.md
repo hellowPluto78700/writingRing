@@ -15,6 +15,18 @@ Use `build_angular_accel_66ch_variant.bash` when the source pipeline is already 
 
 The builder does not rerun gravity removal, resampling, alignment, or boundary detection. For each complete recording it derives angular acceleration from the existing gyroscope signal, runs the same Custom Wavelet encoder, and then reuses the already validated segmentation and padding geometry.
 
+### Unity / Conda environment
+
+The launcher follows the same environment style as the existing Exp 3.4 CPU-array Bash scripts. You do **not** need to activate Conda manually before running it. Every invocation, including the submit shell, Slurm array workers, and the finalizer, performs:
+
+```bash
+module load conda/latest
+eval "$(conda shell.bash hook)"
+conda activate writingring-gpu
+```
+
+It then validates that the activated environment can start the AngularAccel66 Python helper before discovering users or submitting work. If `writingring-gpu` is missing or its dependencies are incomplete, the script fails immediately instead of falling back to a system Python.
+
 ### Signal transform
 
 For the complete recording, before segmentation:
@@ -132,6 +144,8 @@ SLURM_MEM=4G \
   bash scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash \
   <source-root> <output-root>
 ```
+
+No prior `conda activate` is required.
 
 The submit mode creates:
 
