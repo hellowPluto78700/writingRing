@@ -20,7 +20,7 @@ def save_frame(q_frames, q_insts, save_frame_filename):
     MAX_FRAME_SIZE = 1000
     segment = 0
     frames = []
-    save_frame_filename = f"{save_frame_filename.split(".gz")[0]}"
+    save_frame_filename = save_frame_filename.split(".gz")[0]
     current_dump_process = None
     try:
         while True:
