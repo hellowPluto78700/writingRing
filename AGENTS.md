@@ -43,6 +43,46 @@ For other experiment-specific changes, add or update focused contract tests when
 
 Do not describe a change as tested or passing if the checks were not actually executed. If the current environment cannot execute them, say explicitly that the change was only statically reviewed and leave the GitHub CI result as the remaining verification gate.
 
+## Default multi-CPU experiment execution
+
+Unless the user explicitly requests another execution model or the workload has a concrete reason not to parallelize this way, use task-level multi-CPU execution for experiment sweeps.
+
+The default pattern is:
+
+```text
+independent run dimensions
+(seed / objective / architecture / configuration / ablation)
+        -> one Slurm array task per independent run
+        -> one CPU core per task
+        -> train the run
+        -> select/save its best checkpoint
+        -> immediately evaluate that same checkpoint when evaluation depends only on that run
+        -> write per-run artifacts
+all required tasks complete
+        -> one finalizer/aggregator job
+        -> analysis-only notebook for tables and plots
+```
+
+Required defaults:
+
+* Prefer Slurm arrays for independent experiment runs.
+* Use one CPU core per independent run unless profiling shows the run materially benefits from more cores.
+* Cap array concurrency at 50 tasks by default, e.g. `#SBATCH --array=0-N%50`.
+* Never request more than 50 simultaneously running experiment CPU tasks without explicit user approval.
+* Split sweeps across seeds, objectives, architectures, configurations, or other independent conditions instead of running them sequentially in one process.
+* When a run's evaluation depends only on its own checkpoint, perform `train -> evaluate -> save artifacts` in the same Slurm task rather than creating a barrier followed by a second full evaluation array.
+* Keep training and evaluation as separate Python functions/modules even when the Slurm task executes them consecutively, so evaluation can be rerun without retraining.
+* Reused/frozen baselines that require no training may be evaluated by a small separate job; use one CPU sequentially when the baseline set is small unless there is a measured reason to parallelize it.
+* Use Slurm `afterok` dependencies for finalizers that require multiple job groups to complete.
+* Finalizers should aggregate existing per-run artifacts only; they should not retrain models or silently regenerate missing runs.
+* Experiment notebooks should be analysis-only whenever practical: read finalized CSV/JSON artifacts, aggregate, rank, and plot. Do not make the notebook the primary training or multiprocessing driver.
+* Set CPU thread environment variables such as `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` for one-core-per-task jobs to avoid hidden oversubscription.
+* Size walltime and memory for the complete atomic task, including evaluation after training.
+
+Valid reasons to deviate include a workload that is demonstrably GPU-bound, requires materially more memory per run, has unavoidable shared mutable state, has a true serial dependency between runs, cannot safely write independent artifacts, or has benchmark evidence that another execution model is better. Document the reason for the deviation in the experiment README or runner comments.
+
+For new experiment implementations, treat this multi-CPU pattern as the repository default rather than an experiment-specific optimization.
+
 # Roles
 
 * PRIMARY: intent, routing, planning, orchestration, documentation.
