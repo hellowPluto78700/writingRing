@@ -25,9 +25,11 @@ from scripts.experiment_3_0_1_single_tau_objectives import (  # noqa: E402
     EXPECTED_RUNS,
     EXPERIMENT_ID,
     OBJECTIVES,
+    PROTOCOL_VERSION,
     SEEDS,
     SHIFTS,
     prepare_data,
+    protocol_results_dir,
     run_one,
 )
 
@@ -65,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force-retrain",
         action="store_true",
-        help="Ignore an existing checkpoint for this run.",
+        help="Ignore an existing matching checkpoint for this protocol.",
     )
     return parser.parse_args()
 
@@ -112,7 +114,7 @@ def main() -> None:
     except RuntimeError:
         pass
 
-    results_dir = REPO_ROOT / "notebooks" / "artifacts" / EXPERIMENT_ID
+    results_dir = protocol_results_dir(REPO_ROOT)
     config = Config(
         repo_root=REPO_ROOT,
         results_dir=results_dir,
@@ -125,6 +127,8 @@ def main() -> None:
 
     print("Repository root:", REPO_ROOT)
     print("Experiment:", EXPERIMENT_ID)
+    print("Protocol:", PROTOCOL_VERSION)
+    print("Results dir:", results_dir.relative_to(REPO_ROOT))
     if task_id is not None:
         print(f"Array task: {task_id}/{EXPECTED_RUNS - 1}")
     print(
@@ -138,6 +142,7 @@ def main() -> None:
     )
 
     data = prepare_data(REPO_ROOT)
+    print("Split:", data.split)
     result = run_one(shift, objective, seed, data, config)
 
     print(
