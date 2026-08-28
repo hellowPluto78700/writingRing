@@ -182,7 +182,7 @@ class LIFBaseTorch(TorchModule):
             By default, this is set to ``'taus'``, in which the time constants are direct parameters, which are trainable by default.
 
             if ``'taus'``,  :py:attr:`.tau_mem` and :py:attr:`.tau_syn` are used as model parameters
-            if ``'decays'``,  :py:attr:`.alpha` and :py:attr:`.beta` are used as model parameters (:py:attr:`.alpha` and :py:attr:`.beta` are:  :math:`\exp(-dt / \\tau_{mem}`) and  :math:`\\exp(-dt / \\tau_{syn}`) respectively)
+            if ``'decays'``,  :py:attr:`.alpha` and :py:attr:`.beta` are used as model parameters (:py:attr:`.alpha` and :py:attr:`.beta` are: :math:`\\exp(-dt / \\tau_{mem})` and :math:`\\exp(-dt / \\tau_{syn})` respectively)
             if ``'bitshifts'``, :py:attr:`.dash_mem` and `.dash_syn` are used as model parameters. :py:attr:`.dash_mem` and :py:attr:`.dash_syn` are the bitshift equivalent of decays, such that :math:`.alpha = 1-(1/(2**dash_mem))`
 
             If decay parameters are passed as :py:func:`.Constant` in the instantiation of module they will be set to non-traianble parameters.
