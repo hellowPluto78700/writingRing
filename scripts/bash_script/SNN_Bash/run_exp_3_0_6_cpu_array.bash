@@ -19,4 +19,4 @@ eval "$(conda shell.bash hook)"
 conda activate writingring-gpu
 export CUDA_VISIBLE_DEVICES=""
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONUNBUFFERED=1
-python -u scripts/experiment_3_0_6_causal_temporal_decoding.py run-one --array-task-id "$TASK_ID" --device cpu
+python -u -m scripts.experiment_3_0_6_causal_temporal_decoding run-one --array-task-id "$TASK_ID" --device cpu
