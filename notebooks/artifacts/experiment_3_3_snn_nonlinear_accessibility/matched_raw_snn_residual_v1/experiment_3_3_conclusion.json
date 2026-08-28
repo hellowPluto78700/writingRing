@@ -1,0 +1,32 @@
+{
+  "criterion_1_linear_better": true,
+  "criterion_2_raw_has_nonlinear_gain": true,
+  "criterion_3_snn_gain_smaller": true,
+  "criterion_4_consistent_across_seeds": true,
+  "experiment_id": "experiment_3_3_snn_nonlinear_accessibility",
+  "guardrail": "SNN-L2 has 128 channels versus Raw's 30. A smaller SNN residual gain is conservative evidence for linearization; a larger SNN gain is capacity-confounded and should not by itself be interpreted as more intrinsic nonlinear information.",
+  "hypothesis": "Frozen SNN-L2 has already converted part of the nonlinear absolute-time temporal structure into linearly accessible features.",
+  "linear_reproduction_max_abs_difference": 0.0,
+  "mean_snn_gain_minus_raw_gain": -0.026982739482739476,
+  "mean_snn_minus_raw_linear_test_ba": 0.07746998371998366,
+  "mean_snn_nonlinear_gain": -0.0015498390498390007,
+  "n_snn_seeds": 3,
+  "primary_decoder": "local_transition",
+  "primary_hypothesis_supported": true,
+  "primary_question": "Has the frozen SNN-L2 already converted part of the nonlinear temporal structure in raw events into linearly accessible features?",
+  "primary_representation": "fixed250",
+  "protocol_version": "matched_raw_snn_residual_v1",
+  "raw_nonlinear_gain": 0.025432900432900474,
+  "reference_experiment": "experiment_3_1_raw_vs_snn_representation_value",
+  "secondary_control": "Relative10 is descriptive only and does not determine the primary Fixed250 hypothesis decision.",
+  "snn_lower_gain_seeds": 2,
+  "source_objective": "timestep_ce",
+  "split_seed": 12345,
+  "validation_standard": {
+    "criterion_1": "mean(SNN-L2 Linear BA - Raw Linear BA) > 0 on Fixed250",
+    "criterion_2": "Raw Fixed250 Local+Transition gain over its frozen Linear baseline > 0",
+    "criterion_3": "mean(SNN-L2 nonlinear gain - Raw nonlinear gain) < 0",
+    "criterion_4": "at least 2 of 3 frozen SNN seeds have smaller nonlinear gain than Raw",
+    "decision_rule": "all four criteria must pass"
+  }
+}
