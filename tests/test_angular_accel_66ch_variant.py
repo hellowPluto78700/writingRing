@@ -128,3 +128,13 @@ def test_output_schema_and_channel_counts_are_stable() -> None:
     assert angular66.SOURCE_CHANNELS == 36
     assert angular66.OUTPUT_EVENTS == 60
     assert angular66.OUTPUT_CHANNELS == 66
+
+
+def test_angular66_finalizer_declares_unsigned_event_representation() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_source = (
+        repo_root / "scripts" / "angular_accel66" / "cli.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"event_representation": "unsigned"' in cli_source
+    assert '"event_feature_schema": OUTPUT_EVENT_SCHEMA' in cli_source
