@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import json
 import shutil
@@ -28,6 +29,28 @@ from .common import (
 from .metadata import combined_names, composite_spec, patch_contract, patch_recording_metadata
 
 
+def _integral_token(value: object, *, field: str) -> int:
+    """Parse an integer-valued token without truncating fractional values.
+
+    Upstream CSV manifests can contain integer indices serialized by pandas as
+    strings such as ``"0.0"`` when a column also contains missing values. Those
+    tokens are semantically integral and must remain compatible with the
+    existing preprocessing artifacts. Truly fractional or non-finite values
+    remain invalid.
+    """
+
+    token = str(value).strip()
+    if not token:
+        raise BuildError(f"{field} must be an integer; got an empty value")
+    try:
+        number = Decimal(token)
+    except InvalidOperation as exc:
+        raise BuildError(f"{field} must be an integer; got {value!r}") from exc
+    if not number.is_finite() or number != number.to_integral_value():
+        raise BuildError(f"{field} must be an integer; got {value!r}")
+    return int(number)
+
+
 def build_recordings(
     source_root: Path, output_root: Path, user: str, *, overwrite: bool
 ) -> tuple[dict[int, Path], dict[str, Any], str, list[str], list[str]]:
@@ -46,7 +69,7 @@ def build_recordings(
     reference_names: list[str] | None = None
     reference_units: list[str] | None = None
     for relative, source_dir in found:
-        dataset_id = int(relative.parts[-1])
+        dataset_id = _integral_token(relative.parts[-1], field="recording dataset id")
         source_values, metadata, source_spec, source_hash, source_names, source_units = (
             validate_source_recording(source_dir)
         )
@@ -136,16 +159,22 @@ def build_segmentation(
     manifest_path = source / f"{stem}_segments.csv"
     summary_path = source / f"{stem}_segmentation_summary.json"
     fields, rows = read_csv(manifest_path)
-    selected = sorted(_exported_rows(rows), key=lambda row: int(row["segment_index"]))
+    selected = sorted(
+        _exported_rows(rows),
+        key=lambda row: _integral_token(row["segment_index"], field="segment_index"),
+    )
     pieces: list[np.ndarray] = []
     for expected_index, row in enumerate(selected):
-        if int(row["segment_index"]) != expected_index:
+        segment_index = _integral_token(row["segment_index"], field="segment_index")
+        if segment_index != expected_index:
             raise BuildError(f"non-contiguous segment indices for {user}")
-        dataset_id = int(row["dataset_id"])
+        dataset_id = _integral_token(row["dataset_id"], field="dataset_id")
         if dataset_id not in recordings:
             raise BuildError(f"segmentation references missing dataset {dataset_id}")
-        start = int(row["start_sample_index"])
-        stop = int(row["stop_sample_index_exclusive"])
+        start = _integral_token(row["start_sample_index"], field="start_sample_index")
+        stop = _integral_token(
+            row["stop_sample_index_exclusive"], field="stop_sample_index_exclusive"
+        )
         values = np.load(recordings[dataset_id], allow_pickle=False, mmap_mode="r")
         if not 0 <= start < stop <= len(values):
             raise BuildError("reused segment slice is outside the derived recording")
@@ -189,7 +218,7 @@ def build_segmentation(
                     item[key] = value
             dataset_token = item.get("dataset_id", "").strip()
             if dataset_token:
-                dataset_id = int(float(dataset_token))
+                dataset_id = _integral_token(dataset_token, field="dataset_id")
                 recording_path = recordings.get(dataset_id)
                 if recording_path is None:
                     raise BuildError(
@@ -286,8 +315,10 @@ def build_padding(
     for row in rows:
         if row.get("exported", "").strip().lower() not in {"true", "1"}:
             continue
-        segment_index = int(row["segment_index"])
-        output_index = int(row["output_segment_index"])
+        segment_index = _integral_token(row["segment_index"], field="segment_index")
+        output_index = _integral_token(
+            row["output_segment_index"], field="output_segment_index"
+        )
         length = int(valid_lengths[output_index])
         if length != int(segment_lengths[segment_index]):
             raise BuildError("padding valid length disagrees with reused segment length")
