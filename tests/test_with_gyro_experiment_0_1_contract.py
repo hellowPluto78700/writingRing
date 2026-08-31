@@ -10,22 +10,39 @@ from scripts import with_gyro_experiment_0_1_temporal_representation_probe as ex
 
 
 EXPECTED_CONDA_PREFIX_FRAGMENT = "/work/pi_jgummeso_umass_edu/${USER}/.conda/envs/writingring-gpu"
+EXPECTED_FIXED_DURATIONS = (
+    50.0,
+    150.0,
+    250.0,
+    350.0,
+    450.0,
+    550.0,
+    650.0,
+    750.0,
+    850.0,
+    950.0,
+    1050.0,
+)
 
 
 def test_protocol_dimensions_and_run_mapping_are_stable() -> None:
+    assert exp01.PROTOCOL_VERSION == "linear_angular_accel_60event_v2"
     assert exp01.SPLIT_SEEDS == (11, 23, 37, 53, 71)
-    assert exp01.FIXED_DURATION_MS == (50.0, 150.0)
+    assert exp01.FIXED_DURATION_MS == EXPECTED_FIXED_DURATIONS
     assert exp01.RELATIVE_N_BINS == (1, 2, 4, 6, 8, 10, 12, 16, 20)
     assert exp01.EVENT_CHANNEL_COUNT == 60
     assert exp01.TOTAL_CHANNEL_COUNT == 66
     assert exp01.EXPECTED_SAMPLING_RATE_HZ == 64.0
-    assert len(exp01.run_specs()) == 55
-    assert len({spec.key for spec in exp01.run_specs()}) == 55
+    assert len(exp01.run_specs()) == 100
+    assert len({spec.key for spec in exp01.run_specs()}) == 100
 
 
-def test_integral_fixed_duration_rounding_matches_64_hz_contract() -> None:
-    assert int(np.rint(50.0 * exp01.EXPECTED_SAMPLING_RATE_HZ / 1000.0)) == 3
-    assert int(np.rint(150.0 * exp01.EXPECTED_SAMPLING_RATE_HZ / 1000.0)) == 10
+def test_fixed_duration_rounding_matches_64_hz_contract() -> None:
+    samples = [
+        int(np.rint(duration * exp01.EXPECTED_SAMPLING_RATE_HZ / 1000.0))
+        for duration in EXPECTED_FIXED_DURATIONS
+    ]
+    assert samples == [3, 10, 16, 22, 29, 35, 42, 48, 54, 61, 67]
 
 
 def test_user_split_is_disjoint_and_reproducible() -> None:
@@ -71,7 +88,8 @@ def _read_bash(name: str) -> str:
 
 def test_slurm_array_uses_one_core_and_pinned_work_conda_prefix() -> None:
     script = _read_bash("run_exp_0_1_cpu_array.bash")
-    assert "#SBATCH --array=0-54%50" in script
+    assert "#SBATCH --array=0-99%50" in script
+    assert "TASK_ID >= 100" in script
     assert "#SBATCH --cpus-per-task=1" in script
     assert "OMP_NUM_THREADS=1" in script
     assert "MKL_NUM_THREADS=1" in script
@@ -100,4 +118,5 @@ def test_submit_pipeline_preflights_prefix_and_uses_afterok_finalizer() -> None:
     assert "with_gyro_experiment_0_1_temporal_representation_probe describe" in script
     assert '--export="ALL,WRITINGRING_CONDA_PREFIX=${WRITINGRING_CONDA_PREFIX}"' in script
     assert '--dependency="afterok:${ARRAY_JOB}"' in script
+    assert "100 = 5 split seeds x (11 fixed-duration + 9 relative-progress conditions)" in script
     assert "finalize_exp_0_1_cpu.bash" in script
