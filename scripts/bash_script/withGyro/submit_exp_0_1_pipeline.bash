@@ -42,7 +42,8 @@ printf 'WithGyro Experiment 0.1 submitted\n'
 printf '  conda:     %s\n' "$WRITINGRING_CONDA_PREFIX"
 printf '  array:     %s\n' "$ARRAY_JOB"
 printf '  finalizer: %s\n' "$FINAL_JOB"
-printf '  tasks:     55 = 5 split seeds x (2 fixed-duration + 9 relative-progress conditions)\n'
+printf '  tasks:     100 = 5 split seeds x (11 fixed-duration + 9 relative-progress conditions)\n'
+printf '  fixed ms:  50,150,250,350,450,550,650,750,850,950,1050\n'
 printf '  max CPU concurrency: 50\n'
 printf '\nMonitor with:\n'
 printf '  squeue -u %s\n' "$USER"
