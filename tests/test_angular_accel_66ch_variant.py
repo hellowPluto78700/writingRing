@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from scripts import build_angular_accel_66ch_variant as angular66
+from scripts.angular_accel66.builders import _integral_token
+from scripts.angular_accel66.common import BuildError
 
 
 def test_angular_acceleration_central_difference_preserves_linear_derivative() -> None:
@@ -51,6 +54,19 @@ def test_angular_encoder_uses_planned_64_hz_wavelet_contract() -> None:
     assert encoder.max_filter_time_samples == 19
     assert encoder.settings.post_encode_transform == "PolaritySplitAbs"
     assert len(encoder.output_channel_names) == 30
+
+
+def test_integral_manifest_tokens_accept_pandas_style_float_strings() -> None:
+    assert _integral_token("0", field="segment_index") == 0
+    assert _integral_token("0.0", field="segment_index") == 0
+    assert _integral_token("17.000", field="dataset_id") == 17
+    assert _integral_token(23, field="output_segment_index") == 23
+
+
+@pytest.mark.parametrize("token", ["1.5", "nan", "inf", "", "abc"])
+def test_integral_manifest_tokens_reject_non_integer_values(token: str) -> None:
+    with pytest.raises(BuildError, match="must be an integer"):
+        _integral_token(token, field="segment_index")
 
 
 def _bash_entrypoint() -> str:
