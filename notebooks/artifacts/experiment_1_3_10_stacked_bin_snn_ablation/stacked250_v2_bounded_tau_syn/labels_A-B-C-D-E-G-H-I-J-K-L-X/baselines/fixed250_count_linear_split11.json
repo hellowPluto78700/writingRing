@@ -1,0 +1,88 @@
+{
+  "baseline_id": "fixed250_count_linear",
+  "classifier": {
+    "max_iter": 5000,
+    "random_state": 489343193,
+    "solver": "lbfgs",
+    "type": "sklearn.linear_model.LogisticRegression"
+  },
+  "experiment_id": "experiment_1_3_10_stacked_bin_snn_ablation",
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "metrics": {
+    "test": {
+      "accuracy": 0.6875,
+      "balanced_accuracy": 0.683183551198257,
+      "macro_f1": 0.6820908007191738
+    },
+    "train": {
+      "accuracy": 1.0,
+      "balanced_accuracy": 1.0,
+      "macro_f1": 1.0
+    },
+    "val": {
+      "accuracy": 0.4583333333333333,
+      "balanced_accuracy": 0.4517094017094017,
+      "macro_f1": 0.4464819530286534
+    }
+  },
+  "num_classes": 12,
+  "preprocessing": "StandardScaler fit on training features only",
+  "protocol_version": "stacked250_v2_bounded_tau_syn",
+  "representation": {
+    "aggregation": "per-channel sum within each fixed 250 ms bin, then flatten bins in absolute order",
+    "bin_ms_actual": 250.0,
+    "bin_ms_requested": 250.0,
+    "bin_steps": 16,
+    "event_channels": 30,
+    "feature_dim": 480,
+    "n_bins": 16,
+    "name": "fixed250_count_linear"
+  },
+  "sample_hash": "fd3786ff7fca359f06912c9a8ffb3cb84f82534fdade3b9e9e33e91c66dd8338",
+  "sampling_rate_hz": 64.0,
+  "split_seed": 11,
+  "split_sizes": {
+    "test": 208,
+    "train": 477,
+    "val": 168
+  },
+  "test_users": [
+    "user_1",
+    "user_14",
+    "user_2",
+    "user_3"
+  ],
+  "train_users": [
+    "user_0",
+    "user_10",
+    "user_13",
+    "user_15",
+    "user_18",
+    "user_19",
+    "user_20",
+    "user_4",
+    "user_5",
+    "user_6",
+    "user_7",
+    "user_8"
+  ],
+  "val_users": [
+    "user_11",
+    "user_12",
+    "user_16",
+    "user_9"
+  ]
+}
