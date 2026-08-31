@@ -210,6 +210,17 @@ Repository defaults:
 - Notebooks should be analysis-only whenever practical: read finalized
   CSV/JSON artifacts, aggregate, rank, and plot. Do not make notebooks the
   primary training or multiprocessing driver.
+- Every Slurm compute node/job must initialize Conda locally before running
+  experiment code. Batch scripts should run `module load conda/latest`, then
+  `eval "$(conda shell.bash hook)"`, then activate `writingring-gpu`; fall back
+  to `writingring-viz` only if `writingring-gpu` is unavailable.
+- Do not rely on Conda activation inherited from the login/submit shell, and do
+  not pass the submit shell's absolute Python executable path to compute nodes
+  as the environment contract.
+- Do not place comma-separated values such as label lists directly inside
+  `sbatch --export=...`, because Slurm uses commas as variable separators.
+  Export the complete value in the submit shell first, then submit with
+  `--export=ALL` so the value is inherited intact.
 - For one-core tasks, set `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`,
   `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` to avoid hidden CPU
   oversubscription.
