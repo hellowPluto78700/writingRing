@@ -2,7 +2,7 @@
 #SBATCH --job-name=exp1_3_10
 #SBATCH --output=logs/exp1_3_10_%A_%a.out
 #SBATCH --error=logs/exp1_3_10_%A_%a.err
-#SBATCH --array=0-35%36
+#SBATCH --array=0-59%50
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=6G
 #SBATCH --time=03:00:00
@@ -34,11 +34,11 @@ fi
 TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
 LABELS="${LABELS:-A,B,C,D,E,X,G,H,I,J,K,L}"
 
-echo "Experiment 1.3.10 task ${TASK_ID}/35 | CPUs=${THREADS} | labels=${LABELS}"
+echo "Experiment 1.3.10 task ${TASK_ID}/59 | CPUs=${THREADS} | labels=${LABELS}"
 echo "Conda env: ${CONDA_DEFAULT_ENV:-unknown}"
 which python
 
-nice -n 10 python scripts/experiment_1_3_10_stacked_bin_snn_ablation.py \
+nice -n 10 python scripts/experiment_1_3_10_runner.py \
     --run-index "$TASK_ID" \
     --labels "$LABELS" \
     --device cpu \
