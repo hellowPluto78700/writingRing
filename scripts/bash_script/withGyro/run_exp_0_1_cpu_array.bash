@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=wr-gyro01
 #SBATCH --partition=cpu
-#SBATCH --array=0-54%50
+#SBATCH --array=0-99%50
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=01:00:00
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
-if (( TASK_ID < 0 || TASK_ID >= 55 )); then
+if (( TASK_ID < 0 || TASK_ID >= 100 )); then
     echo "Invalid array task id: $TASK_ID" >&2
     exit 2
 fi
