@@ -76,6 +76,9 @@ Required defaults:
 * Use Slurm `afterok` dependencies for finalizers that require multiple job groups to complete.
 * Finalizers should aggregate existing per-run artifacts only; they should not retrain models or silently regenerate missing runs.
 * Experiment notebooks should be analysis-only whenever practical: read finalized CSV/JSON artifacts, aggregate, rank, and plot. Do not make the notebook the primary training or multiprocessing driver.
+* Every Slurm compute node/job must initialize Conda locally before running experiment code. Batch scripts should run `module load conda/latest`, then `eval "$(conda shell.bash hook)"`, then activate `writingring-gpu`; fall back to `writingring-viz` only if `writingring-gpu` is unavailable.
+* Do not rely on Conda activation inherited from the login/submit shell, and do not pass the submit shell's absolute Python executable path to compute nodes as the environment contract.
+* Do not place comma-separated values such as label lists directly inside `sbatch --export=...`, because Slurm uses commas as variable separators. Export the complete value in the submit shell first, then submit with `--export=ALL` so the value is inherited intact.
 * Set CPU thread environment variables such as `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` for one-core-per-task jobs to avoid hidden oversubscription.
 * Size walltime and memory for the complete atomic task, including evaluation after training.
 
