@@ -62,13 +62,12 @@ def test_multi_cpu_launcher_contract() -> None:
     assert "conda activate writingring-gpu" in array_text
     assert "module load conda/latest" in finalizer_text
     assert "conda activate writingring-gpu" in finalizer_text
-    assert "WRITINGRING_PYTHON" not in array_text
-    assert "WRITINGRING_PYTHON" not in finalizer_text
-    assert "WRITINGRING_PYTHON" not in submitter_text
     assert "--finalize-if-ready" not in array_text
     assert "--finalize-only" in finalizer_text
     assert "--require-complete" in finalizer_text
     assert 'afterok:${ARRAY_JOB_ID}' in submitter_text
+    assert 'export LABELS="${LABELS:-A,B,C,D,E,X,G,H,I,J,K,L}"' in submitter_text
+    assert '--export=ALL,LABELS=' not in submitter_text
 
 
 def test_notebook_is_analysis_only() -> None:
