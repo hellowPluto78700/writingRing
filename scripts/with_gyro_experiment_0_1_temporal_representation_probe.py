@@ -16,14 +16,26 @@ from sklearn.neighbors import KNeighborsClassifier
 
 
 EXPERIMENT_ID = "withGyro_experiment_0_1_temporal_representation_probe"
-PROTOCOL_VERSION = "linear_angular_accel_60event_v1"
+PROTOCOL_VERSION = "linear_angular_accel_60event_v2"
 
 SPLIT_SEEDS = (11, 23, 37, 53, 71)
 N_TRAIN_USERS = 12
 N_VAL_USERS = 4
 N_TEST_USERS = 4
 
-FIXED_DURATION_MS = (50.0, 150.0)
+FIXED_DURATION_MS = (
+    50.0,
+    150.0,
+    250.0,
+    350.0,
+    450.0,
+    550.0,
+    650.0,
+    750.0,
+    850.0,
+    950.0,
+    1050.0,
+)
 RELATIVE_N_BINS = (1, 2, 4, 6, 8, 10, 12, 16, 20)
 CLASSIFIERS = ("linear", "5nn")
 
@@ -691,7 +703,7 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
                 "raw_imu_excluded": True,
                 "split_seeds": list(SPLIT_SEEDS),
                 "fixed_duration_ms": list(FIXED_DURATION_MS),
-                "fixed_duration_rule": "start at 50 ms, increment by 100 ms, include values <= 200 ms",
+                "fixed_duration_rule": "start at 50 ms, increment by 100 ms, include values <= 1050 ms",
                 "relative_n_bins": list(RELATIVE_N_BINS),
                 "classifiers": list(CLASSIFIERS),
                 "standardization": "per-feature z-score fit on training users only",
