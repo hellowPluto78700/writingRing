@@ -1,0 +1,52 @@
+{
+  "architectures": {
+    "1h1024": [
+      1024
+    ],
+    "1h128": [
+      128
+    ],
+    "1h256": [
+      256
+    ],
+    "1h512": [
+      512
+    ],
+    "2h128": [
+      128,
+      128
+    ]
+  },
+  "expected_runs": 60,
+  "experiment_id": "experiment_1_3_10_stacked_bin_snn_ablation",
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce"
+  ],
+  "protocol_version": "stacked250_v1",
+  "readout": "whole_output_spike_count",
+  "representation": "250ms bins stacked across absolute-bin identity; 16 within-bin timesteps x 480 channels at 64 Hz",
+  "split_seeds": [
+    11,
+    23,
+    101
+  ],
+  "train_regimes": [
+    "weight_only",
+    "trainable_dynamics"
+  ]
+}
