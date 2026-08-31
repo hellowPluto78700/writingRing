@@ -33,6 +33,7 @@ def _literal_assignments(path: Path) -> dict[str, object]:
 
 def test_factorial_protocol_constants() -> None:
     values = _literal_assignments(DRIVER)
+    runner_values = _literal_assignments(RUNNER)
     assert values["SPLIT_SEEDS"] == (11, 23, 101)
     assert values["OBJECTIVES"] == ("whole_count_ce", "timestep_ce")
     assert values["TRAIN_REGIMES"] == ("weight_only", "trainable_dynamics")
@@ -40,6 +41,9 @@ def test_factorial_protocol_constants() -> None:
     assert values["TAU_MEM_MS"] == 22.0
     assert values["THRESHOLD"] == 0.5
     assert values["BIN_MS"] == 250.0
+    assert runner_values["PROTOCOL_VERSION"] == "stacked250_v2_bounded_tau_syn"
+    assert runner_values["TAU_SYN_MIN_MS"] == 20.0
+    assert runner_values["TAU_SYN_MAX_MS"] == 300.0
 
 
 def test_architecture_contract_and_readout() -> None:
@@ -60,8 +64,24 @@ def test_architecture_contract_and_readout() -> None:
     assert 'model_seed = derive_seed(spec.split_seed, "model_init", spec.architecture)' in source
 
 
+def test_bounded_tau_syn_parameterization() -> None:
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert "class BoundedTauSynaptic(snn.Synaptic)" in runner
+    assert "raw_tau_syn" in runner
+    assert "torch.sigmoid" in runner
+    assert "TAU_SYN_MIN_MS + (TAU_SYN_MAX_MS - TAU_SYN_MIN_MS)" in runner
+    assert "torch.exp(-self.dt_ms / self.tau_syn_ms())" in runner
+    assert "learn_alpha=False" in runner
+    assert "learn_tau_syn=True" in runner
+    assert "experiment.StackedBinSNN = BoundedStackedBinSNN" in runner
+    assert "experiment.dynamics_summary = dynamics_summary" in runner
+    assert '"tau_syn_bounds_ms"' in runner
+
+
 def test_fixed250_linear_baseline_matches_exp_1_3_4_semantics() -> None:
     source = BASELINE.read_text(encoding="utf-8")
+    assert "import experiment_1_3_10_runner as protocol" in source
+    assert "PROTOCOL_VERSION = protocol.PROTOCOL_VERSION" in source
     assert 'BASELINE_ID = "fixed250_count_linear"' in source
     assert ".reshape(n, n_bins, bin_steps, channels).sum(axis=2)" in source
     assert "counts.reshape(n, n_bins * channels)" in source
@@ -113,6 +133,7 @@ def test_notebook_is_analysis_only_and_compares_baseline() -> None:
     assert "torch.optim" not in code
     assert "loss.backward" not in code
     assert "train_one_run" not in code
+    assert "stacked250_v2_bounded_tau_syn" in code
     assert "run_*.json" in code
     assert "fixed250_count_linear_split*.json" in code
     assert "baseline_test_ba" in code
@@ -122,6 +143,6 @@ def test_notebook_is_analysis_only_and_compares_baseline() -> None:
     assert "EXPECTED_RUNS = 60" in code
     assert "train_objective_loss" in code
     assert "train_loss_by_epoch_summary.csv" in code
-    assert "fill_between" in code
+    assert "tau_syn_bounds_ms" in code
     assert "Fixed250 + Linear" in text
     assert "plt.subplots" in code
