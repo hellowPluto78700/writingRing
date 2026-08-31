@@ -89,6 +89,19 @@ def test_bash_entrypoint_auto_activates_writingring_gpu_like_exp34() -> None:
     assert "PYTHON_BIN=" not in script
 
 
+def test_bash_entrypoint_propagates_canonical_repo_root_to_slurm_jobs() -> None:
+    script = _bash_entrypoint()
+
+    assert 'EXPLICIT_REPO_ROOT="${WRITINGRING_REPO_ROOT:-}"' in script
+    assert 'export WRITINGRING_REPO_ROOT="$REPO_ROOT"' in script
+    assert "resolve_repo_root()" in script
+    assert 'WRITINGRING_REPO_ROOT=${REPO_ROOT}' in script
+    assert '--chdir="$REPO_ROOT"' in script
+    assert 'SCRIPT_PATH="${REPO_ROOT}/scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash"' in script
+    assert 'PYTHON_HELPER="${REPO_ROOT}/scripts/build_angular_accel_66ch_variant.py"' in script
+    assert 'REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"' not in script
+
+
 def test_output_schema_and_channel_counts_are_stable() -> None:
     assert angular66.OUTPUT_SCHEMA == (
         "linear_accel_angular_accel_polarity_split_wavelet_events_plus_imu_v1"
