@@ -33,7 +33,7 @@ LABELS="${LABELS:-A,B,C,D,E,X,G,H,I,J,K,L}"
 echo "Conda env: ${CONDA_DEFAULT_ENV:-unknown}"
 which python
 
-python scripts/experiment_1_3_10_stacked_bin_snn_ablation.py \
+python scripts/experiment_1_3_10_runner.py \
     --labels "$LABELS" \
     --device cpu \
     --threads 1 \
