@@ -85,6 +85,39 @@ def _directory_digest(root: Path) -> tuple[str, int]:
     return digest.hexdigest(), count
 
 
+def _backfill_package_sampling_rate(
+    output_padding: Path, users: tuple[str, ...] | list[str], action: str
+) -> None:
+    """Ensure finalized per-user padding summaries expose the 64 Hz contract.
+
+    Historical Angular66 package summaries inherited the source padding summary,
+    which did not always carry ``sampling_rate_hz`` at package scope. The actual
+    data are nevertheless produced from the fixed 64 Hz pipeline. Finalization is
+    the compatibility boundary where the explicit rate is added for downstream
+    consumers. Existing non-64 values are rejected rather than overwritten.
+    """
+
+    for user in users:
+        path = (
+            output_padding
+            / user
+            / f"action_{action}"
+            / f"{user}_action_{action}_padding_summary.json"
+        )
+        if not path.is_file():
+            raise BuildError(f"missing completed padding summary: {path}")
+        payload = load_json(path)
+        existing = payload.get("sampling_rate_hz")
+        if existing is not None and not math.isclose(
+            float(existing), RATE_HZ, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise BuildError(
+                f"padding summary has unexpected sampling_rate_hz={existing!r}: {path}"
+            )
+        payload["sampling_rate_hz"] = RATE_HZ
+        write_json(path, payload)
+
+
 def finalize(source_root: Path, output_root: Path, *, overwrite: bool) -> dict[str, Any]:
     users, action = list_users(source_root), infer_action(source_root)
     reports: list[dict[str, Any]] = []
@@ -109,6 +142,8 @@ def finalize(source_root: Path, output_root: Path, *, overwrite: bool) -> dict[s
 
     source_padding = source_root / "segmentation_padded"
     output_padding = output_root / "segmentation_padded"
+    _backfill_package_sampling_rate(output_padding, users, action)
+
     root_summary = load_json(source_padding / "padding_dataset_summary.json")
     if root_summary.get("feature_schema") != POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA:
         raise BuildError("source root padding summary is not 36-channel polarity split")
@@ -117,6 +152,7 @@ def finalize(source_root: Path, output_root: Path, *, overwrite: bool) -> dict[s
         source_schema=POLARITY_SPLIT_WAVELET_SPIKE_IMU_FEATURE_SCHEMA,
     )
     root_summary.update({
+        "sampling_rate_hz": RATE_HZ,
         "source_combination_root": str(source_root.resolve()),
         "output_root": str(output_root.resolve()),
         "processed_user_action_count": len(users), "segmentation_geometry_reused": True,
