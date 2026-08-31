@@ -9,6 +9,9 @@ import pytest
 from scripts import with_gyro_experiment_0_1_temporal_representation_probe as exp01
 
 
+EXPECTED_CONDA_PREFIX_FRAGMENT = "/work/pi_jgummeso_umass_edu/${USER}/.conda/envs/writingring-gpu"
+
+
 def test_protocol_dimensions_and_run_mapping_are_stable() -> None:
     assert exp01.SPLIT_SEEDS == (11, 23, 37, 53, 71)
     assert exp01.FIXED_DURATION_MS == (50.0, 150.0)
@@ -59,32 +62,42 @@ def test_contract_rejects_non_angular66_metadata() -> None:
         exp01._validate_contract(payload, context="fixture")
 
 
-def test_slurm_array_uses_one_core_and_caps_concurrency_at_50() -> None:
+def _read_bash(name: str) -> str:
     repo_root = Path(__file__).resolve().parents[1]
-    script = (
-        repo_root
-        / "scripts"
-        / "bash_script"
-        / "withGyro"
-        / "run_exp_0_1_cpu_array.bash"
+    return (
+        repo_root / "scripts" / "bash_script" / "withGyro" / name
     ).read_text(encoding="utf-8")
+
+
+def test_slurm_array_uses_one_core_and_pinned_work_conda_prefix() -> None:
+    script = _read_bash("run_exp_0_1_cpu_array.bash")
     assert "#SBATCH --array=0-54%50" in script
     assert "#SBATCH --cpus-per-task=1" in script
     assert "OMP_NUM_THREADS=1" in script
     assert "MKL_NUM_THREADS=1" in script
     assert "OPENBLAS_NUM_THREADS=1" in script
     assert "NUMEXPR_NUM_THREADS=1" in script
-    assert "conda activate writingring-gpu" in script
+    assert EXPECTED_CONDA_PREFIX_FRAGMENT in script
+    assert 'conda activate "$WRITINGRING_CONDA_PREFIX"' in script
+    assert "conda activate writingring-gpu" not in script
+    assert 'python -c "import numpy, pandas, sklearn"' in script
 
 
-def test_submit_pipeline_uses_afterok_finalizer() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    script = (
-        repo_root
-        / "scripts"
-        / "bash_script"
-        / "withGyro"
-        / "submit_exp_0_1_pipeline.bash"
-    ).read_text(encoding="utf-8")
+def test_finalizer_uses_same_pinned_work_conda_prefix() -> None:
+    script = _read_bash("finalize_exp_0_1_cpu.bash")
+    assert EXPECTED_CONDA_PREFIX_FRAGMENT in script
+    assert 'conda activate "$WRITINGRING_CONDA_PREFIX"' in script
+    assert "conda activate writingring-gpu" not in script
+    assert 'python -c "import numpy, pandas, sklearn"' in script
+
+
+def test_submit_pipeline_preflights_prefix_and_uses_afterok_finalizer() -> None:
+    script = _read_bash("submit_exp_0_1_pipeline.bash")
+    assert EXPECTED_CONDA_PREFIX_FRAGMENT in script
+    assert 'conda activate "$WRITINGRING_CONDA_PREFIX"' in script
+    assert "conda activate writingring-gpu" not in script
+    assert 'python -c "import numpy, pandas, sklearn"' in script
+    assert "with_gyro_experiment_0_1_temporal_representation_probe describe" in script
+    assert '--export="ALL,WRITINGRING_CONDA_PREFIX=${WRITINGRING_CONDA_PREFIX}"' in script
     assert '--dependency="afterok:${ARRAY_JOB}"' in script
     assert "finalize_exp_0_1_cpu.bash" in script
