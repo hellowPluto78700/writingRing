@@ -19,9 +19,15 @@ export MPLBACKEND=Agg
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p logs
 
-PYTHON_BIN="${WRITINGRING_PYTHON:-}"
-if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
-    echo "WRITINGRING_PYTHON is missing or not executable. Submit with submit_exp_1_3_10_cpu.bash from an activated writingring environment." >&2
+module load conda/latest
+
+eval "$(conda shell.bash hook)"
+if conda env list | awk '{print $1}' | grep -qx writingring-gpu; then
+    conda activate writingring-gpu
+elif conda env list | awk '{print $1}' | grep -qx writingring-viz; then
+    conda activate writingring-viz
+else
+    echo "Neither writingring-gpu nor writingring-viz Conda environment is available on this compute node." >&2
     exit 2
 fi
 
@@ -29,9 +35,10 @@ TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
 LABELS="${LABELS:-A,B,C,D,E,X,G,H,I,J,K,L}"
 
 echo "Experiment 1.3.10 task ${TASK_ID}/35 | CPUs=${THREADS} | labels=${LABELS}"
-echo "Python: ${PYTHON_BIN}"
+echo "Conda env: ${CONDA_DEFAULT_ENV:-unknown}"
+which python
 
-nice -n 10 "$PYTHON_BIN" scripts/experiment_1_3_10_stacked_bin_snn_ablation.py \
+nice -n 10 python scripts/experiment_1_3_10_stacked_bin_snn_ablation.py \
     --run-index "$TASK_ID" \
     --labels "$LABELS" \
     --device cpu \
