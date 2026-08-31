@@ -58,6 +58,13 @@ def test_multi_cpu_launcher_contract() -> None:
     assert "#SBATCH --array=0-35%36" in array_text
     assert "#SBATCH --cpus-per-task=1" in array_text
     assert 'export OMP_NUM_THREADS="$THREADS"' in array_text
+    assert "module load conda/latest" in array_text
+    assert "conda activate writingring-gpu" in array_text
+    assert "module load conda/latest" in finalizer_text
+    assert "conda activate writingring-gpu" in finalizer_text
+    assert "WRITINGRING_PYTHON" not in array_text
+    assert "WRITINGRING_PYTHON" not in finalizer_text
+    assert "WRITINGRING_PYTHON" not in submitter_text
     assert "--finalize-if-ready" not in array_text
     assert "--finalize-only" in finalizer_text
     assert "--require-complete" in finalizer_text
