@@ -15,6 +15,31 @@ The experiment compares channel-wise event-count temporal representations:
 
 It uses five user-disjoint split seeds `(11, 23, 37, 53, 71)`, train-only feature standardization, Logistic Regression and 5-NN, and reports Accuracy, Balanced Accuracy, and Macro-F1 on validation and test users.
 
+### Unity Conda environment
+
+The launchers follow the repository Unity environment policy and pin the only supported environment to:
+
+```text
+/work/pi_jgummeso_umass_edu/$USER/.conda/envs/writingring-gpu
+```
+
+`submit_exp_0_1_pipeline.bash`, every Slurm array worker, and the finalizer independently run:
+
+```bash
+module load conda/latest
+eval "$(conda shell.bash hook)"
+conda activate "$WRITINGRING_CONDA_PREFIX"
+```
+
+where `WRITINGRING_CONDA_PREFIX` defaults to the path above. They reject a missing or mismatched prefix and verify that `numpy`, `pandas`, and `sklearn` import before experiment execution. The submit script also runs the experiment `describe` command as a preflight. Therefore an already activated Conda environment in the login shell is not required.
+
+An explicit override remains possible for a compatible relocated environment:
+
+```bash
+WRITINGRING_CONDA_PREFIX=/absolute/path/to/writingring-gpu \
+  bash scripts/bash_script/withGyro/submit_exp_0_1_pipeline.bash
+```
+
 ### Multi-CPU execution
 
 The sweep has 55 independent tasks:
@@ -30,6 +55,8 @@ From the repository root on Unity:
 ```bash
 bash scripts/bash_script/withGyro/submit_exp_0_1_pipeline.bash
 ```
+
+The command performs the Conda/dependency preflight before submitting any Slurm jobs. If that preflight succeeds, it prints the exact Conda prefix and Python executable used.
 
 Monitor with:
 
