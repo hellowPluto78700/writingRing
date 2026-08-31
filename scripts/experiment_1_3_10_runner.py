@@ -109,7 +109,7 @@ class BoundedTauSynaptic(snn.Synaptic):
     def _base_state_reset_zero(self, input_: torch.Tensor):
         syn = self.effective_alpha() * self.syn + input_
         mem = self.beta.clamp(0, 1) * self.mem + syn
-        return torch.zeros_like(syn), mem
+        return syn, mem
 
 
 class BoundedStackedBinSNN(experiment.StackedBinSNN):
