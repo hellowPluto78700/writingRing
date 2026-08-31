@@ -20,7 +20,7 @@ set -Eeuo pipefail
 #   MODE=finalize internal/final aggregation
 #
 # Unity environment policy matches the SNN Bash launchers:
-#   resolve the repository from SLURM_SUBMIT_DIR when running under Slurm
+#   resolve and propagate the canonical repository root across Slurm jobs
 #   module load conda/latest
 #   eval "$(conda shell.bash hook)"
 #   conda activate writingring-gpu
@@ -32,12 +32,38 @@ set -Eeuo pipefail
 # Default OUTPUT_ROOT is a sibling named <SOURCE_COMBINATION_ROOT>_angular_accel66.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
-if REPO_CANDIDATE="$(git -C "$SUBMIT_DIR" rev-parse --show-toplevel 2>/dev/null)"; then
-    REPO_ROOT="$REPO_CANDIDATE"
-else
-    REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
+SUBMIT_DIR="${SLURM_SUBMIT_DIR:-}"
+EXPLICIT_REPO_ROOT="${WRITINGRING_REPO_ROOT:-}"
+
+resolve_repo_root() {
+    local candidate=""
+    local root=""
+    local -a candidates=()
+
+    [[ -n "$EXPLICIT_REPO_ROOT" ]] && candidates+=("$EXPLICIT_REPO_ROOT")
+    [[ -n "$SUBMIT_DIR" ]] && candidates+=("$SUBMIT_DIR")
+    candidates+=("$PWD" "$SCRIPT_DIR")
+
+    for candidate in "${candidates[@]}"; do
+        [[ -n "$candidate" ]] || continue
+        if root="$(git -C "$candidate" rev-parse --show-toplevel 2>/dev/null)"; then
+            if [[ -f "$root/scripts/build_angular_accel_66ch_variant.py" ]] && \
+               [[ -f "$root/scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash" ]]; then
+                printf '%s\n' "$root"
+                return 0
+            fi
+        fi
+    done
+
+    return 1
+}
+
+if ! REPO_ROOT="$(resolve_repo_root)"; then
+    printf 'error: could not locate the writingRing repository; set WRITINGRING_REPO_ROOT explicitly\n' >&2
+    exit 2
 fi
+export WRITINGRING_REPO_ROOT="$REPO_ROOT"
+
 SCRIPT_PATH="${REPO_ROOT}/scripts/bash_script/preprocessing_pipeline/build_angular_accel_66ch_variant.bash"
 PYTHON_HELPER="${REPO_ROOT}/scripts/build_angular_accel_66ch_variant.py"
 
@@ -86,6 +112,7 @@ Environment:
   SLURM_PARTITION=cpu                  Slurm partition
   SLURM_TIME=02:00:00
   SLURM_MEM=4G
+  WRITINGRING_REPO_ROOT=<path>         optional explicit repository root override
 
 On Unity the launcher owns its Python environment, matching the repository's
 SNN Bash launchers. Every invocation, including Slurm workers and the finalizer,
@@ -93,8 +120,9 @@ loads conda/latest and activates writingring-gpu before running Python. Manual
 `conda activate` is not required.
 
 Slurm copies submitted scripts into its spool directory before executing them.
-Workers therefore recover the real Git repository from SLURM_SUBMIT_DIR instead
-of treating BASH_SOURCE as a repository path.
+The submit process therefore propagates WRITINGRING_REPO_ROOT and sets --chdir
+to the canonical repository. Workers/finalizers validate that root instead of
+assuming BASH_SOURCE still lives inside the repository.
 
 The source root must already contain a completed 64 Hz 36-channel
 PolaritySplitAbs pipeline, including recording-level spikeEncoding,
@@ -268,7 +296,7 @@ case "$MODE" in
         command -v sbatch >/dev/null 2>&1 || fail "sbatch is required for MODE=submit"
         mkdir -p "$OUTPUT_ROOT/logs"
         array_last=$((${#USERS[@]} - 1))
-        export_spec="ALL,MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
+        export_spec="ALL,WRITINGRING_REPO_ROOT=${REPO_ROOT},MODE=worker,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
         worker_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66 \
@@ -277,6 +305,7 @@ case "$MODE" in
                 --cpus-per-task=1 \
                 --mem="$SLURM_MEM" \
                 --time="$SLURM_TIME" \
+                --chdir="$REPO_ROOT" \
                 --output="$OUTPUT_ROOT/logs/slurm-angular66-%A_%a.out" \
                 --error="$OUTPUT_ROOT/logs/slurm-angular66-%A_%a.err" \
                 --export="$export_spec" \
@@ -285,7 +314,7 @@ case "$MODE" in
         worker_job="${worker_job%%;*}"
         [[ "$worker_job" =~ ^[0-9]+$ ]] || fail "could not parse worker Slurm job id"
 
-        finalize_export="ALL,MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
+        finalize_export="ALL,WRITINGRING_REPO_ROOT=${REPO_ROOT},MODE=finalize,OVERWRITE_DEST=${OVERWRITE_DEST},SAMPLING_RATE_HZ=${SAMPLING_RATE_HZ},FREQUENCIES_HZ=${FREQUENCIES_HZ},MAX_FILTER_TIME_S=${MAX_FILTER_TIME_S},SLURM_PARTITION=${SLURM_PARTITION}"
         final_job="$({
             sbatch --parsable \
                 --job-name=wr-angular66-final \
@@ -294,6 +323,7 @@ case "$MODE" in
                 --cpus-per-task=1 \
                 --mem="$SLURM_MEM" \
                 --time="$SLURM_TIME" \
+                --chdir="$REPO_ROOT" \
                 --output="$OUTPUT_ROOT/logs/slurm-angular66-final-%j.out" \
                 --error="$OUTPUT_ROOT/logs/slurm-angular66-final-%j.err" \
                 --export="$finalize_export" \
