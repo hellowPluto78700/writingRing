@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / "scripts" / "experiment_1_3_10_stacked_bin_snn_ablation.py"
+RUNNER = ROOT / "scripts" / "experiment_1_3_10_runner.py"
 BASELINE = ROOT / "scripts" / "experiment_1_3_10_fixed250_linear_baseline.py"
 ARRAY = ROOT / "scripts" / "bash_script" / "SNN_Bash" / "run_exp_1_3_10_cpu_array.bash"
 BASELINE_JOB = ROOT / "scripts" / "bash_script" / "SNN_Bash" / "run_exp_1_3_10_fixed250_linear_baseline.bash"
@@ -43,9 +44,15 @@ def test_factorial_protocol_constants() -> None:
 
 def test_architecture_contract_and_readout() -> None:
     source = DRIVER.read_text(encoding="utf-8")
-    assert '"1h128": (128,)' in source
-    assert '"1h256": (256,)' in source
-    assert '"2h128": (128, 128)' in source
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert '"1h128": (128,)' in runner
+    assert '"1h256": (256,)' in runner
+    assert '"1h512": (512,)' in runner
+    assert '"1h1024": (1024,)' in runner
+    assert '"2h128": (128, 128)' in runner
+    assert "len(experiment.SPLIT_SEEDS)" in runner
+    assert "len(experiment.OBJECTIVES)" in runner
+    assert "len(experiment.TRAIN_REGIMES)" in runner
     assert "return out_spikes.sum(dim=1)" in source
     assert "F.cross_entropy(out_spikes.sum(dim=1), labels)" in source
     assert "out_spikes.reshape(batch * timesteps, classes)" in source
@@ -74,16 +81,18 @@ def test_multi_cpu_launcher_contract() -> None:
     baseline_text = BASELINE_JOB.read_text(encoding="utf-8")
     finalizer_text = FINALIZER.read_text(encoding="utf-8")
     submitter_text = SUBMITTER.read_text(encoding="utf-8")
-    assert "#SBATCH --array=0-35%36" in array_text
+    assert "#SBATCH --array=0-59%50" in array_text
     assert "#SBATCH --cpus-per-task=1" in array_text
     assert 'export OMP_NUM_THREADS="$THREADS"' in array_text
     assert "module load conda/latest" in array_text
     assert "conda activate writingring-gpu" in array_text
+    assert "experiment_1_3_10_runner.py" in array_text
     assert "module load conda/latest" in baseline_text
     assert "conda activate writingring-gpu" in baseline_text
     assert "experiment_1_3_10_fixed250_linear_baseline.py" in baseline_text
     assert "module load conda/latest" in finalizer_text
     assert "conda activate writingring-gpu" in finalizer_text
+    assert "experiment_1_3_10_runner.py" in finalizer_text
     assert "--finalize-if-ready" not in array_text
     assert "--finalize-only" in finalizer_text
     assert "--require-complete" in finalizer_text
@@ -109,5 +118,10 @@ def test_notebook_is_analysis_only_and_compares_baseline() -> None:
     assert "baseline_test_ba" in code
     assert "delta_vs_fixed250_linear" in code
     assert "sample_hash == paired_hash.snn_sample_hash" in code
+    assert "ARCHITECTURES = ('1h128','1h256','1h512','1h1024','2h128')" in code
+    assert "EXPECTED_RUNS = 60" in code
+    assert "train_objective_loss" in code
+    assert "train_loss_by_epoch_summary.csv" in code
+    assert "fill_between" in code
     assert "Fixed250 + Linear" in text
     assert "plt.subplots" in code
