@@ -1,31 +1,34 @@
 # WithGyro experiments
 
-## Experiment 0.1 — 60-event temporal representation probe
+## Experiment 0.1 — paired channel-ablation temporal representation probe
 
-This experiment evaluates the derived Angular66 action-0 dataset using only event channels `0:60`:
+This experiment evaluates the derived Angular66 action-0 dataset with three paired event-channel conditions from the same samples and user splits:
 
-- `0:30`: existing linear-acceleration polarity-split wavelet events;
-- `30:60`: angular-acceleration polarity-split wavelet events;
-- `60:66`: raw acceleration and gyroscope, excluded from the classifier input.
+- `accel30` = channels `0:30`: linear-acceleration polarity-split wavelet events;
+- `angular30` = channels `30:60`: gyro-derived angular-acceleration polarity-split wavelet events;
+- `combined60` = channels `0:60`: concatenated `accel30 + angular30`;
+- channels `60:66`: raw acceleration and raw gyroscope, excluded from all classifier inputs.
 
-The experiment compares channel-wise event-count temporal representations:
+The main gyro-contribution comparison is `combined60 - accel30`. Because all three channel sets use the same split seed, representation condition, samples, labels, and classifiers, gains are computed within each split first and then aggregated across the five splits.
+
+The temporal representation sweep is:
 
 - fixed duration: 50, 150, 250, 350, 450, 550, 650, 750, 850, 950, and 1050 ms requested bins;
 - relative progress: 1, 2, 4, 6, 8, 10, 12, 16, and 20 bins.
 
-At 64 Hz, the fixed-duration requests quantize to 3, 10, 16, 22, 29, 35, 42, 48, 54, 61, and 67 samples per bin, respectively. The experiment records both requested and actual bin durations.
+At 64 Hz, fixed-duration requests quantize to 3, 10, 16, 22, 29, 35, 42, 48, 54, 61, and 67 samples per bin. Requested and actual durations are both saved.
 
-It uses five user-disjoint split seeds `(11, 23, 37, 53, 71)`, train-only feature standardization, Logistic Regression and 5-NN, and reports Accuracy, Balanced Accuracy, and Macro-F1 on validation and test users.
+The experiment uses five user-disjoint split seeds `(11, 23, 37, 53, 71)`, 12/4/4 train/validation/test users, Logistic Regression and 5-NN, and reports Accuracy, Balanced Accuracy, and Macro-F1. Each channel set is standardized independently using only its training-user features.
 
 ### Unity Conda environment
 
-The launchers follow the repository Unity environment policy and pin the only supported environment to:
+The launchers pin the supported environment to:
 
 ```text
 /work/pi_jgummeso_umass_edu/$USER/.conda/envs/writingring-gpu
 ```
 
-`submit_exp_0_1_pipeline.bash`, every Slurm array worker, and the finalizer independently run:
+`submit_exp_0_1_pipeline.bash`, every Slurm worker, and the finalizer independently run:
 
 ```bash
 module load conda/latest
@@ -33,24 +36,26 @@ eval "$(conda shell.bash hook)"
 conda activate "$WRITINGRING_CONDA_PREFIX"
 ```
 
-where `WRITINGRING_CONDA_PREFIX` defaults to the path above. They reject a missing or mismatched prefix and verify that `numpy`, `pandas`, and `sklearn` import before experiment execution. The submit script also runs the experiment `describe` command as a preflight. Therefore an already activated Conda environment in the login shell is not required.
-
-An explicit override remains possible for a compatible relocated environment:
-
-```bash
-WRITINGRING_CONDA_PREFIX=/absolute/path/to/writingring-gpu \
-  bash scripts/bash_script/withGyro/submit_exp_0_1_pipeline.bash
-```
+where `WRITINGRING_CONDA_PREFIX` defaults to the path above. They verify that `numpy`, `pandas`, and `sklearn` import before experiment execution.
 
 ### Multi-CPU execution
 
-The sweep has 100 independent tasks:
+The sweep remains 100 independent Slurm tasks:
 
 ```text
 5 split seeds x (11 fixed-duration + 9 relative-progress conditions) = 100 tasks
 ```
 
-Each Slurm array task uses one CPU core. Array concurrency is capped at 50 with `--array=0-99%50`. Each task builds one representation/split, fits both classifiers on the same standardized training features, evaluates validation/test, and writes one JSON artifact. An `afterok` finalizer aggregates existing run artifacts into CSV/JSON outputs; it does not retrain.
+Each task uses one CPU core and runs all three channel sets and both classifiers internally:
+
+```text
+one task
+├── accel30    -> Linear + 5NN
+├── angular30  -> Linear + 5NN
+└── combined60 -> Linear + 5NN
+```
+
+Thus each task performs six model fits while preserving exact paired comparisons. Array concurrency remains capped at 50 with `--array=0-99%50`. An `afterok` finalizer aggregates existing artifacts only; it does not retrain.
 
 From the repository root on Unity:
 
@@ -58,24 +63,33 @@ From the repository root on Unity:
 bash scripts/bash_script/withGyro/submit_exp_0_1_pipeline.bash
 ```
 
-The command performs the Conda/dependency preflight before submitting any Slurm jobs. If that preflight succeeds, it prints the exact Conda prefix and Python executable used.
-
 Monitor with:
 
 ```bash
 squeue -u "$USER"
 ```
 
-The submit script also prints the array and finalizer job IDs. After completion, inspect:
+Final artifacts are written under:
 
 ```text
-notebooks/artifacts/withGyro/experiment_0_1_temporal_representation_probe/linear_angular_accel_60event_v2/
+notebooks/artifacts/withGyro/experiment_0_1_temporal_representation_probe/linear_angular_accel_channel_ablation_v3/
 ```
 
-Then open and run:
+Key files:
+
+```text
+experiment_0_1_results.csv
+experiment_0_1_summary.csv
+experiment_0_1_paired_gains.csv
+experiment_0_1_paired_gain_summary.csv
+experiment_0_1_split_assignments.csv
+provenance.json
+```
+
+Then open:
 
 ```text
 notebooks/withGyro/experiment_0_1_temporal_representation_probe.ipynb
 ```
 
-The notebook is analysis-only and requires the finalizer outputs.
+The notebook is analysis-only and reads the finalized v3 artifacts.
