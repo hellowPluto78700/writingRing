@@ -1,0 +1,80 @@
+{
+  "channel_set_semantics": {
+    "accel30": "linear-acceleration polarity-split wavelet events",
+    "angular30": "gyro-derived angular-acceleration polarity-split wavelet events",
+    "combined60": "accel30 concatenated with angular30"
+  },
+  "channel_sets": {
+    "accel30": [
+      0,
+      30
+    ],
+    "angular30": [
+      30,
+      60
+    ],
+    "combined60": [
+      0,
+      60
+    ]
+  },
+  "classifiers": [
+    "linear",
+    "5nn"
+  ],
+  "dataset_root": "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64_with_gyro_0e5_1_2_4_8/low-pass/aligned-board-events",
+  "event_channel_count": 60,
+  "event_feature_schema": "linear_accel_angular_accel_polarity_split_abs_events_v1",
+  "expected_result_rows": 1200,
+  "expected_runs": 100,
+  "experiment_id": "withGyro_experiment_0_1_temporal_representation_probe",
+  "feature_schema": "linear_accel_angular_accel_polarity_split_wavelet_events_plus_imu_v1",
+  "fixed_binning": "channel-wise weighted event sums in fixed physical-duration bins over the common 256-sample padded timeline",
+  "fixed_duration_ms": [
+    50.0,
+    150.0,
+    250.0,
+    350.0,
+    450.0,
+    550.0,
+    650.0,
+    750.0,
+    850.0,
+    950.0,
+    1050.0
+  ],
+  "fixed_duration_rule": "start at 50 ms, increment by 100 ms, include values <= 1050 ms",
+  "gain_comparisons": [
+    "combined60-accel30",
+    "combined60-angular30",
+    "angular30-accel30"
+  ],
+  "paired_gain_rule": "compute channel-set metric differences within each split seed first, then aggregate paired deltas across the five splits",
+  "protocol_version": "linear_angular_accel_channel_ablation_v3",
+  "raw_imu_excluded": true,
+  "relative_binning": "channel-wise weighted event sums after np.array_split of each gesture valid prefix",
+  "relative_n_bins": [
+    1,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    16,
+    20
+  ],
+  "sample_count": 451,
+  "sampling_rate_hz": 64.0,
+  "slurm_unit": "one split-seed x representation-condition per CPU task; all three channel sets and both classifiers run inside the same task",
+  "split_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "standardization": "per-feature z-score fit independently on training users for each channel set",
+  "total_channel_count": 66,
+  "user_count": 20
+}
