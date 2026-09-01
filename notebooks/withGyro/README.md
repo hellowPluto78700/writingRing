@@ -93,3 +93,85 @@ notebooks/withGyro/experiment_0_1_temporal_representation_probe.ipynb
 ```
 
 The notebook is analysis-only and reads the finalized v3 artifacts.
+
+## Experiment 0.2 — nonlinear temporal decoder probe
+
+Experiment 0.2 keeps the Experiment 0.1 action-0 cohort, channel semantics, five user-disjoint split seeds, and raw-IMU exclusion, but narrows the temporal representations to the two conditions used for the mechanism probe:
+
+```text
+fixed250
+relative10
+```
+
+For each representation it evaluates the three paired event inputs:
+
+```text
+accel30
+angular30
+combined60
+```
+
+and compares five decoders:
+
+```text
+Linear
+Linear + Local residual
+Linear + Transition residual
+Linear + Local + Transition residual
+GRU
+```
+
+The residual decoders inherit the Experiment 3.2 definitions. The Linear logits are frozen; the residual output heads are zero initialized, so epoch 0 is exactly the Linear baseline. `Local` applies a rank-16 GELU projection independently within valid bins. `Transition` multiplies separate rank-16 projections of adjacent valid bins. `Local+Transition` sums independent residual branches.
+
+The GRU is intentionally small and generic: one unidirectional layer with hidden size 32, followed by a 12-class Linear head. It consumes the same Fixed250 or Relative10 representation as the other decoders. Fixed250 uses packed valid-bin lengths so padded future bins do not modify the final hidden state.
+
+Linear uses the same train-only per-feature z-score as Experiment 0.1. Residual and GRU inputs use a train-only per-channel RMS scale computed over valid bins only. Validation Balanced Accuracy selects neural checkpoints; ties use lower validation CE. The finalizer reproduces the Experiment 0.1 Linear baseline and rejects absolute BA drift above 0.01.
+
+### Multi-CPU execution
+
+The pipeline is split into three dependency stages:
+
+```text
+1 CPU baseline job
+    -> fit/save 30 frozen Linear baselines
+    -> afterok
+120-task neural CPU array
+    -> 3 channel sets x 2 representations x 4 neural decoders x 5 splits
+    -> one independent train/evaluate/checkpoint per CPU task
+    -> max 50 concurrent tasks
+    -> afterok
+1 CPU finalizer
+    -> aggregate existing artifacts only
+```
+
+Submit from the repository root on Unity:
+
+```bash
+bash scripts/bash_script/withGyro/submit_exp_0_2_pipeline.bash
+```
+
+Final artifacts are written under:
+
+```text
+notebooks/artifacts/withGyro/experiment_0_2_nonlinear_temporal_decoder_probe/structured_residual_gru_v1/
+```
+
+The main finalized files are:
+
+```text
+experiment_0_2_results.csv
+experiment_0_2_summary.csv
+experiment_0_2_paired_decoder_deltas.csv
+experiment_0_2_sensor_deltas.csv
+experiment_0_2_nonlinear_synergy.csv
+experiment_0_2_parameter_counts.csv
+experiment_0_2_linear_reproduction.csv
+experiment_0_2_conclusion.json
+provenance.json
+```
+
+Then open the analysis-only notebook:
+
+```text
+notebooks/withGyro/experiment_0_2_nonlinear_temporal_decoder_probe.ipynb
+```
