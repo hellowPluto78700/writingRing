@@ -26,15 +26,22 @@ EXPECTED_FIXED_DURATIONS = (
 
 
 def test_protocol_dimensions_and_run_mapping_are_stable() -> None:
-    assert exp01.PROTOCOL_VERSION == "linear_angular_accel_60event_v2"
+    assert exp01.PROTOCOL_VERSION == "linear_angular_accel_channel_ablation_v3"
     assert exp01.SPLIT_SEEDS == (11, 23, 37, 53, 71)
     assert exp01.FIXED_DURATION_MS == EXPECTED_FIXED_DURATIONS
     assert exp01.RELATIVE_N_BINS == (1, 2, 4, 6, 8, 10, 12, 16, 20)
+    assert exp01.CHANNEL_SETS == {
+        "accel30": (0, 30),
+        "angular30": (30, 60),
+        "combined60": (0, 60),
+    }
     assert exp01.EVENT_CHANNEL_COUNT == 60
     assert exp01.TOTAL_CHANNEL_COUNT == 66
     assert exp01.EXPECTED_SAMPLING_RATE_HZ == 64.0
     assert len(exp01.run_specs()) == 100
     assert len({spec.key for spec in exp01.run_specs()}) == 100
+    assert len(exp01.CHANNEL_SETS) * len(exp01.CLASSIFIERS) == 6
+    assert len(exp01.run_specs()) * len(exp01.CHANNEL_SETS) * len(exp01.CLASSIFIERS) * 2 == 1200
 
 
 def test_fixed_duration_rounding_matches_64_hz_contract() -> None:
@@ -43,6 +50,49 @@ def test_fixed_duration_rounding_matches_64_hz_contract() -> None:
         for duration in EXPECTED_FIXED_DURATIONS
     ]
     assert samples == [3, 10, 16, 22, 29, 35, 42, 48, 54, 61, 67]
+
+
+def test_channel_slices_are_nonoverlapping_branches_plus_combination() -> None:
+    assert exp01._channel_bounds("accel30") == (0, 30)
+    assert exp01._channel_bounds("angular30") == (30, 60)
+    assert exp01._channel_bounds("combined60") == (0, 60)
+    with pytest.raises(ValueError, match="Unknown channel set"):
+        exp01._channel_bounds("gyro30")
+
+
+def test_paired_gain_is_computed_within_split_before_aggregation() -> None:
+    rows: list[dict[str, object]] = []
+    values = {
+        11: {"accel30": 0.50, "angular30": 0.55, "combined60": 0.65},
+        23: {"accel30": 0.60, "angular30": 0.50, "combined60": 0.70},
+    }
+    for split_seed, per_channel in values.items():
+        for channel_set, ba in per_channel.items():
+            rows.append(
+                {
+                    "representation_family": "fixed_duration",
+                    "condition": "fixed_0250ms",
+                    "requested_duration_ms": 250.0,
+                    "samples_per_bin": 16,
+                    "actual_duration_ms": 250.0,
+                    "n_bins": 16,
+                    "classifier": "linear",
+                    "split_seed": split_seed,
+                    "channel_set": channel_set,
+                    "balanced_accuracy": ba,
+                    "accuracy": ba,
+                    "macro_f1": ba,
+                }
+            )
+    paired = exp01._paired_gain_rows(pd.DataFrame(rows)).sort_values("split_seed")
+    np.testing.assert_allclose(
+        paired["delta_balanced_accuracy_combined60_minus_accel30"],
+        [0.15, 0.10],
+    )
+    np.testing.assert_allclose(
+        paired["delta_balanced_accuracy_angular30_minus_accel30"],
+        [0.05, -0.10],
+    )
 
 
 def test_user_split_is_disjoint_and_reproducible() -> None:
