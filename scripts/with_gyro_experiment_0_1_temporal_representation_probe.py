@@ -16,7 +16,7 @@ from sklearn.neighbors import KNeighborsClassifier
 
 
 EXPERIMENT_ID = "withGyro_experiment_0_1_temporal_representation_probe"
-PROTOCOL_VERSION = "linear_angular_accel_60event_v2"
+PROTOCOL_VERSION = "linear_angular_accel_channel_ablation_v3"
 
 SPLIT_SEEDS = (11, 23, 37, 53, 71)
 N_TRAIN_USERS = 12
@@ -38,6 +38,16 @@ FIXED_DURATION_MS = (
 )
 RELATIVE_N_BINS = (1, 2, 4, 6, 8, 10, 12, 16, 20)
 CLASSIFIERS = ("linear", "5nn")
+CHANNEL_SETS: dict[str, tuple[int, int]] = {
+    "accel30": (0, 30),
+    "angular30": (30, 60),
+    "combined60": (0, 60),
+}
+GAIN_COMPARISONS = (
+    ("combined60", "accel30"),
+    ("combined60", "angular30"),
+    ("angular30", "accel30"),
+)
 
 EVENT_CHANNEL_COUNT = 60
 TOTAL_CHANNEL_COUNT = 66
@@ -368,11 +378,29 @@ def _sample_events(cohort: Cohort, row: object) -> np.ndarray:
     return events
 
 
+def _channel_bounds(channel_set: str) -> tuple[int, int]:
+    try:
+        start, stop = CHANNEL_SETS[channel_set]
+    except KeyError as exc:
+        raise ValueError(f"Unknown channel set: {channel_set}") from exc
+    if not (0 <= start < stop <= EVENT_CHANNEL_COUNT):
+        raise RuntimeError(f"Invalid channel slice for {channel_set}: {(start, stop)}")
+    return start, stop
+
+
+def _sample_channel_events(cohort: Cohort, row: object, channel_set: str) -> np.ndarray:
+    start, stop = _channel_bounds(channel_set)
+    return _sample_events(cohort, row)[:, start:stop]
+
+
 def fixed_duration_features(
     cohort: Cohort,
     frame: pd.DataFrame,
     requested_ms: float,
+    channel_set: str = "combined60",
 ) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+    start, stop = _channel_bounds(channel_set)
+    channel_count = stop - start
     samples_per_bin = int(np.rint(float(requested_ms) * cohort.fs / 1000.0))
     if samples_per_bin <= 0:
         raise ValueError(f"Invalid fixed duration {requested_ms} ms")
@@ -380,16 +408,17 @@ def fixed_duration_features(
     padded_target = n_bins * samples_per_bin
     feature_rows: list[np.ndarray] = []
     for row in frame.itertuples(index=False):
-        values = np.zeros(
-            (padded_target, EVENT_CHANNEL_COUNT),
-            dtype=np.float32,
-        )
-        events = _sample_events(cohort, row)
+        values = np.zeros((padded_target, channel_count), dtype=np.float32)
+        events = _sample_channel_events(cohort, row, channel_set)
         values[: len(events)] = events
-        counts = values.reshape(n_bins, samples_per_bin, EVENT_CHANNEL_COUNT).sum(axis=1)
+        counts = values.reshape(n_bins, samples_per_bin, channel_count).sum(axis=1)
         feature_rows.append(counts.reshape(-1))
     features = np.stack(feature_rows).astype(np.float64)
     meta = {
+        "channel_set": channel_set,
+        "channel_start": start,
+        "channel_stop": stop,
+        "channel_count": channel_count,
         "representation_family": "fixed_duration",
         "condition": f"fixed_{int(round(float(requested_ms))):04d}ms",
         "requested_duration_ms": float(requested_ms),
@@ -405,10 +434,13 @@ def relative_progress_features(
     cohort: Cohort,
     frame: pd.DataFrame,
     n_bins: int,
+    channel_set: str = "combined60",
 ) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+    start, stop = _channel_bounds(channel_set)
+    channel_count = stop - start
     feature_rows: list[np.ndarray] = []
     for row in frame.itertuples(index=False):
-        events = _sample_events(cohort, row)
+        events = _sample_channel_events(cohort, row, channel_set)
         if n_bins > len(events):
             raise ValueError(
                 f"Relative {n_bins}-bin representation exceeds valid length {len(events)}"
@@ -418,6 +450,10 @@ def relative_progress_features(
         feature_rows.append(counts.reshape(-1))
     features = np.stack(feature_rows).astype(np.float64)
     meta = {
+        "channel_set": channel_set,
+        "channel_start": start,
+        "channel_stop": stop,
+        "channel_count": channel_count,
         "representation_family": "relative_progress",
         "condition": f"relative_{int(n_bins):02d}bin",
         "requested_duration_ms": None,
@@ -433,11 +469,12 @@ def build_features(
     cohort: Cohort,
     frame: pd.DataFrame,
     spec: RunSpec,
+    channel_set: str = "combined60",
 ) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
     if spec.representation_family == "fixed_duration":
-        return fixed_duration_features(cohort, frame, float(spec.value))
+        return fixed_duration_features(cohort, frame, float(spec.value), channel_set)
     if spec.representation_family == "relative_progress":
-        return relative_progress_features(cohort, frame, int(spec.value))
+        return relative_progress_features(cohort, frame, int(spec.value), channel_set)
     raise ValueError(f"Unknown representation family: {spec.representation_family}")
 
 
@@ -500,6 +537,10 @@ def evaluate_models(
                     "experiment": EXPERIMENT_ID,
                     "protocol_version": PROTOCOL_VERSION,
                     "split_seed": spec.split_seed,
+                    "channel_set": meta["channel_set"],
+                    "channel_start": meta["channel_start"],
+                    "channel_stop": meta["channel_stop"],
+                    "channel_count": meta["channel_count"],
                     "representation_family": meta["representation_family"],
                     "condition": meta["condition"],
                     "requested_duration_ms": meta["requested_duration_ms"],
@@ -540,31 +581,38 @@ def run_one(
         return payload
 
     parts = make_user_split(cohort.manifest, spec.split_seed)
-    built: dict[str, tuple[np.ndarray, np.ndarray, dict[str, object]]] = {
-        split_name: build_features(cohort, frame, spec)
-        for split_name, frame in parts.items()
-    }
-    train_x, train_y, train_meta = built["train"]
-    val_x, val_y, val_meta = built["val"]
-    test_x, test_y, test_meta = built["test"]
-    if train_meta != val_meta or train_meta != test_meta:
-        raise RuntimeError("Representation metadata differs across splits")
+    result_rows: list[dict[str, object]] = []
+    representation_meta: dict[str, dict[str, object]] = {}
 
-    mean, std = fit_standardizer(train_x)
-    train_z = apply_standardizer(train_x, mean, std)
-    val_z = apply_standardizer(val_x, mean, std)
-    test_z = apply_standardizer(test_x, mean, std)
-    model_seed = derive_seed(spec.split_seed, spec.condition, "classifier")
-    models = train_models(train_z, train_y, seed=model_seed)
-    result_rows = evaluate_models(
-        models,
-        {
-            "val": (val_z, val_y),
-            "test": (test_z, test_y),
-        },
-        spec=spec,
-        meta=train_meta,
-    )
+    for channel_set in CHANNEL_SETS:
+        built: dict[str, tuple[np.ndarray, np.ndarray, dict[str, object]]] = {
+            split_name: build_features(cohort, frame, spec, channel_set)
+            for split_name, frame in parts.items()
+        }
+        train_x, train_y, train_meta = built["train"]
+        val_x, val_y, val_meta = built["val"]
+        test_x, test_y, test_meta = built["test"]
+        if train_meta != val_meta or train_meta != test_meta:
+            raise RuntimeError("Representation metadata differs across splits")
+
+        mean, std = fit_standardizer(train_x)
+        train_z = apply_standardizer(train_x, mean, std)
+        val_z = apply_standardizer(val_x, mean, std)
+        test_z = apply_standardizer(test_x, mean, std)
+        model_seed = derive_seed(spec.split_seed, spec.condition, channel_set, "classifier")
+        models = train_models(train_z, train_y, seed=model_seed)
+        result_rows.extend(
+            evaluate_models(
+                models,
+                {
+                    "val": (val_z, val_y),
+                    "test": (test_z, test_y),
+                },
+                spec=spec,
+                meta=train_meta,
+            )
+        )
+        representation_meta[channel_set] = dict(train_meta)
 
     payload: dict[str, object] = {
         "experiment_id": EXPERIMENT_ID,
@@ -580,13 +628,13 @@ def run_one(
         "sampling_rate_hz": float(cohort.fs),
         "event_channel_count": EVENT_CHANNEL_COUNT,
         "total_channel_count": TOTAL_CHANNEL_COUNT,
-        "event_channel_slice": [0, EVENT_CHANNEL_COUNT],
+        "channel_sets": {key: list(value) for key, value in CHANNEL_SETS.items()},
         "linear_acceleration_event_slice": [0, 30],
         "angular_acceleration_event_slice": [30, 60],
         "raw_imu_excluded": True,
         "sample_hash": _sample_hash(parts),
         **_split_users(parts),
-        "representation": dict(train_meta),
+        "representations": representation_meta,
         "classifiers": list(CLASSIFIERS),
         "results": result_rows,
     }
@@ -596,6 +644,65 @@ def run_one(
         encoding="utf-8",
     )
     return payload
+
+
+def _paired_gain_rows(test_results: pd.DataFrame) -> pd.DataFrame:
+    key_columns = [
+        "representation_family",
+        "condition",
+        "requested_duration_ms",
+        "samples_per_bin",
+        "actual_duration_ms",
+        "n_bins",
+        "classifier",
+        "split_seed",
+    ]
+    rows: list[dict[str, object]] = []
+    expected_sets = set(CHANNEL_SETS)
+    for keys, group in test_results.groupby(key_columns, dropna=False, sort=False):
+        available = set(group.channel_set.tolist())
+        if available != expected_sets:
+            raise ValueError(
+                f"Paired channel-set comparison is incomplete for {keys}: {sorted(available)}"
+            )
+        by_channel = group.set_index("channel_set")
+        row = dict(zip(key_columns, keys, strict=True))
+        for metric in ("balanced_accuracy", "accuracy", "macro_f1"):
+            for numerator, denominator in GAIN_COMPARISONS:
+                name = f"delta_{metric}_{numerator}_minus_{denominator}"
+                row[name] = float(
+                    by_channel.loc[numerator, metric] - by_channel.loc[denominator, metric]
+                )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _paired_gain_summary(paired_gains: pd.DataFrame) -> pd.DataFrame:
+    group_columns = [
+        "representation_family",
+        "condition",
+        "requested_duration_ms",
+        "samples_per_bin",
+        "actual_duration_ms",
+        "n_bins",
+        "classifier",
+    ]
+    gain_columns = [column for column in paired_gains.columns if column.startswith("delta_")]
+    aggregations: dict[str, tuple[str, str]] = {
+        "n_splits": ("split_seed", "nunique")
+    }
+    for column in gain_columns:
+        aggregations[f"mean_{column}"] = (column, "mean")
+        aggregations[f"sd_{column}"] = (column, "std")
+    summary = (
+        paired_gains.groupby(group_columns, dropna=False, as_index=False)
+        .agg(**aggregations)
+        .sort_values(["representation_family", "classifier", "condition"])
+        .reset_index(drop=True)
+    )
+    if not (summary.n_splits == len(SPLIT_SEEDS)).all():
+        raise ValueError("At least one paired-gain condition is missing split seeds")
+    return summary
 
 
 def finalize_experiment(repo_root: Path) -> dict[str, Path]:
@@ -631,17 +738,28 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
     expected_runs = len(run_specs())
     if len(payloads) != expected_runs:
         raise ValueError(f"Expected {expected_runs} runs, got {len(payloads)}")
-    expected_result_rows = expected_runs * len(CLASSIFIERS) * 2
+    expected_result_rows = expected_runs * len(CHANNEL_SETS) * len(CLASSIFIERS) * 2
     if len(result_rows) != expected_result_rows:
         raise ValueError(
             f"Expected {expected_result_rows} result rows, got {len(result_rows)}"
         )
 
     results = pd.DataFrame(result_rows).sort_values(
-        ["representation_family", "condition", "split_seed", "classifier", "eval_split"]
+        [
+            "representation_family",
+            "condition",
+            "split_seed",
+            "channel_set",
+            "classifier",
+            "eval_split",
+        ]
     ).reset_index(drop=True)
     test = results[results.eval_split == "test"].copy()
     group_columns = [
+        "channel_set",
+        "channel_start",
+        "channel_stop",
+        "channel_count",
         "representation_family",
         "condition",
         "requested_duration_ms",
@@ -662,12 +780,14 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
             mean_test_macro_f1=("macro_f1", "mean"),
             sd_test_macro_f1=("macro_f1", "std"),
         )
-        .sort_values(["representation_family", "classifier", "n_bins"])
+        .sort_values(["representation_family", "classifier", "channel_set", "condition"])
         .reset_index(drop=True)
     )
     if not (summary.n_splits == len(SPLIT_SEEDS)).all():
         raise ValueError("At least one finalized condition is missing split seeds")
 
+    paired_gains = _paired_gain_rows(test)
+    paired_gain_summary = _paired_gain_summary(paired_gains)
     split_assignments = pd.DataFrame(split_rows).drop_duplicates().sort_values(
         ["split_seed", "condition", "split", "user"]
     )
@@ -676,11 +796,15 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
     outputs = {
         "results": root / "experiment_0_1_results.csv",
         "summary": root / "experiment_0_1_summary.csv",
+        "paired_gains": root / "experiment_0_1_paired_gains.csv",
+        "paired_gain_summary": root / "experiment_0_1_paired_gain_summary.csv",
         "split_assignments": root / "experiment_0_1_split_assignments.csv",
         "provenance": root / "provenance.json",
     }
     results.to_csv(outputs["results"], index=False)
     summary.to_csv(outputs["summary"], index=False)
+    paired_gains.to_csv(outputs["paired_gains"], index=False)
+    paired_gain_summary.to_csv(outputs["paired_gain_summary"], index=False)
     split_assignments.to_csv(outputs["split_assignments"], index=False)
 
     cohort_payload = payloads[0]
@@ -697,20 +821,42 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
                 "event_feature_schema": EXPECTED_EVENT_FEATURE_SCHEMA,
                 "event_channel_count": EVENT_CHANNEL_COUNT,
                 "total_channel_count": TOTAL_CHANNEL_COUNT,
-                "event_channel_slice": [0, 60],
-                "linear_acceleration_event_slice": [0, 30],
-                "angular_acceleration_event_slice": [30, 60],
+                "channel_sets": {key: list(value) for key, value in CHANNEL_SETS.items()},
+                "channel_set_semantics": {
+                    "accel30": "linear-acceleration polarity-split wavelet events",
+                    "angular30": "gyro-derived angular-acceleration polarity-split wavelet events",
+                    "combined60": "accel30 concatenated with angular30",
+                },
                 "raw_imu_excluded": True,
                 "split_seeds": list(SPLIT_SEEDS),
                 "fixed_duration_ms": list(FIXED_DURATION_MS),
                 "fixed_duration_rule": "start at 50 ms, increment by 100 ms, include values <= 1050 ms",
                 "relative_n_bins": list(RELATIVE_N_BINS),
                 "classifiers": list(CLASSIFIERS),
-                "standardization": "per-feature z-score fit on training users only",
-                "fixed_binning": "channel-wise weighted event sums in fixed physical-duration bins over the common 256-sample padded timeline",
-                "relative_binning": "channel-wise weighted event sums after np.array_split of each gesture valid prefix",
+                "standardization": (
+                    "per-feature z-score fit independently on training users for each channel set"
+                ),
+                "fixed_binning": (
+                    "channel-wise weighted event sums in fixed physical-duration bins over the "
+                    "common 256-sample padded timeline"
+                ),
+                "relative_binning": (
+                    "channel-wise weighted event sums after np.array_split of each gesture valid prefix"
+                ),
+                "paired_gain_rule": (
+                    "compute channel-set metric differences within each split seed first, then "
+                    "aggregate paired deltas across the five splits"
+                ),
+                "gain_comparisons": [
+                    f"{numerator}-{denominator}"
+                    for numerator, denominator in GAIN_COMPARISONS
+                ],
                 "expected_runs": expected_runs,
-                "slurm_unit": "one split-seed x representation-condition per CPU task; Linear and 5-NN share the same standardized features inside the task",
+                "expected_result_rows": expected_result_rows,
+                "slurm_unit": (
+                    "one split-seed x representation-condition per CPU task; all three channel "
+                    "sets and both classifiers run inside the same task"
+                ),
             },
             indent=2,
             sort_keys=True,
@@ -724,8 +870,8 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "WithGyro Experiment 0.1: 60-event fixed-duration and relative-progress "
-            "temporal representation probe"
+            "WithGyro Experiment 0.1: paired accel30/angular30/combined60 temporal "
+            "representation probe"
         )
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -750,6 +896,12 @@ def main() -> None:
                     "split_seeds": list(SPLIT_SEEDS),
                     "fixed_duration_ms": list(FIXED_DURATION_MS),
                     "relative_n_bins": list(RELATIVE_N_BINS),
+                    "channel_sets": {key: list(value) for key, value in CHANNEL_SETS.items()},
+                    "classifiers": list(CLASSIFIERS),
+                    "model_fits_per_task": len(CHANNEL_SETS) * len(CLASSIFIERS),
+                    "expected_result_rows": (
+                        len(run_specs()) * len(CHANNEL_SETS) * len(CLASSIFIERS) * 2
+                    ),
                     "event_channel_count": EVENT_CHANNEL_COUNT,
                 },
                 indent=2,
