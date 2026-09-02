@@ -29,6 +29,25 @@ def test_run_matrix_is_complete_and_factorial() -> None:
     assert len({spec.key for spec in specs}) == len(specs)
 
 
+def test_random_streams_are_paired_across_cap_variants() -> None:
+    group = [
+        spec
+        for spec in exp401.run_specs()
+        if spec.architecture == "rsnn" and spec.seed == 11
+    ]
+    assert len(group) == 4
+    assert len({exp401.paired_seed(spec, "model_init") for spec in group}) == 1
+    assert len({exp401.paired_seed(spec, "train_loader") for spec in group}) == 1
+    other_seed = next(
+        spec
+        for spec in exp401.run_specs()
+        if spec.architecture == "rsnn" and spec.seed == 23
+    )
+    assert exp401.paired_seed(group[0], "model_init") != exp401.paired_seed(
+        other_seed, "model_init"
+    )
+
+
 def test_binary_and_multispike_share_update_but_change_event_cap() -> None:
     current = torch.tensor([[2.1]], dtype=torch.float32)
     membrane = torch.zeros_like(current)
