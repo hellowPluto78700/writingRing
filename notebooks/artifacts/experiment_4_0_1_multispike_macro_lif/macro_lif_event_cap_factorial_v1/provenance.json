@@ -1,0 +1,85 @@
+{
+  "anchors": [
+    {
+      "architecture": "ff",
+      "hidden_width": 128,
+      "tau_mem_ms": 2000.0
+    },
+    {
+      "architecture": "rsnn",
+      "hidden_width": 128,
+      "tau_mem_ms": 250.0
+    }
+  ],
+  "channel_scale": [
+    0.3543558716773987,
+    0.4321190118789673,
+    0.1880633682012558,
+    0.34511953592300415,
+    0.15273113548755646,
+    0.31384825706481934,
+    0.235134556889534,
+    0.28344836831092834,
+    0.17823587357997894,
+    0.2438988983631134,
+    0.2070259302854538,
+    0.13798296451568604,
+    0.21412914991378784,
+    0.14232085645198822,
+    0.2848164439201355,
+    0.24791888892650604,
+    0.26815885305404663,
+    0.2525761127471924,
+    0.18306319415569305,
+    0.17641578614711761,
+    0.1401812583208084,
+    0.12556137144565582,
+    0.13084261119365692,
+    0.08961961418390274,
+    0.14934155344963074,
+    0.13374808430671692,
+    0.1636434942483902,
+    0.15457744896411896,
+    0.1635637879371643,
+    0.18049365282058716
+  ],
+  "custom_binary_control": "all four variants use the same MacroMultiSpikeLIF update/reset implementation",
+  "event_channels": 30,
+  "expected_runs": 40,
+  "experiment_id": "experiment_4_0_1_multispike_macro_lif",
+  "fixed_bin_ms": 250.0,
+  "output_readout_normalization": "output event count divided by output_cap before CE",
+  "paired_randomness": "same architecture/seed uses identical initialization and train-loader order across cap variants",
+  "protocol_version": "macro_lif_event_cap_factorial_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "split_seed": 12345,
+  "state_dynamics": "all padded bins execute; zero input after endpoint; no state freeze",
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "name": "binary",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_h",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 1,
+      "name": "multi_o",
+      "output_cap": 31
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_ho",
+      "output_cap": 31
+    }
+  ]
+}
