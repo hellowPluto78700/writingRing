@@ -309,7 +309,6 @@ class TemporalDecoderSNN(nn.Module):
         self.tau_mem_ms = float(tau_mem_ms)
         self.n_classes = int(n_classes)
 
-        # Macro timestep is exactly one 250 ms input bin.
         beta_hidden = math.exp(-FIXED_MS / self.tau_mem_ms)
         beta_output = math.exp(-FIXED_MS / OUTPUT_TAU_MEM_MS)
         spike_grad = surrogate.fast_sigmoid(slope=SURROGATE_SLOPE)
@@ -615,7 +614,6 @@ def run_linear_baseline(data: BinnedData, root: Path) -> dict[str, object]:
         max_iter=LOGREG_MAX_ITER,
         class_weight="balanced",
         solver="lbfgs",
-        multi_class="auto",
     )
     model.fit(Xtr, data.ytr)
     split_metrics = {}
