@@ -94,6 +94,18 @@ def run_specs() -> list[RunSpec]:
     return specs
 
 
+def paired_seed(spec: RunSpec, role: str) -> int:
+    """Use identical random streams across cap variants in each paired group."""
+    return exp40.base.dseed(
+        spec.seed,
+        "exp4_0_1_paired",
+        spec.architecture,
+        spec.hidden_width,
+        spec.tau_mem_ms,
+        role,
+    )
+
+
 class _MultiThresholdSpike(torch.autograd.Function):
     """Integer event count in forward, multi-threshold surrogate in backward.
 
@@ -489,6 +501,7 @@ def _provenance(
         "output_tau_mem_ms": exp40.OUTPUT_TAU_MEM_MS,
         "state_dynamics": "all padded bins execute; zero input after endpoint; no state freeze",
         "primary_objective": "valid normalized output-event WholeCount CE",
+        "paired_randomness": "same architecture/seed uses identical model-init and train-loader random streams across all cap variants",
         "epochs": config.epochs,
         "batch_size": config.batch_size,
         "learning_rate": LR,
@@ -514,16 +527,7 @@ def run_one(
 
     torch.set_num_threads(config.threads)
     device = torch.device(config.device)
-    exp40.base.seed_all(
-        exp40.base.dseed(
-            spec.seed,
-            "exp4_0_1_model_init",
-            spec.architecture,
-            spec.hidden_width,
-            spec.tau_mem_ms,
-            spec.variant,
-        )
-    )
+    exp40.base.seed_all(paired_seed(spec, "model_init"))
     model = MacroTemporalDecoder(
         architecture=spec.architecture,
         hidden_width=spec.hidden_width,
@@ -545,14 +549,14 @@ def run_one(
         *partitions[0],
         config.batch_size,
         True,
-        exp40.base.dseed(spec.seed, spec.key, "train_loader"),
+        paired_seed(spec, "train_loader"),
     )
     eval_loaders = [
         exp40.loader(
             *partition,
             config.batch_size,
             False,
-            exp40.base.dseed(spec.seed, spec.key, split, "eval_loader"),
+            paired_seed(spec, f"eval_loader_{split}"),
         )
         for partition, split in zip(partitions, ("train", "val", "test"), strict=True)
     ]
@@ -810,6 +814,7 @@ def finalize(data: exp40.BinnedData, config: Config) -> None:
         "event_channels": exp40.EVENT_CHANNELS,
         "output_readout_normalization": "output event count divided by output_cap before CE",
         "custom_binary_control": "all four variants use the same MacroMultiSpikeLIF update/reset implementation",
+        "paired_randomness": "same architecture/seed uses identical initialization and train-loader order across cap variants",
         "state_dynamics": "all padded bins execute; zero input after endpoint; no state freeze",
         "channel_scale": data.channel_scale.tolist(),
     }
