@@ -1,0 +1,94 @@
+{
+  "channel_scale": [
+    0.3543558716773987,
+    0.4321190118789673,
+    0.1880633682012558,
+    0.34511953592300415,
+    0.15273113548755646,
+    0.31384825706481934,
+    0.235134556889534,
+    0.28344836831092834,
+    0.17823587357997894,
+    0.2438988983631134,
+    0.2070259302854538,
+    0.13798296451568604,
+    0.21412914991378784,
+    0.14232085645198822,
+    0.2848164439201355,
+    0.24791888892650604,
+    0.26815885305404663,
+    0.2525761127471924,
+    0.18306319415569305,
+    0.17641578614711761,
+    0.1401812583208084,
+    0.12556137144565582,
+    0.13084261119365692,
+    0.08961961418390274,
+    0.14934155344963074,
+    0.13374808430671692,
+    0.1636434942483902,
+    0.15457744896411896,
+    0.1635637879371643,
+    0.18049365282058716
+  ],
+  "event_channels": 30,
+  "expected_new_runs": 20,
+  "experiment_id": "experiment_4_0_3_hierarchical_snn",
+  "fixed_bin_ms": 250.0,
+  "hidden_cap": 31,
+  "input_information_contract": "same scaled Fixed250 vectors as Exp4.0/4.0.1/4.2; no sub-bin timing",
+  "new_conditions": [
+    "rsnn176_capacity",
+    "local128_rsnn128",
+    "rsnn128_rsnn128",
+    "local128_ff128"
+  ],
+  "output_cap": 31,
+  "parameter_counts": {
+    "local128_ff128": {
+      "input_layer1": 3840,
+      "layer1_layer2": 16384,
+      "output": 1536,
+      "recurrent1": 0,
+      "recurrent2": 0,
+      "total": 21760
+    },
+    "local128_rsnn128": {
+      "input_layer1": 3840,
+      "layer1_layer2": 16384,
+      "output": 1536,
+      "recurrent1": 0,
+      "recurrent2": 16384,
+      "total": 38144
+    },
+    "rsnn128_rsnn128": {
+      "input_layer1": 3840,
+      "layer1_layer2": 16384,
+      "output": 1536,
+      "recurrent1": 16384,
+      "recurrent2": 16384,
+      "total": 54528
+    },
+    "rsnn176_capacity": {
+      "input_layer1": 5280,
+      "layer1_layer2": 0,
+      "output": 2112,
+      "recurrent1": 30976,
+      "recurrent2": 0,
+      "total": 38368
+    }
+  },
+  "primary_readout": "fully-spiking normalized valid WholeCount",
+  "protocol_version": "fixed250_hierarchical_multispike_v1",
+  "reused_baseline": "rsnn128_multispike_reused",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "split_seed": 12345,
+  "state_dynamics": "all padded bins execute; zero input after endpoint; no state freeze",
+  "state_probe": "post-hoc endpoint state only; no phase access; never used for checkpoint selection"
+}
