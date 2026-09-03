@@ -1,0 +1,124 @@
+{
+  "experiment_id": "experiment_4_0_4_hidden_state_probe",
+  "input_information_contract": "same scaled Fixed250 vectors as Exp4.0.1; no raw/sub-bin timing added",
+  "probe": {
+    "classifier": "balanced LogisticRegression(lbfgs)",
+    "feature": "post-reset hidden membrane at the causal valid endpoint; one 128-D vector per gesture",
+    "feature_dim": 128,
+    "metrics": {
+      "test": {
+        "accuracy": 0.3904109589041096,
+        "balanced_accuracy": 0.3917735042735042,
+        "macro_f1": 0.3991976251780173
+      },
+      "train": {
+        "accuracy": 0.9965576592082617,
+        "balanced_accuracy": 0.9967206790123457,
+        "macro_f1": 0.9966638462252497
+      },
+      "val": {
+        "accuracy": 0.46825396825396826,
+        "balanced_accuracy": 0.46334175084175083,
+        "macro_f1": 0.46558059329731155
+      }
+    },
+    "output_neuron_access": false,
+    "source_snn_frozen": true,
+    "temporal_phase_access": false
+  },
+  "protocol_version": "rsnn_cap_variant_endpoint_state_probe_v1",
+  "provenance": {
+    "channel_scale": [
+      0.3543558716773987,
+      0.4321190118789673,
+      0.1880633682012558,
+      0.34511953592300415,
+      0.15273113548755646,
+      0.31384825706481934,
+      0.235134556889534,
+      0.28344836831092834,
+      0.17823587357997894,
+      0.2438988983631134,
+      0.2070259302854538,
+      0.13798296451568604,
+      0.21412914991378784,
+      0.14232085645198822,
+      0.2848164439201355,
+      0.24791888892650604,
+      0.26815885305404663,
+      0.2525761127471924,
+      0.18306319415569305,
+      0.17641578614711761,
+      0.1401812583208084,
+      0.12556137144565582,
+      0.13084261119365692,
+      0.08961961418390274,
+      0.14934155344963074,
+      0.13374808430671692,
+      0.1636434942483902,
+      0.15457744896411896,
+      0.1635637879371643,
+      0.18049365282058716
+    ],
+    "event_channels": 30,
+    "fixed_bin_ms": 250.0,
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "probe_training": "probe fits train endpoint states only; val/test are evaluation only",
+    "split_seed": 12345,
+    "state_dynamics": "replay frozen Exp4.0.1 hidden dynamics through all padded bins; select hidden post-reset membrane at causal valid endpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "source": {
+    "architecture": "rsnn",
+    "best_epoch": 145,
+    "checkpoint": "notebooks/artifacts/experiment_4_0_1_multispike_macro_lif/macro_lif_event_cap_factorial_v1/checkpoints/rsnn__h128__tau250ms__multi_o__hcap1__ocap31__seed23.pt",
+    "experiment_id": "experiment_4_0_1_multispike_macro_lif",
+    "hidden_width": 128,
+    "protocol_version": "macro_lif_event_cap_factorial_v1",
+    "tau_mem_ms": 250.0
+  },
+  "spec": {
+    "hidden_cap": 1,
+    "output_cap": 31,
+    "seed": 23,
+    "variant": "multi_o"
+  }
+}

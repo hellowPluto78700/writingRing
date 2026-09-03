@@ -1,0 +1,44 @@
+{
+  "expected_probe_tasks": 20,
+  "experiment_id": "experiment_4_0_4_hidden_state_probe",
+  "feature": "post-reset hidden membrane at the causal valid endpoint; one 128-D vector per gesture",
+  "output_neuron_access": false,
+  "protocol_version": "rsnn_cap_variant_endpoint_state_probe_v1",
+  "scientific_question": "Does poor fully-spiking performance, especially Multi-H with output cap 1, reflect poor recurrent hidden memory or information loss after that hidden state?",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "source_architecture": "rsnn",
+  "source_experiment": "experiment_4_0_1_multispike_macro_lif",
+  "source_hidden_width": 128,
+  "source_protocol": "macro_lif_event_cap_factorial_v1",
+  "source_snn_training": "none; all SNN checkpoints are frozen Exp4.0.1 artifacts",
+  "source_tau_mem_ms": 250.0,
+  "temporal_phase_access": false,
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "output_cap": 1,
+      "variant": "binary"
+    },
+    {
+      "hidden_cap": 31,
+      "output_cap": 1,
+      "variant": "multi_h"
+    },
+    {
+      "hidden_cap": 1,
+      "output_cap": 31,
+      "variant": "multi_o"
+    },
+    {
+      "hidden_cap": 31,
+      "output_cap": 31,
+      "variant": "multi_ho"
+    }
+  ]
+}
