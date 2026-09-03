@@ -24,6 +24,14 @@ def test_exp404_run_matrix_is_four_rsnn_cap_variants_by_five_seeds() -> None:
         ("multi_ho", 31, 31),
     }
     assert len({spec.key for spec in specs}) == len(specs)
+    assert [spec.variant for spec in specs] == (
+        ["binary"] * 5
+        + ["multi_h"] * 5
+        + ["multi_o"] * 5
+        + ["multi_ho"] * 5
+    )
+    for offset in range(0, 20, 5):
+        assert [spec.seed for spec in specs[offset : offset + 5]] == [11, 23, 37, 53, 71]
 
 
 def test_exp404_source_identity_is_fixed_to_recurrent_h128_tau250() -> None:
@@ -104,6 +112,7 @@ def test_exp404_endpoint_feature_selects_each_samples_valid_endpoint() -> None:
 
 
 def test_exp404_probe_contract_has_no_phase_or_output_neuron_access() -> None:
+    torch.manual_seed(17)
     model = exp401.MacroTemporalDecoder(
         architecture="rsnn",
         hidden_width=128,
@@ -112,10 +121,10 @@ def test_exp404_probe_contract_has_no_phase_or_output_neuron_access() -> None:
         hidden_cap=1,
         output_cap=1,
     )
-    X = torch.zeros(4, 3, exp40.EVENT_CHANNELS)
-    y = torch.tensor([0, 1, 2, 3])
-    valid_bins = torch.tensor([1, 2, 3, 2])
-    loader = DataLoader(TensorDataset(X, y, valid_bins), batch_size=2, shuffle=False)
+    X = torch.randn(8, 3, exp40.EVENT_CHANNELS)
+    y = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3])
+    valid_bins = torch.tensor([1, 2, 3, 2, 3, 1, 2, 3])
+    loader = DataLoader(TensorDataset(X, y, valid_bins), batch_size=4, shuffle=False)
     probe = exp404.fit_endpoint_state_probe(
         model,
         [loader, loader, loader],
