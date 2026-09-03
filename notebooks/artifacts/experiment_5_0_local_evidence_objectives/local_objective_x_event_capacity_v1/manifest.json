@@ -1,0 +1,98 @@
+{
+  "architecture": {
+    "input_channels": 30,
+    "l1_group_neurons": [
+      43,
+      43,
+      42
+    ],
+    "l1_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l1_tau_syn_ms": [
+      54.31342963722199,
+      117.0136826471659,
+      242.10347130039656
+    ],
+    "l1_width": 128,
+    "l2_group_neurons": [
+      43,
+      43,
+      42
+    ],
+    "l2_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l2_tau_syn_ms": [
+      54.31342963722199,
+      117.0136826471659,
+      242.10347130039656
+    ],
+    "l2_width": 128,
+    "logit_gain_training_only": 5.0,
+    "output_neurons": 12,
+    "output_synaptic_state": false,
+    "output_tau_mem_ms": 22.54,
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "checkpoint_selection": "validation Output WholeCount BA for every training objective",
+  "experiment_id": "experiment_5_0_local_evidence_objectives",
+  "files": {
+    "paired_loss_effects": "paired_loss_effects.csv",
+    "paired_loss_effects_summary": "paired_loss_effects_summary.csv",
+    "paired_variant_effects": "paired_variant_effects.csv",
+    "paired_variant_effects_summary": "paired_variant_effects_summary.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce",
+    "fixed250_bin_ce",
+    "fixed500_bin_ce",
+    "relative10_bin_ce"
+  ],
+  "primary_metric": "test Output WholeCount balanced accuracy",
+  "protocol_version": "local_objective_x_event_capacity_v1",
+  "question": "How do local-supervision temporal scale and spike/event capacity interact in an Exp3-style local-evidence SNN when final inference is always Output WholeCount?",
+  "readouts": [
+    "output_whole_count",
+    "l1_whole_count_linear",
+    "l2_whole_count_linear",
+    "l2_fixed250_ordered_linear",
+    "l2_relative10_ordered_linear",
+    "l2_uend_linear"
+  ],
+  "run_count": 75,
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "name": "binary",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_h",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_ho",
+      "output_cap": 31
+    }
+  ]
+}
