@@ -1,0 +1,47 @@
+{
+  "architecture": "30 -> Local128(beta=0) -> RSNN128(tau_mem=250ms physical) -> 12",
+  "expected_runs": 45,
+  "experiment_id": "experiment_4_0_5_temporal_resolution_event_capacity",
+  "files": {
+    "paired_effects": "paired_effects.csv",
+    "paired_effects_summary": "paired_effects_summary.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "primary_training_objective": "valid normalized output WholeCount CE",
+  "protocol_version": "hierarchical_temporal_resolution_event_cap_v1",
+  "readouts": [
+    "output_whole_count",
+    "hidden_whole_count_linear",
+    "uend_linear"
+  ],
+  "representations": [
+    "fixed250",
+    "repeat4",
+    "raw64"
+  ],
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "output_cap": 1,
+      "variant": "binary"
+    },
+    {
+      "hidden_cap": 31,
+      "output_cap": 1,
+      "variant": "multi_h"
+    },
+    {
+      "hidden_cap": 31,
+      "output_cap": 31,
+      "variant": "multi_ho"
+    }
+  ]
+}
