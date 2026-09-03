@@ -21,9 +21,11 @@ def test_exp43_notebook_is_valid_analysis_only_notebook() -> None:
 
     code_cells = [cell for cell in cells if cell["cell_type"] == "code"]
     assert code_cells
-    for cell in code_cells:
+    for index, cell in enumerate(code_cells):
         assert cell["execution_count"] is None
         assert cell["outputs"] == []
+        source = "".join(cell["source"])
+        compile(source, f"{NOTEBOOK}::code_cell_{index}", "exec")
 
     code = "\n".join("".join(cell["source"]) for cell in code_cells)
     markdown = "\n".join(
