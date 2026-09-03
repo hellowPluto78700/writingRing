@@ -1,0 +1,38 @@
+{
+  "experiment_id": "experiment_4_3_long_term_memory_validation",
+  "files": {
+    "classification_runs": "classification_runs.csv",
+    "classification_summary": "classification_summary.csv",
+    "paired_effects": "paired_effects.csv",
+    "paired_effects_summary": "paired_effects_summary.csv",
+    "retention_runs": "retention_runs.csv",
+    "retention_summary": "retention_summary.csv"
+  },
+  "fixed_architecture": {
+    "hidden_cap": 31,
+    "local_condition": "shift34",
+    "output_cap": 31,
+    "stage2_tau_mem_ms": 250.0,
+    "stage2_width": 128,
+    "variant": "multi_ho"
+  },
+  "frozen_rsnn_evaluations": 5,
+  "new_training_runs": 5,
+  "primary_memory_metric": "Uend + frozen train-only StandardScaler/LogisticRegression probe",
+  "protocol_version": "stage2_recurrence_memory_validation_v1",
+  "question": "Does the current Stage-2 state retain information beyond the local ~250-ms window, and is that memory specifically supported by recurrent feedback?",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "validations": {
+    "v1": "independently trained FF vs frozen Exp4.0.6 RSNN",
+    "v2": "same trained RSNN with recurrence disabled only at inference",
+    "v3": "periodic Stage-2-only resets at [250, 500, 1000] ms",
+    "v4": "silent-delay Uend retention at [0, 250, 500, 1000, 2000] ms"
+  },
+  "whole_count_note": "Output WholeCount is secondary for reset tests because the accumulator itself retains earlier evidence."
+}
