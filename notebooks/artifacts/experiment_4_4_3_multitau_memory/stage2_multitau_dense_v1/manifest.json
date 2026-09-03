@@ -1,0 +1,46 @@
+{
+  "baseline_single_taus": [
+    250,
+    500
+  ],
+  "experiment_id": "experiment_4_4_3_multitau_memory",
+  "files": {
+    "paired_effects": "paired_effects.csv",
+    "paired_effects_summary": "paired_effects_summary.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "fixed": {
+    "local_condition": "shift34",
+    "output_tau_mem_ms": 250.0,
+    "stage2_topology": "dense",
+    "stage2_width": 128,
+    "threshold": 0.5,
+    "training_objective": "valid normalized output WholeCount CE",
+    "variant": "multi_ho"
+  },
+  "multitau_profiles": {
+    "tau125_250_500": [
+      125,
+      250,
+      500
+    ],
+    "tau250_500": [
+      250,
+      500
+    ]
+  },
+  "new_training_runs": 10,
+  "parameter_note": "Only fixed per-neuron beta/tau assignment changes; trainable parameter count is unchanged.",
+  "primary_comparison": "each heterogeneous profile versus single250 paired by seed",
+  "protocol_version": "stage2_multitau_dense_v1",
+  "question": "Can heterogeneous Stage-2 membrane timescales improve the Dense-RSNN gesture-level state beyond the best homogeneous single-tau architecture without adding parameters?",
+  "reused_exp441_baseline_runs": 10,
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ]
+}

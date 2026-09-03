@@ -1,0 +1,38 @@
+{
+  "experiment_id": "experiment_4_4_2_recurrence_topology",
+  "files": {
+    "paired_effects": "paired_effects.csv",
+    "paired_effects_summary": "paired_effects_summary.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "fixed": {
+    "local_condition": "shift34",
+    "output_tau_mem_ms": 250.0,
+    "stage2_width": 128,
+    "threshold": 0.5,
+    "training_objective": "valid normalized output WholeCount CE",
+    "variant": "multi_ho"
+  },
+  "new_training_runs": 10,
+  "parameter_note": "Diagonal and dense recurrence are not parameter matched: 128 versus 16384 recurrent parameters. Dense > diagonal supports population mixing efficacy, not a parameter-independent proof.",
+  "protocol_version": "stage2_recurrence_topology_v1",
+  "question": "At the two useful Stage-2 tau regimes from Exp4.4.1, does neuron-wise self recurrence recover the gesture-level memory benefit of dense population recurrence?",
+  "reused_exp441_baselines": 20,
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "tau_mem_ms": [
+    250,
+    500
+  ],
+  "topologies": [
+    "ff",
+    "diagonal",
+    "dense"
+  ]
+}
