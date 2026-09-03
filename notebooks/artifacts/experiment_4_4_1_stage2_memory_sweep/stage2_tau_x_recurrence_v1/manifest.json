@@ -1,0 +1,48 @@
+{
+  "experiment_id": "experiment_4_4_1_stage2_memory_sweep",
+  "files": {
+    "paired_effects": "paired_effects.csv",
+    "paired_effects_summary": "paired_effects_summary.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "fixed": {
+    "hidden_cap": 31,
+    "local_condition": "shift34",
+    "output_cap": 31,
+    "output_tau_mem_ms": 250.0,
+    "stage2_width": 128,
+    "threshold": 0.5,
+    "training_objective": "valid normalized output WholeCount CE",
+    "variant": "multi_ho"
+  },
+  "model_kinds": [
+    "ff",
+    "rsnn"
+  ],
+  "primary_architecture_metric": "Uend + train-only scaled Linear probe balanced accuracy",
+  "protocol_version": "stage2_tau_x_recurrence_v1",
+  "question": "With Local128 fixed, how do passive Stage-2 tau_mem and dense recurrence interact to determine gesture-level memory quality and spike-accessible classification?",
+  "run_count": 50,
+  "secondary_metrics": [
+    "Hidden WholeCount + train-only scaled Linear probe balanced accuracy",
+    "Output WholeCount balanced accuracy",
+    "Uend-HiddenCount gap",
+    "Uend-OutputCount gap",
+    "state/output firing rate and tail activity"
+  ],
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "tau_mem_ms": [
+    125,
+    250,
+    500,
+    1000,
+    2000
+  ]
+}

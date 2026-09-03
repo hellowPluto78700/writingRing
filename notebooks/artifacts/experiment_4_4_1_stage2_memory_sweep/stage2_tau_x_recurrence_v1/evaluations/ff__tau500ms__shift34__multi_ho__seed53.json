@@ -1,0 +1,310 @@
+{
+  "architecture": {
+    "dt_ms": 15.625,
+    "hidden_cap": 31,
+    "input": "Raw64 30-channel scaled weighted events",
+    "local": {
+      "betas": [
+        0.875,
+        0.9375
+      ],
+      "condition": "shift34",
+      "group_widths": [
+        64,
+        64
+      ],
+      "role": "stateful feedforward local LIF memory; no learned local recurrence",
+      "shifts": [
+        3,
+        4
+      ],
+      "tau_mem_ms": [
+        117.0136826471659,
+        242.10347130039656
+      ]
+    },
+    "local_recurrence": false,
+    "output_cap": 31,
+    "output_tau_mem_ms": 250.0,
+    "stage2_beta": 0.9692332344763441,
+    "stage2_recurrence": false,
+    "stage2_tau_mem_ms": 500,
+    "stage2_width": 128,
+    "threshold": 0.5,
+    "variant": "multi_ho"
+  },
+  "best_epoch": 144,
+  "best_val_balanced_accuracy": 0.5355218855218855,
+  "best_val_loss": 1.3927891254425049,
+  "diagnostics": {
+    "test": {
+      "full_count": {
+        "accuracy": 0.4452054794520548,
+        "balanced_accuracy": 0.4339750527250527,
+        "macro_f1": 0.4105993006866835
+      },
+      "local_valid_stats": {
+        "fraction_at_cap": 0.0,
+        "fraction_ge4": 0.0005699544213114191,
+        "fraction_gt1": 0.015395176214204258,
+        "fraction_one": 0.07581569060479125,
+        "fraction_zero": 0.90878914072089,
+        "mean_events_per_neuron_second": 7.055333124448175,
+        "mean_events_per_neuron_step": 0.11023958006950274,
+        "pre_reset_membrane_max": 3.7275583548088598,
+        "pre_reset_membrane_mean": -0.028245463425114956
+      },
+      "mean_theoretical_output_count_levels": 2564.2328767123286,
+      "mean_valid_duration_s": 1.2919520547945205,
+      "mean_valid_steps": 82.68493150684931,
+      "output_tail_event_fraction": 0.0002553704615733395,
+      "output_valid_stats": {
+        "fraction_at_cap": 0.04793374891048425,
+        "fraction_ge4": 0.3823365238431382,
+        "fraction_gt1": 0.4535196729718822,
+        "fraction_one": 0.042372070405989476,
+        "fraction_zero": 0.5041082476916379,
+        "mean_events_per_neuron_second": 369.7164799938463,
+        "mean_events_per_neuron_step": 5.776819999903848,
+        "pre_reset_membrane_max": 89.4192622459098,
+        "pre_reset_membrane_mean": 2.9658713112138724
+      },
+      "state_tail_event_fraction": 0.0,
+      "state_valid_stats": {
+        "fraction_at_cap": 0.0001615161612017514,
+        "fraction_ge4": 0.07076321491231657,
+        "fraction_gt1": 0.16464805888803039,
+        "fraction_one": 0.11139007596528694,
+        "fraction_zero": 0.7239618530012157,
+        "mean_events_per_neuron_second": 52.84878639325704,
+        "mean_events_per_neuron_step": 0.8257622873946412,
+        "pre_reset_membrane_max": 28.185219398916583,
+        "pre_reset_membrane_mean": -0.6491551803399439
+      },
+      "valid_count": {
+        "accuracy": 0.4452054794520548,
+        "balanced_accuracy": 0.4339750527250527,
+        "macro_f1": 0.4105993006866835
+      },
+      "valid_count_loss": 1.6573485593273216
+    },
+    "train": {
+      "full_count": {
+        "accuracy": 0.8123924268502581,
+        "balanced_accuracy": 0.809305768653611,
+        "macro_f1": 0.8089491565004988
+      },
+      "local_valid_stats": {
+        "fraction_at_cap": 0.0,
+        "fraction_ge4": 0.0008471477686599051,
+        "fraction_gt1": 0.014890026294733695,
+        "fraction_one": 0.06639959431043385,
+        "fraction_zero": 0.9187103869992976,
+        "mean_events_per_neuron_second": 6.444282656487418,
+        "mean_events_per_neuron_step": 0.1006919165076159,
+        "pre_reset_membrane_max": 5.813877308430237,
+        "pre_reset_membrane_mean": -0.03413256871387388
+      },
+      "mean_theoretical_output_count_levels": 3186.7435456110156,
+      "mean_valid_duration_s": 1.605717512908778,
+      "mean_valid_steps": 102.76592082616179,
+      "output_tail_event_fraction": 0.0016838562305737767,
+      "output_valid_stats": {
+        "fraction_at_cap": 0.04741082918828613,
+        "fraction_ge4": 0.33885533063834383,
+        "fraction_gt1": 0.4079263168747782,
+        "fraction_one": 0.0428442685398403,
+        "fraction_zero": 0.5492294083979372,
+        "mean_events_per_neuron_second": 335.42855299196225,
+        "mean_events_per_neuron_step": 5.24107114049941,
+        "pre_reset_membrane_max": 105.26021793910435,
+        "pre_reset_membrane_mean": 2.627028054091278
+      },
+      "state_tail_event_fraction": 0.00015140780964047768,
+      "state_valid_stats": {
+        "fraction_at_cap": 0.0003080470549590283,
+        "fraction_ge4": 0.06363228626433831,
+        "fraction_gt1": 0.14480943995786,
+        "fraction_one": 0.09978538675942232,
+        "fraction_zero": 0.7554051741675543,
+        "mean_events_per_neuron_second": 47.95810631179153,
+        "mean_events_per_neuron_step": 0.7493454111217427,
+        "pre_reset_membrane_max": 37.641994450055385,
+        "pre_reset_membrane_mean": -0.6665219223437744
+      },
+      "valid_count": {
+        "accuracy": 0.8192771084337349,
+        "balanced_accuracy": 0.8159048386960772,
+        "macro_f1": 0.8151712940679566
+      },
+      "valid_count_loss": 0.7237882708518312
+    },
+    "val": {
+      "full_count": {
+        "accuracy": 0.5396825396825397,
+        "balanced_accuracy": 0.5355218855218855,
+        "macro_f1": 0.5320488931358497
+      },
+      "local_valid_stats": {
+        "fraction_at_cap": 0.0,
+        "fraction_ge4": 0.000425226055085659,
+        "fraction_gt1": 0.01168754417449236,
+        "fraction_one": 0.06533392518758774,
+        "fraction_zero": 0.9229785203933716,
+        "mean_events_per_neuron_second": 5.841497898101807,
+        "mean_events_per_neuron_step": 0.09127340465784073,
+        "pre_reset_membrane_max": 4.140976428985596,
+        "pre_reset_membrane_mean": -0.009243817999958992
+      },
+      "mean_theoretical_output_count_levels": 2803.547619047619,
+      "mean_valid_duration_s": 1.4125744047619047,
+      "mean_valid_steps": 90.4047619047619,
+      "output_tail_event_fraction": 0.00012718746438622475,
+      "output_valid_stats": {
+        "fraction_at_cap": 0.03484475985169411,
+        "fraction_ge4": 0.32617124915122986,
+        "fraction_gt1": 0.3982164263725281,
+        "fraction_one": 0.04511602595448494,
+        "fraction_zero": 0.5566675662994385,
+        "mean_events_per_neuron_second": 305.5029296875,
+        "mean_events_per_neuron_step": 4.7734832763671875,
+        "pre_reset_membrane_max": 86.59782409667969,
+        "pre_reset_membrane_mean": 2.458699941635132
+      },
+      "state_tail_event_fraction": 0.0,
+      "state_valid_stats": {
+        "fraction_at_cap": 0.00013031120761297643,
+        "fraction_ge4": 0.057122260332107544,
+        "fraction_gt1": 0.13651059567928314,
+        "fraction_one": 0.10131285339593887,
+        "fraction_zero": 0.7621765732765198,
+        "mean_events_per_neuron_second": 43.625450134277344,
+        "mean_events_per_neuron_step": 0.6816476583480835,
+        "pre_reset_membrane_max": 34.89331817626953,
+        "pre_reset_membrane_mean": -0.5659693479537964
+      },
+      "valid_count": {
+        "accuracy": 0.5396825396825397,
+        "balanced_accuracy": 0.5355218855218855,
+        "macro_f1": 0.5320488931358497
+      },
+      "valid_count_loss": 1.3927891254425049
+    }
+  },
+  "experiment_id": "experiment_4_4_1_stage2_memory_sweep",
+  "metrics": {
+    "test": {
+      "hidden_whole_count_linear": {
+        "accuracy": 0.5205479452054794,
+        "balanced_accuracy": 0.5181790431790431,
+        "macro_f1": 0.5203149708789669
+      },
+      "output_whole_count": {
+        "accuracy": 0.4452054794520548,
+        "balanced_accuracy": 0.4339750527250527,
+        "macro_f1": 0.4105993006866835
+      },
+      "uend_linear": {
+        "accuracy": 0.21232876712328766,
+        "balanced_accuracy": 0.2065483127983128,
+        "macro_f1": 0.20517811910075334
+      },
+      "uend_minus_hidden_count_ba": -0.3116307303807303,
+      "uend_minus_output_count_ba": -0.22742673992673992
+    },
+    "train": {
+      "hidden_whole_count_linear": {
+        "accuracy": 0.955249569707401,
+        "balanced_accuracy": 0.9577380532657077,
+        "macro_f1": 0.9542581975845339
+      },
+      "output_whole_count": {
+        "accuracy": 0.8192771084337349,
+        "balanced_accuracy": 0.8159048386960772,
+        "macro_f1": 0.8151712940679566
+      },
+      "uend_linear": {
+        "accuracy": 0.9586919104991394,
+        "balanced_accuracy": 0.9613858217049115,
+        "macro_f1": 0.9602231714620949
+      },
+      "uend_minus_hidden_count_ba": 0.00364776843920378,
+      "uend_minus_output_count_ba": 0.14548098300883427
+    },
+    "val": {
+      "hidden_whole_count_linear": {
+        "accuracy": 0.5555555555555556,
+        "balanced_accuracy": 0.5568542568542569,
+        "macro_f1": 0.5538327434312008
+      },
+      "output_whole_count": {
+        "accuracy": 0.5396825396825397,
+        "balanced_accuracy": 0.5355218855218855,
+        "macro_f1": 0.5320488931358497
+      },
+      "uend_linear": {
+        "accuracy": 0.23809523809523808,
+        "balanced_accuracy": 0.228018278018278,
+        "macro_f1": 0.2259204020528031
+      },
+      "uend_minus_hidden_count_ba": -0.3288359788359789,
+      "uend_minus_output_count_ba": -0.3075036075036075
+    }
+  },
+  "probe_protocol": {
+    "classifier": "train-only StandardScaler + balanced LogisticRegression(lbfgs)",
+    "fit_source": "normal train-user representations only",
+    "temporal_phase_access": false
+  },
+  "protocol_version": "stage2_tau_x_recurrence_v1",
+  "provenance": {
+    "channel_scale_source": "training Fixed250 valid bins only, inherited from Exp4.0.5/4.0.6",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "training_objective": "valid normalized output WholeCount CE",
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "model_kind": "ff",
+    "seed": 53,
+    "tau_mem_ms": 500
+  }
+}
