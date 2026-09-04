@@ -1,0 +1,166 @@
+{
+  "best_epoch": 82,
+  "experiment_id": "experiment_5_1_boundary_free_temporal_decoder",
+  "native": {
+    "test": {
+      "accuracy": 0.541095890410959,
+      "balanced_accuracy": 0.5266788766788767,
+      "hidden_events_per_neuron_second": 23.70203777335984,
+      "hidden_tail_event_fraction": 0.3561270999267536,
+      "loss": 1.5640620956682179,
+      "macro_f1": 0.5249249674293991
+    },
+    "train": {
+      "accuracy": 0.9087779690189329,
+      "balanced_accuracy": 0.9092750245628021,
+      "hidden_events_per_neuron_second": 23.62914733615824,
+      "hidden_tail_event_fraction": 0.3036626151369205,
+      "loss": 0.4572863984538848,
+      "macro_f1": 0.909011771124809
+    },
+    "val": {
+      "accuracy": 0.4603174603174603,
+      "balanced_accuracy": 0.47103775853775853,
+      "hidden_events_per_neuron_second": 21.605346326046877,
+      "hidden_tail_event_fraction": 0.30439974618751314,
+      "loss": 1.4837130308151245,
+      "macro_f1": 0.45214328198296744
+    }
+  },
+  "probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.5205479452054794,
+      "probe_test_balanced_accuracy": 0.5113782051282051,
+      "probe_test_macro_f1": 0.5074941359809781,
+      "probe_type": "hidden_whole_count",
+      "probe_val_balanced_accuracy": 0.4715428090428091
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.1,
+      "probe_test_accuracy": 0.5547945205479452,
+      "probe_test_balanced_accuracy": 0.536487123987124,
+      "probe_test_macro_f1": 0.5350062315942178,
+      "probe_type": "hidden_fixed250_ordered",
+      "probe_val_balanced_accuracy": 0.4763949013949014
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.1,
+      "probe_test_accuracy": 0.636986301369863,
+      "probe_test_balanced_accuracy": 0.6190968753468752,
+      "probe_test_macro_f1": 0.6124011778169994,
+      "probe_type": "hidden_relative10_ordered",
+      "probe_val_balanced_accuracy": 0.5503848003848004
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.1,
+      "probe_test_accuracy": 0.5205479452054794,
+      "probe_test_balanced_accuracy": 0.49876373626373627,
+      "probe_test_macro_f1": 0.5060093756986844,
+      "probe_type": "hidden_uend",
+      "probe_val_balanced_accuracy": 0.627435064935065
+    }
+  ],
+  "protocol_version": "frozen_local_leaky_interface_rsnn_v1",
+  "provenance": {
+    "aggregator": "none; raw frozen L2 spikes",
+    "aggregator_alpha": null,
+    "aggregator_dc_mass_samples": null,
+    "aggregator_tau_ms": null,
+    "architecture": "ff",
+    "batch_size": 128,
+    "checkpoint_selection": "max validation native BA; tie-break validation CE",
+    "epochs": 100,
+    "experiment_id": "experiment_5_1_boundary_free_temporal_decoder",
+    "head": "Linear(128,12,bias=True); no output LIF",
+    "interface": "raw_l2",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "local_shifts": [
+      2,
+      3,
+      4
+    ],
+    "local_source_condition": "exp3_exact_analog",
+    "local_source_experiment": "experiment_5_0_1_exp3_analog_head_control",
+    "local_source_frozen": true,
+    "local_source_protocol": "analog_head_three_way_control_v3",
+    "local_width": 128,
+    "objective": "CE(valid-mean analog class evidence, y)",
+    "parameter_counts": {
+      "aggregator_trainable": 0,
+      "analog_head": 1548,
+      "input_hidden": 16384,
+      "recurrent": 0,
+      "trainable_total": 17932
+    },
+    "protocol_version": "frozen_local_leaky_interface_rsnn_v1",
+    "raw_dt_ms": 15.625,
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 101,
+    "split_seed": 12345,
+    "temporal_tau_mem_ms": 1000.0,
+    "temporal_update_rate": "raw 64Hz; no temporal downsampling",
+    "temporal_width": 128,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0
+  },
+  "spec": {
+    "architecture": "ff",
+    "interface": "raw_l2",
+    "seed": 101,
+    "tau_mem_ms": 1000.0
+  }
+}
