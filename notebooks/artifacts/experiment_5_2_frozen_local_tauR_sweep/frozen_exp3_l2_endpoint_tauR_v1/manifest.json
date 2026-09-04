@@ -1,0 +1,41 @@
+{
+  "aggregation_policy": "finalizer concatenates per-run/per-seed artifacts only; notebook computes summaries, paired effects, timing recovery, selected condition, and plots",
+  "architectures": [
+    "ff",
+    "rsnn"
+  ],
+  "expected_decoder_runs": 50,
+  "expected_local_cache_seeds": 5,
+  "experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "files": {
+    "histories": "histories.csv",
+    "local_reference": "local_reference.csv",
+    "runs": "runs.csv"
+  },
+  "primary_metric": "native validation/test balanced accuracy from hidden Uend endpoint head",
+  "primary_objective": "endpoint_ce",
+  "protocol_version": "frozen_exp3_l2_endpoint_tauR_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selection_policy": "notebook selects tau by mean validation native BA only; test BA never selects",
+  "shift_mem_r": [
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "tail_seconds": 2.0,
+  "tau_mem_r_ms_at_64hz": [
+    117.0136826471659,
+    242.10347130039656,
+    492.1461612435418,
+    992.1669944116244,
+    1992.177287539818
+  ]
+}

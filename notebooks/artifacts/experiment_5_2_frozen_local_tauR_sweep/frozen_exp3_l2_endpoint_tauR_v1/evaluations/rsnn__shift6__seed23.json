@@ -1,0 +1,173 @@
+{
+  "best_epoch": 58,
+  "experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "native": {
+    "test": {
+      "accuracy": 0.6164383561643836,
+      "balanced_accuracy": 0.5992216117216117,
+      "endpoint_membrane_l2_mean": 136.98281316887844,
+      "hidden_events_per_neuron_second": 13.63692842942346,
+      "hidden_tail_event_fraction": 0.4048813287278288,
+      "hidden_tail_events_per_neuron_second": 5.993177440068493,
+      "loss": 2.5027439137027687,
+      "macro_f1": 0.5919702958497585
+    },
+    "train": {
+      "accuracy": 0.9827882960413081,
+      "balanced_accuracy": 0.9835541672859005,
+      "endpoint_membrane_l2_mean": 143.89029219556798,
+      "hidden_events_per_neuron_second": 13.460490394761083,
+      "hidden_tail_event_fraction": 0.38040822714303446,
+      "hidden_tail_events_per_neuron_second": 6.635051366179002,
+      "loss": 0.07026477679033186,
+      "macro_f1": 0.9836131519639849
+    },
+    "val": {
+      "accuracy": 0.5238095238095238,
+      "balanced_accuracy": 0.5299122174122175,
+      "endpoint_membrane_l2_mean": 127.4106677827381,
+      "hidden_events_per_neuron_second": 12.179396014397332,
+      "hidden_tail_event_fraction": 0.40356137941115144,
+      "hidden_tail_events_per_neuron_second": 5.820374503968254,
+      "loss": 2.3097875118255615,
+      "macro_f1": 0.5336586045110072
+    }
+  },
+  "probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.4315068493150685,
+      "probe_test_balanced_accuracy": 0.4248251748251748,
+      "probe_test_macro_f1": 0.42437973892613295,
+      "probe_type": "hidden_whole_count",
+      "probe_val_balanced_accuracy": 0.4787878787878788
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.4726027397260274,
+      "probe_test_balanced_accuracy": 0.45803293928293926,
+      "probe_test_macro_f1": 0.4615481742999891,
+      "probe_type": "hidden_fixed250_ordered",
+      "probe_val_balanced_accuracy": 0.5193602693602694
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 1.0,
+      "probe_test_accuracy": 0.6027397260273972,
+      "probe_test_balanced_accuracy": 0.5824918137418137,
+      "probe_test_macro_f1": 0.582622563741649,
+      "probe_type": "hidden_relative10_ordered",
+      "probe_val_balanced_accuracy": 0.5068662818662818
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.6164383561643836,
+      "probe_test_balanced_accuracy": 0.5986353923853923,
+      "probe_test_macro_f1": 0.6067071746563578,
+      "probe_type": "hidden_uend",
+      "probe_val_balanced_accuracy": 0.5628487253487254
+    }
+  ],
+  "protocol_version": "frozen_exp3_l2_endpoint_tauR_v1",
+  "provenance": {
+    "architecture": "rsnn",
+    "batch_size": 128,
+    "beta_r": 0.984375,
+    "checkpoint_selection": "max validation native endpoint BA; tie-break validation CE",
+    "epochs": 100,
+    "experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+    "head": "Linear(hidden Uend 128 -> classes, bias=True); no output LIF",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "local_l1_shifts": [
+      2,
+      3,
+      4
+    ],
+    "local_l2_shifts": [
+      2,
+      3,
+      4
+    ],
+    "local_source_condition": "exp3_exact_analog",
+    "local_source_experiment": "experiment_5_0_1_exp3_analog_head_control",
+    "local_source_frozen": true,
+    "local_source_protocol": "analog_head_three_way_control_v3",
+    "local_width": 128,
+    "objective": "endpoint_ce = CE(Linear(U_hidden[valid_end]), y)",
+    "parameter_counts": {
+      "endpoint_head": 1548,
+      "input_hidden": 16384,
+      "recurrent": 16384,
+      "trainable_total": 34316
+    },
+    "protocol_version": "frozen_exp3_l2_endpoint_tauR_v1",
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 23,
+    "separate_temporal_synaptic_state": false,
+    "shift_mem_r": 6,
+    "split_seed": 12345,
+    "tail_seconds": 2.0,
+    "tau_mem_r_ms": 992.1669944116244,
+    "temporal_update_rate": "raw 64Hz frozen L2 trajectory; no pooling/compressor/downsampling",
+    "temporal_width": 128,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0
+  },
+  "spec": {
+    "architecture": "rsnn",
+    "seed": 23,
+    "shift_mem_r": 6
+  }
+}
