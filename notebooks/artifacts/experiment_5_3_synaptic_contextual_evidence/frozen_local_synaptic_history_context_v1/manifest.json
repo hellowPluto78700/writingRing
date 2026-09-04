@@ -1,0 +1,114 @@
+{
+  "aggregation_policy": "finalizer only concatenates completed artifacts; notebook computes summaries, paired effects, validation selections, and plots",
+  "conditions": [
+    {
+      "beta": null,
+      "family": "direct",
+      "name": "direct",
+      "shifts_syn": []
+    },
+    {
+      "beta": 0.9375,
+      "family": "lif",
+      "name": "lif_tau242",
+      "shifts_syn": []
+    },
+    {
+      "beta": 0.5,
+      "family": "lif",
+      "name": "lif_beta050",
+      "shifts_syn": []
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_single_s4",
+      "shifts_syn": [
+        4
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_single_s5",
+      "shifts_syn": [
+        5
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_single_s6",
+      "shifts_syn": [
+        6
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_multi_s23456",
+      "shifts_syn": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_multi_s456",
+      "shifts_syn": [
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "syn",
+      "name": "syn_multi_s56",
+      "shifts_syn": [
+        5,
+        6
+      ]
+    },
+    {
+      "beta": 0.5,
+      "family": "rsnn",
+      "name": "rsnn_beta050",
+      "shifts_syn": []
+    },
+    {
+      "beta": 0.5,
+      "family": "factorized",
+      "name": "factorized_rsnn_beta050",
+      "shifts_syn": []
+    }
+  ],
+  "expected_runs": 55,
+  "experiment_id": "experiment_5_3_synaptic_contextual_evidence",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "histories": "histories.csv",
+    "local_reference": "local_reference.csv",
+    "phase_probe_runs": "phase_probe_runs.csv",
+    "probe_runs": "probe_runs.csv",
+    "runs": "runs.csv"
+  },
+  "primary_metric": "native validation/test balanced accuracy from signed non-leaky accumulator",
+  "primary_objective": "final_accumulated_ce",
+  "protocol_version": "frozen_local_synaptic_history_context_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selection_policy": "checkpoint by validation BA; notebook selects best single and multi condition by mean validation BA only",
+  "shuffle_replicates": 5,
+  "source_experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_protocol_version": "frozen_exp3_l2_endpoint_tauR_v1"
+}

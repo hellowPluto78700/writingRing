@@ -1,0 +1,537 @@
+{
+  "ablations": [
+    {
+      "ablation": "state_reset",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 0.001,
+        "probe_test_accuracy": 0.0958904109589041,
+        "probe_test_balanced_accuracy": 0.08333333333333333,
+        "probe_test_macro_f1": 0.014583333333333332,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.08333333333333333
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 31.900865946730523,
+          "accuracy": 0.21232876712328766,
+          "balanced_accuracy": 0.2054646742146742,
+          "evidence_abs_per_valid_step": 0.15036337692162993,
+          "hidden_events_per_neuron_second": 0.0,
+          "hidden_tail_event_fraction": 0.0,
+          "hidden_tail_events_per_neuron_second": 0.0,
+          "loss": 2.218939728932838,
+          "macro_f1": 0.17991898148148147
+        },
+        "train": {
+          "accumulator_l2_mean": 35.95168704953743,
+          "accuracy": 0.39759036144578314,
+          "balanced_accuracy": 0.3923057624825225,
+          "evidence_abs_per_valid_step": 0.14078257150325407,
+          "hidden_events_per_neuron_second": 0.0,
+          "hidden_tail_event_fraction": 0.0,
+          "hidden_tail_events_per_neuron_second": 0.0,
+          "loss": 2.017043409372156,
+          "macro_f1": 0.3277859700163454
+        },
+        "val": {
+          "accumulator_l2_mean": 28.348280164930557,
+          "accuracy": 0.2222222222222222,
+          "balanced_accuracy": 0.20711279461279464,
+          "evidence_abs_per_valid_step": 0.11917043797597884,
+          "hidden_events_per_neuron_second": 0.0,
+          "hidden_tail_event_fraction": 0.0,
+          "hidden_tail_events_per_neuron_second": 0.0,
+          "loss": 2.242427349090576,
+          "macro_f1": 0.16724492827434
+        }
+      },
+      "replicate": 0
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 0.01,
+        "probe_test_accuracy": 0.5547945205479452,
+        "probe_test_balanced_accuracy": 0.5324307636807636,
+        "probe_test_macro_f1": 0.5235030408337717,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.5256433381433381
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 216.30851682898117,
+          "accuracy": 0.5,
+          "balanced_accuracy": 0.4852036852036852,
+          "evidence_abs_per_valid_step": 0.6418751218815578,
+          "hidden_events_per_neuron_second": 29.31365970841617,
+          "hidden_tail_event_fraction": 0.6006798748578892,
+          "hidden_tail_events_per_neuron_second": 28.484482020547944,
+          "loss": 2.5011880593757105,
+          "macro_f1": 0.4739918700537287
+        },
+        "train": {
+          "accumulator_l2_mean": 277.7894759842943,
+          "accuracy": 0.8812392426850258,
+          "balanced_accuracy": 0.877615984226732,
+          "evidence_abs_per_valid_step": 0.6403975165094405,
+          "hidden_events_per_neuron_second": 28.946572428693454,
+          "hidden_tail_event_fraction": 0.5470471340784648,
+          "hidden_tail_events_per_neuron_second": 28.06777780765921,
+          "loss": 0.3668543209102191,
+          "macro_f1": 0.874900410792474
+        },
+        "val": {
+          "accumulator_l2_mean": 223.79436383928572,
+          "accuracy": 0.5317460317460317,
+          "balanced_accuracy": 0.5192881192881194,
+          "evidence_abs_per_valid_step": 0.6116937393922103,
+          "hidden_events_per_neuron_second": 27.307874637872004,
+          "hidden_tail_event_fraction": 0.5717112192704067,
+          "hidden_tail_events_per_neuron_second": 25.74596974206349,
+          "loss": 2.1237998008728027,
+          "macro_f1": 0.48288188602869964
+        }
+      },
+      "replicate": 0
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 1.0,
+        "probe_test_accuracy": 0.4794520547945205,
+        "probe_test_balanced_accuracy": 0.4623570873570873,
+        "probe_test_macro_f1": 0.45842517745835815,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.5175084175084176
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 217.73459405768406,
+          "accuracy": 0.4520547945205479,
+          "balanced_accuracy": 0.43391816516816517,
+          "evidence_abs_per_valid_step": 0.6449800815333693,
+          "hidden_events_per_neuron_second": 29.4039098740888,
+          "hidden_tail_event_fraction": 0.599841949722651,
+          "hidden_tail_events_per_neuron_second": 28.472575984589042,
+          "loss": 2.6199947089365083,
+          "macro_f1": 0.4159769083122217
+        },
+        "train": {
+          "accumulator_l2_mean": 278.22756091329603,
+          "accuracy": 0.8881239242685026,
+          "balanced_accuracy": 0.8848227895441565,
+          "evidence_abs_per_valid_step": 0.6411580937257496,
+          "hidden_events_per_neuron_second": 28.951178253806088,
+          "hidden_tail_event_fraction": 0.5469233507250693,
+          "hidden_tail_events_per_neuron_second": 28.058223967297764,
+          "loss": 0.3526484399469707,
+          "macro_f1": 0.8829450639164719
+        },
+        "val": {
+          "accumulator_l2_mean": 222.68560887896825,
+          "accuracy": 0.5476190476190477,
+          "balanced_accuracy": 0.5387686387686389,
+          "evidence_abs_per_valid_step": 0.6108748363108302,
+          "hidden_events_per_neuron_second": 27.29338951804056,
+          "hidden_tail_event_fraction": 0.571689537977029,
+          "hidden_tail_events_per_neuron_second": 25.73003472222222,
+          "loss": 2.0960850715637207,
+          "macro_f1": 0.5216468253968253
+        }
+      },
+      "replicate": 1
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 0.1,
+        "probe_test_accuracy": 0.5,
+        "probe_test_balanced_accuracy": 0.4876998001998001,
+        "probe_test_macro_f1": 0.48307004427332423,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.5209776334776335
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 217.78920463666523,
+          "accuracy": 0.4863013698630137,
+          "balanced_accuracy": 0.47184898434898437,
+          "evidence_abs_per_valid_step": 0.6438134296434932,
+          "hidden_events_per_neuron_second": 29.320120941020544,
+          "hidden_tail_event_fraction": 0.6006416541521353,
+          "hidden_tail_events_per_neuron_second": 28.486221104452056,
+          "loss": 2.559727329097382,
+          "macro_f1": 0.4594886174396941
+        },
+        "train": {
+          "accumulator_l2_mean": 277.7606564651463,
+          "accuracy": 0.8795180722891566,
+          "balanced_accuracy": 0.8758886379100405,
+          "evidence_abs_per_valid_step": 0.6408375941577202,
+          "hidden_events_per_neuron_second": 28.89939203108513,
+          "hidden_tail_event_fraction": 0.5476131392535455,
+          "hidden_tail_events_per_neuron_second": 28.086119029690188,
+          "loss": 0.3535109950219908,
+          "macro_f1": 0.87574489386216
+        },
+        "val": {
+          "accumulator_l2_mean": 225.15708705357142,
+          "accuracy": 0.5,
+          "balanced_accuracy": 0.4851611351611352,
+          "evidence_abs_per_valid_step": 0.6165674358228719,
+          "hidden_events_per_neuron_second": 27.353129663769643,
+          "hidden_tail_event_fraction": 0.5709482859523137,
+          "hidden_tail_events_per_neuron_second": 25.708426339285715,
+          "loss": 2.1772634983062744,
+          "macro_f1": 0.45471504199125684
+        }
+      },
+      "replicate": 2
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 0.1,
+        "probe_test_accuracy": 0.5136986301369864,
+        "probe_test_balanced_accuracy": 0.5015796703296703,
+        "probe_test_macro_f1": 0.49727738960195106,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.5401635401635402
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 218.069444630244,
+          "accuracy": 0.4726027397260274,
+          "balanced_accuracy": 0.45246767121767123,
+          "evidence_abs_per_valid_step": 0.6448411176819293,
+          "hidden_events_per_neuron_second": 29.357770046388335,
+          "hidden_tail_event_fraction": 0.6002334933194967,
+          "hidden_tail_events_per_neuron_second": 28.47431506849315,
+          "loss": 2.5749174536091006,
+          "macro_f1": 0.4377663591191909
+        },
+        "train": {
+          "accumulator_l2_mean": 277.89580195783134,
+          "accuracy": 0.8812392426850258,
+          "balanced_accuracy": 0.8787004722761215,
+          "evidence_abs_per_valid_step": 0.6403408487227209,
+          "hidden_events_per_neuron_second": 28.928944679853284,
+          "hidden_tail_event_fraction": 0.5472580676234673,
+          "hidden_tail_events_per_neuron_second": 28.07457508605852,
+          "loss": 0.3632803747042526,
+          "macro_f1": 0.8751780057910813
+        },
+        "val": {
+          "accumulator_l2_mean": 224.05724516369048,
+          "accuracy": 0.5396825396825397,
+          "balanced_accuracy": 0.5282527657527658,
+          "evidence_abs_per_valid_step": 0.613826899617388,
+          "hidden_events_per_neuron_second": 27.320208936879993,
+          "hidden_tail_event_fraction": 0.5718010582360027,
+          "hidden_tail_events_per_neuron_second": 25.767051091269842,
+          "loss": 2.1586456298828125,
+          "macro_f1": 0.5130379768513826
+        }
+      },
+      "replicate": 3
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "hidden_whole_count_probe": {
+        "feature_dim": 128,
+        "input_feature_dim": 128,
+        "pca_explained_variance_ratio_sum": null,
+        "probe_C": 0.1,
+        "probe_test_accuracy": 0.5068493150684932,
+        "probe_test_balanced_accuracy": 0.48878205128205127,
+        "probe_test_macro_f1": 0.49440261263790664,
+        "probe_type": "hidden_whole_count",
+        "probe_val_balanced_accuracy": 0.5136063011063011
+      },
+      "native": {
+        "test": {
+          "accumulator_l2_mean": 218.71076359160958,
+          "accuracy": 0.4863013698630137,
+          "balanced_accuracy": 0.47400654900654904,
+          "evidence_abs_per_valid_step": 0.6477701917293979,
+          "hidden_events_per_neuron_second": 29.438286944996687,
+          "hidden_tail_event_fraction": 0.5992392538688553,
+          "hidden_tail_events_per_neuron_second": 28.434396404109588,
+          "loss": 2.500898932757443,
+          "macro_f1": 0.45502077758269716
+        },
+        "train": {
+          "accumulator_l2_mean": 278.43201376936315,
+          "accuracy": 0.8760757314974182,
+          "balanced_accuracy": 0.8742101208622128,
+          "evidence_abs_per_valid_step": 0.642276865437679,
+          "hidden_events_per_neuron_second": 28.95727469140972,
+          "hidden_tail_event_fraction": 0.547110522900171,
+          "hidden_tail_events_per_neuron_second": 28.08533912435456,
+          "loss": 0.362011846802526,
+          "macro_f1": 0.8718476202664052
+        },
+        "val": {
+          "accumulator_l2_mean": 223.8847191220238,
+          "accuracy": 0.5476190476190477,
+          "balanced_accuracy": 0.5387686387686389,
+          "evidence_abs_per_valid_step": 0.6117316896745969,
+          "hidden_events_per_neuron_second": 27.296418224914405,
+          "hidden_tail_event_fraction": 0.5718699720967505,
+          "hidden_tail_events_per_neuron_second": 25.75186011904762,
+          "loss": 2.1332383155822754,
+          "macro_f1": 0.5162886736735841
+        }
+      },
+      "replicate": 4
+    }
+  ],
+  "best_epoch": 56,
+  "experiment_id": "experiment_5_3_synaptic_contextual_evidence",
+  "native": {
+    "test": {
+      "accumulator_l2_mean": 154.68004367776112,
+      "accuracy": 0.4315068493150685,
+      "balanced_accuracy": 0.42220973470973466,
+      "evidence_abs_per_valid_step": 0.5291258565684884,
+      "hidden_events_per_neuron_second": 23.91356030483764,
+      "hidden_tail_event_fraction": 0.6525640871344326,
+      "hidden_tail_events_per_neuron_second": 29.01409995719178,
+      "loss": 2.3300253887699074,
+      "macro_f1": 0.40638329300221016
+    },
+    "train": {
+      "accumulator_l2_mean": 199.06143603431585,
+      "accuracy": 0.9759036144578314,
+      "balanced_accuracy": 0.9748758804128733,
+      "evidence_abs_per_valid_step": 0.5428475744922426,
+      "hidden_events_per_neuron_second": 24.669201266183194,
+      "hidden_tail_event_fraction": 0.5904883296358147,
+      "hidden_tail_events_per_neuron_second": 28.55875510972461,
+      "loss": 0.18202567437788705,
+      "macro_f1": 0.9759635554432319
+    },
+    "val": {
+      "accumulator_l2_mean": 158.69193328373015,
+      "accuracy": 0.48412698412698413,
+      "balanced_accuracy": 0.4774591149591149,
+      "evidence_abs_per_valid_step": 0.49632093730796245,
+      "hidden_events_per_neuron_second": 21.849091387937847,
+      "hidden_tail_event_fraction": 0.6305087865934859,
+      "hidden_tail_events_per_neuron_second": 26.333085317460316,
+      "loss": 1.8534377813339233,
+      "macro_f1": 0.4663999630056075
+    }
+  },
+  "phase_probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.31438356164383563,
+      "probe_test_balanced_accuracy": 0.31438356164383563,
+      "probe_test_macro_f1": 0.2704377412190561,
+      "probe_type": "phase_contextual",
+      "probe_val_balanced_accuracy": 0.3119047619047619
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.32465753424657534,
+      "probe_test_balanced_accuracy": 0.3246575342465753,
+      "probe_test_macro_f1": 0.2975534305520349,
+      "probe_type": "phase_synaptic_state",
+      "probe_val_balanced_accuracy": 0.3436507936507936
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.32602739726027397,
+      "probe_test_balanced_accuracy": 0.32602739726027397,
+      "probe_test_macro_f1": 0.2985844889481479,
+      "probe_type": "phase_membrane",
+      "probe_val_balanced_accuracy": 0.33809523809523806
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.31438356164383563,
+      "probe_test_balanced_accuracy": 0.31438356164383563,
+      "probe_test_macro_f1": 0.2704377412190561,
+      "probe_type": "phase_spike",
+      "probe_val_balanced_accuracy": 0.3119047619047619
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.1,
+      "probe_test_balanced_accuracy": 0.1,
+      "probe_test_macro_f1": 0.01818181818181818,
+      "probe_type": "phase_gate",
+      "probe_val_balanced_accuracy": 0.1
+    }
+  ],
+  "probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.4657534246575342,
+      "probe_test_balanced_accuracy": 0.4564636752136752,
+      "probe_test_macro_f1": 0.4446597805504144,
+      "probe_type": "hidden_whole_count",
+      "probe_val_balanced_accuracy": 0.4724927849927851
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 10.0,
+      "probe_test_accuracy": 0.541095890410959,
+      "probe_test_balanced_accuracy": 0.523132423132423,
+      "probe_test_macro_f1": 0.5170357176936123,
+      "probe_type": "hidden_fixed250_ordered",
+      "probe_val_balanced_accuracy": 0.5157888407888408
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.5205479452054794,
+      "probe_test_balanced_accuracy": 0.5036838161838162,
+      "probe_test_macro_f1": 0.4946186819542083,
+      "probe_type": "hidden_relative10_ordered",
+      "probe_val_balanced_accuracy": 0.5070526695526695
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.1,
+      "probe_test_accuracy": 0.541095890410959,
+      "probe_test_balanced_accuracy": 0.5193605006105005,
+      "probe_test_macro_f1": 0.5162493155367064,
+      "probe_type": "hidden_uend",
+      "probe_val_balanced_accuracy": 0.5498797498797499
+    }
+  ],
+  "protocol_version": "frozen_local_synaptic_history_context_v1",
+  "provenance": {
+    "alpha_neuron_counts": [
+      128
+    ],
+    "alpha_syn": [
+      0.984375
+    ],
+    "architecture_family": "syn",
+    "batch_size": 128,
+    "beta": 0.5,
+    "checkpoint_selection": "max validation native accumulator BA; tie-break validation CE",
+    "condition": "syn_single_s6",
+    "epochs": 100,
+    "evidence_accumulator": "12-D signed non-leaky non-spiking sum; no evidence-head bias",
+    "experiment_id": "experiment_5_3_synaptic_contextual_evidence",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "local_source_experiment": "experiment_5_2_frozen_local_tauR_sweep",
+    "local_source_frozen": true,
+    "local_source_protocol": "frozen_exp3_l2_endpoint_tauR_v1",
+    "local_width": 128,
+    "logit_gain_training_only": 5.0,
+    "objective": "final_accumulated_ce",
+    "objective_formula": "CE(5 * sum_valid(e_t) / T_valid, y)",
+    "parameter_counts": {
+      "evidence_head": 1536,
+      "gate_projection": 0,
+      "input_projection": 16384,
+      "recurrent": 0,
+      "trainable_total": 17920
+    },
+    "protocol_version": "frozen_local_synaptic_history_context_v1",
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 71,
+    "shift_syn": [
+      6
+    ],
+    "shuffle_replicates": 5,
+    "split_seed": 12345,
+    "tail_seconds": 2.0,
+    "tau_mem_ms": 22.542110013890053,
+    "tau_syn_ms": [
+      992.1669944116244
+    ],
+    "temporal_width": 128,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0
+  },
+  "spec": {
+    "condition": "syn_single_s6",
+    "seed": 71
+  }
+}
