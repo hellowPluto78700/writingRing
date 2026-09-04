@@ -76,12 +76,13 @@ def test_exp3_initialization_matches_historical_no_l3_model() -> None:
         assert torch.equal(control.state_dict()[name], historical.state_dict()[name]), name
 
 
-def test_exp5_macro_analog_hidden_initialization_matches_exp5_binary() -> None:
+def test_exp5_macro_analog_hidden_matches_exp5_binary_through_l2() -> None:
     seed = exp501.base.dseed(11, "exp5_0_paired", "model_init")
     exp501.base.seed_all(seed)
     control = exp501.Exp5MacroBinaryAnalogNet(12, 64.0)
     exp501.base.seed_all(seed)
     historical = exp501.exp50.LocalEvidenceSNN(12, 64.0, hidden_cap=1, output_cap=1)
+
     for name in ("f1.weight", "f2.weight"):
         assert torch.equal(control.state_dict()[name], historical.state_dict()[name]), name
     assert torch.equal(control.alpha1, historical.alpha1)
@@ -91,6 +92,14 @@ def test_exp5_macro_analog_hidden_initialization_matches_exp5_binary() -> None:
     assert isinstance(control.head, nn.Linear)
     assert control.head.bias is not None
     assert not hasattr(control, "output_lif")
+
+    x = torch.zeros(2, 12, exp501.base.EVENT_CHANNELS)
+    x[:, 0, 0] = 1.0
+    x[:, 4, 7] = 0.5
+    control_layers = control.layer_features(x)
+    historical_layers = historical.forward_trajectory(x)
+    assert torch.equal(control_layers["L1"], historical_layers["l1_spikes"])
+    assert torch.equal(control_layers["L2"], historical_layers["l2_spikes"])
 
 
 def test_timestep_loss_is_direct_analog_linear_for_both_controls() -> None:
