@@ -1,0 +1,191 @@
+{
+  "best_epoch": 99,
+  "condition": "exp3_synaptic_exp5stream_analog",
+  "experiment_id": "experiment_5_0_1_exp3_analog_head_control",
+  "native": {
+    "test": {
+      "accuracy": 0.5273972602739726,
+      "balanced_accuracy": 0.5024156399156399,
+      "loss": 2.0725067510996777,
+      "macro_f1": 0.4872368657758857
+    },
+    "train": {
+      "accuracy": 0.810671256454389,
+      "balanced_accuracy": 0.7999687801361196,
+      "loss": 1.549083818051573,
+      "macro_f1": 0.8019479678492957
+    },
+    "val": {
+      "accuracy": 0.4603174603174603,
+      "balanced_accuracy": 0.45089586339586335,
+      "loss": 2.042923927307129,
+      "macro_f1": 0.3981745352657477
+    }
+  },
+  "objective": "timestep_ce",
+  "probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.6232876712328768,
+      "probe_test_balanced_accuracy": 0.5988296425796426,
+      "probe_test_macro_f1": 0.5953333598020505,
+      "probe_type": "full_count",
+      "probe_val_balanced_accuracy": 0.5506373256373255
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.6232876712328768,
+      "probe_test_balanced_accuracy": 0.6127455877455877,
+      "probe_test_macro_f1": 0.6055664988028576,
+      "probe_type": "fixed250_ordered",
+      "probe_val_balanced_accuracy": 0.5615800865800865
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.5753424657534246,
+      "probe_test_balanced_accuracy": 0.5632416194916195,
+      "probe_test_macro_f1": 0.5685793185994831,
+      "probe_type": "fixed250_shuffled",
+      "probe_val_balanced_accuracy": 0.542430254930255
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": 0.9211848378181458,
+      "probe_C": 1.0,
+      "probe_test_accuracy": 0.541095890410959,
+      "probe_test_balanced_accuracy": 0.5312271062271062,
+      "probe_test_macro_f1": 0.525505602591124,
+      "probe_type": "fixed250_pca128",
+      "probe_val_balanced_accuracy": 0.5208694083694082
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.7054794520547946,
+      "probe_test_balanced_accuracy": 0.6879530192030191,
+      "probe_test_macro_f1": 0.6823695167102072,
+      "probe_type": "relative10_ordered",
+      "probe_val_balanced_accuracy": 0.6393939393939395
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.589041095890411,
+      "probe_test_balanced_accuracy": 0.5685335497835499,
+      "probe_test_macro_f1": 0.5678513273125342,
+      "probe_type": "relative10_shuffled",
+      "probe_val_balanced_accuracy": 0.5146584896584897
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": 0.8939670324325562,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.7191780821917808,
+      "probe_test_balanced_accuracy": 0.6960858585858586,
+      "probe_test_macro_f1": 0.6954085490146871,
+      "probe_type": "relative10_pca128",
+      "probe_val_balanced_accuracy": 0.5966390091390091
+    },
+    {
+      "feature_dim": 1,
+      "input_feature_dim": 1,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.1232876712328767,
+      "probe_test_balanced_accuracy": 0.1130952380952381,
+      "probe_test_macro_f1": 0.03377882599580713,
+      "probe_type": "duration_only",
+      "probe_val_balanced_accuracy": 0.13194444444444445
+    }
+  ],
+  "protocol_version": "analog_head_three_way_control_v3",
+  "provenance": {
+    "batch_size": 128,
+    "checkpoint_selection": "native analog-head validation BA, tie-break validation CE",
+    "condition": "exp3_synaptic_exp5stream_analog",
+    "epochs": 100,
+    "head": "Linear(128, 12, bias=True), no output LIF",
+    "hidden_contract": "Exp3 snnTorch.Synaptic L1/L2 under Exp5 paired random/data stream",
+    "initialization": "Exp5.0 exp5_0_paired model_init stream",
+    "l1_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l2_shifts": [
+      2,
+      3,
+      4
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "loader_contract": "Exp5.0 exp5_0_paired train/val/test loader streams",
+    "objective": "timestep_ce",
+    "probe_protocol": "exact Exp3.0.5 StandardScaler + LogisticRegression C-grid/PCA controls",
+    "question": "Separate protocol reproduction, hidden-dynamics implementation, and the Exp5 spiking-output path by using three analog-head controls.",
+    "reset": "subtract",
+    "role": "paired Synaptic control for hidden-dynamics comparison",
+    "sampling_rate_hz": 64.0,
+    "seed": 101,
+    "split_seed": 12345,
+    "surrogate_slope": 25.0,
+    "tau_mem_ms": 22.54,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "width": 128
+  },
+  "seed": 101
+}

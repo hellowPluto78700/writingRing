@@ -1,0 +1,31 @@
+{
+  "comparison_sources": [
+    "Exp3.0.5 historical analog-head reference",
+    "Exp5.0 timestep_ce binary spiking-output reference",
+    "Exp5.0 timestep_ce multi_ho spiking-output reference"
+  ],
+  "conditions": [
+    "exp3_exact_analog",
+    "exp3_synaptic_exp5stream_analog",
+    "exp5_macro_exp5stream_analog"
+  ],
+  "expected_runs": 9,
+  "experiment_id": "experiment_5_0_1_exp3_analog_head_control",
+  "files": {
+    "comparison_runs": "comparison_runs.csv",
+    "runs": "runs.csv"
+  },
+  "notebook_role": "compute mean/SD, paired deltas, and plots from finalized run tables",
+  "objective": "timestep_ce",
+  "primary_probes": [
+    "full_count",
+    "fixed250_ordered",
+    "relative10_ordered"
+  ],
+  "protocol_version": "analog_head_three_way_control_v3",
+  "seeds": [
+    11,
+    23,
+    101
+  ]
+}
