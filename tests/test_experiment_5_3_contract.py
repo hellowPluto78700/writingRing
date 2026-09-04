@@ -264,6 +264,7 @@ def test_notebook_is_analysis_only_and_uses_validation_selection() -> None:
         "fill_between",
     ):
         assert token in joined
+    assert '("lif_beta100","lif_beta050")' in joined.replace(" ", "")
     for forbidden in (
         "optimizer.step(",
         ".backward()",
@@ -281,6 +282,8 @@ def test_readme_states_scientific_and_execution_contract() -> None:
         "Synaptic history contextualization",
         "lif_beta100",
         "lif_beta050",
+        "one non-leaky LIF layer",
+        "lif_beta100 - lif_beta050",
         "single-tau sweep is therefore `(4, 5, 6)`",
         "`(2,3,4,5,6)` versus `(4,5,6)` versus `(5,6)`",
         "final accumulated supervision",

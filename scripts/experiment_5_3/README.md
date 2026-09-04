@@ -47,7 +47,7 @@ There are 11 conditions.
 | Condition | Context mechanism | Fixed dynamics |
 |---|---|---|
 | `direct` | no contextualizer; local spike goes directly to evidence head | none |
-| `lif_beta100` | one short LIF layer | beta = 1.00 |
+| `lif_beta100` | one non-leaky LIF layer | beta = 1.00 |
 | `lif_beta050` | one short LIF layer | beta = 0.50 |
 | `syn_single_s4` | one Synaptic-LIF layer | shift_syn = 4 |
 | `syn_single_s5` | one Synaptic-LIF layer | shift_syn = 5 |
@@ -70,7 +70,7 @@ At 64 Hz, repository-style synaptic shifts correspond approximately to:
 
 The single-tau sweep is therefore `(4, 5, 6)`. The multi-tau comparison is `(2,3,4,5,6)` versus `(4,5,6)` versus `(5,6)`.
 
-The two pure-LIF controls differ only in beta:
+The two pure-LIF controls differ only in beta; `lif_beta100` has no passive membrane leak:
 
 ```text
 lif_beta100: tau_mem = inf (no passive membrane leak)
