@@ -34,11 +34,10 @@ jobs:
 
           readme_path = Path('scripts/experiment_5_3/README.md')
           readme = readme_path.read_text(encoding='utf-8')
-          readme = readme.replace('`lif_beta100`', '`lif_tau242`')
+          readme = readme.replace('lif_beta100', 'lif_tau242')
           readme = readme.replace('| `lif_tau242` | one non-leaky LIF layer | beta = 1.00 |', '| `lif_tau242` | one long-membrane LIF layer | beta = 0.9375 (shift_mem = 4) |')
           readme = readme.replace('The two pure-LIF controls differ only in beta; `lif_tau242` has no passive membrane leak:', 'The two pure-LIF controls differ only in membrane decay; `lif_tau242` uses repository-style `shift_mem=4`:')
           readme = readme.replace('lif_tau242: tau_mem = inf (no passive membrane leak)', 'lif_tau242: beta = 0.9375, shift_mem = 4, tau_mem about 242 ms at 64 Hz')
-          readme = readme.replace('lif_tau242 - lif_beta050', 'lif_tau242 - lif_beta050')
           assert 'lif_beta100' not in readme
           assert 'tau_mem = inf' not in readme
           assert 'no passive membrane leak' not in readme
@@ -53,17 +52,15 @@ jobs:
 
           test_path = Path('tests/test_experiment_5_3_contract.py')
           test = test_path.read_text(encoding='utf-8')
-          test = test.replace('"lif_beta100"', '"lif_tau242"')
-          test = test.replace('test_lif_beta100_and_beta050_are_explicit_controls', 'test_lif_tau242_and_beta050_are_explicit_controls')
-          test = test.replace('beta100 = exp53.CONDITION_BY_NAME["lif_tau242"]', 'tau242 = exp53.CONDITION_BY_NAME["lif_tau242"]')
-          test = test.replace('assert beta100.family == beta050.family == "lif"', 'assert tau242.family == beta050.family == "lif"')
-          test = test.replace('assert beta100.beta == 1.00', 'assert tau242.beta == 0.9375')
-          test = test.replace('assert beta100.shifts_syn == beta050.shifts_syn == ()', 'assert tau242.shifts_syn == beta050.shifts_syn == ()')
+          test = test.replace('lif_beta100', 'lif_tau242')
+          test = test.replace('beta100', 'tau242')
+          test = test.replace('assert tau242.beta == 1.00', 'assert tau242.beta == 0.9375')
           test = test.replace('assert math.isinf(exp53.tau_ms_from_decay(1.00, 64.0))', 'assert math.isclose(exp53.tau_ms_from_decay(0.9375, 64.0), 242.1, rel_tol=0.02)')
           test = test.replace('"one non-leaky LIF layer",', '"one long-membrane LIF layer",')
-          test = test.replace('"lif_beta100 - lif_beta050",', '"lif_tau242 - lif_beta050",')
           assert 'lif_beta100' not in test
           assert 'beta100' not in test
+          assert 'assert tau242.beta == 0.9375' in test
+          assert 'tau_ms_from_decay(0.9375, 64.0)' in test
           test_path.write_text(test, encoding='utf-8')
           PY
 
@@ -81,6 +78,7 @@ jobs:
           joined = '\n'.join(''.join(cell.get('source', [])) for cell in nb['cells'])
           assert 'lif_tau242' in joined
           assert 'lif_beta100' not in joined
+          assert '("lif_tau242","lif_beta050")' in joined.replace(' ', '')
           for i, cell in enumerate(nb['cells']):
               if cell.get('cell_type') == 'code':
                   compile(''.join(cell.get('source', [])), f'cell-{i}', 'exec')
