@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
+from scripts import experiment_3_0_3_l3_bottleneck_ablation as exp303
 from scripts import experiment_5_0_1_exp3_analog_head_control as exp501
 
 
@@ -47,6 +48,26 @@ def test_model_is_exact_exp3_two_layer_analog_head_contract() -> None:
     assert not hasattr(model, "output_linear")
     assert exp501.base.TAU_MEM_MS == 22.54
     assert exp501.base.THRESHOLD == 0.5
+
+
+def test_initialization_matches_historical_exp3_0_3_no_l3_model() -> None:
+    seed = 11
+    shared_seed = exp501.base.dseed(seed, "shared_backbone_init")
+    head_seed = exp501.base.dseed(seed, "timestep_ce", "head_init")
+
+    exp501.base.seed_all(shared_seed)
+    control = exp501.exp304.L2WidthNet(128, "timestep_ce", 12, 256, 64.0, 16)
+    exp501.base.seed_all(head_seed)
+    control.head.reset_parameters()
+
+    exp501.base.seed_all(shared_seed)
+    historical = exp303.L3AblationNet("B", "timestep_ce", 12, 256, 64.0, 16)
+    exp501.base.seed_all(head_seed)
+    historical.head.reset_parameters()
+
+    assert set(control.state_dict()) == set(historical.state_dict())
+    for name in control.state_dict():
+        assert torch.equal(control.state_dict()[name], historical.state_dict()[name]), name
 
 
 def test_timestep_loss_is_applied_directly_to_analog_linear_logits() -> None:
