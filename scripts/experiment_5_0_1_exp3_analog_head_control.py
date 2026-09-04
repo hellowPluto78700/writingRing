@@ -19,12 +19,12 @@ from scripts import experiment_5_0_local_evidence_objectives as exp50
 
 
 EXPERIMENT_ID = "experiment_5_0_1_exp3_analog_head_control"
-PROTOCOL_VERSION = "analog_head_hidden_dynamics_control_v2"
+PROTOCOL_VERSION = "analog_head_three_way_control_v3"
 OBJECTIVE = "timestep_ce"
-CONDITIONS = (
-    "exp3_synaptic_analog",
-    "exp5_macro_binary_analog",
-)
+EXP3_EXACT = "exp3_exact_analog"
+EXP3_EXP5_STREAM = "exp3_synaptic_exp5stream_analog"
+MACRO_EXP5_STREAM = "exp5_macro_exp5stream_analog"
+CONDITIONS = (EXP3_EXACT, EXP3_EXP5_STREAM, MACRO_EXP5_STREAM)
 SEEDS = base.SEEDS
 WIDTH = 128
 L1_SHIFTS = (2, 3, 4)
@@ -105,12 +105,7 @@ def prepare_data(repo_root: Path) -> base.Data:
 
 
 class Exp5MacroBinaryAnalogNet(nn.Module):
-    """Exp5 binary hidden dynamics with the Exp3 analog timestep head.
-
-    The hidden forward equations match Exp5.0 binary LocalEvidenceSNN through L2:
-    explicit exponential synaptic state + MacroMultiSpikeLIF(cap=1). The 12-neuron
-    spiking output layer is removed and replaced by Linear(128, 12, bias=True).
-    """
+    """Exp5 binary hidden dynamics with an Exp3-style analog timestep head."""
 
     def __init__(self, n_classes: int, fs: float) -> None:
         super().__init__()
@@ -124,8 +119,8 @@ class Exp5MacroBinaryAnalogNet(nn.Module):
         beta = exp50.beta_value(self.fs)
         self.f1 = nn.Linear(base.EVENT_CHANNELS, WIDTH, bias=False)
         self.f2 = nn.Linear(WIDTH, WIDTH, bias=False)
-        # This constructor occupies the same third Linear position as Exp5.0's
-        # output_linear, so f1/f2 initialization remains exactly paired.
+        # Third Linear position mirrors Exp5.0's output_linear draw order. The
+        # analog head adds a bias only after its weight has been initialized.
         self.head = nn.Linear(WIDTH, n_classes, bias=True)
         self.l1_lif = exp50.exp401.MacroMultiSpikeLIF(
             beta=beta,
@@ -181,7 +176,7 @@ class Exp5MacroBinaryAnalogNet(nn.Module):
 
 
 def build_model(data: base.Data, condition: str) -> nn.Module:
-    if condition == "exp3_synaptic_analog":
+    if condition in (EXP3_EXACT, EXP3_EXP5_STREAM):
         model = exp304.L2WidthNet(
             WIDTH,
             OBJECTIVE,
@@ -193,28 +188,30 @@ def build_model(data: base.Data, condition: str) -> nn.Module:
         if model.last_layer != "L2":
             raise RuntimeError(f"Expected L2 final layer, got {model.last_layer}")
         return model
-    if condition == "exp5_macro_binary_analog":
+    if condition == MACRO_EXP5_STREAM:
         return Exp5MacroBinaryAnalogNet(len(data.labels), data.fs)
     raise ValueError(f"Unknown condition: {condition}")
 
 
 def _initialize_model(spec: RunSpec, data: base.Data, device: torch.device) -> nn.Module:
-    if spec.condition == "exp3_synaptic_analog":
-        # Exact historical Exp3.0.3-B / Exp3.0.4 initialization contract.
+    if spec.condition == EXP3_EXACT:
+        # Exact historical Exp3.0.3-B / Exp3.0.4 contract.
         base.seed_all(base.dseed(spec.seed, "shared_backbone_init"))
         model = build_model(data, spec.condition).to(device)
         base.seed_all(base.dseed(spec.seed, OBJECTIVE, "head_init"))
         model.head.reset_parameters()  # type: ignore[attr-defined]
         return model
 
-    # Exact Exp5.0 model-init stream. The analog head replaces output_linear but
-    # f1/f2 are constructed first and therefore retain the exact Exp5 initial weights.
+    # Both Exp5-stream controls use exactly the same random stream. Because both
+    # constructors have f1, f2, and the 128->12 analog head as their only random
+    # parameterized modules in that order, they begin with identical f1/f2/head
+    # parameters; only hidden neuron dynamics differ.
     base.seed_all(base.dseed(spec.seed, "exp5_0_paired", "model_init"))
     return build_model(data, spec.condition).to(device)
 
 
 def _loader_seed(spec: RunSpec, split: str) -> int:
-    if spec.condition == "exp3_synaptic_analog":
+    if spec.condition == EXP3_EXACT:
         return base.dseed(spec.seed, split, "loader")
     return base.dseed(spec.seed, "exp5_0_paired", f"{split}_loader")
 
@@ -497,21 +494,28 @@ def run_one(
 
 
 def provenance(spec: RunSpec, data: base.Data, config: Config) -> dict[str, object]:
-    if spec.condition == "exp3_synaptic_analog":
+    if spec.condition == EXP3_EXACT:
         hidden_contract = "exact Exp3.0.3-B snnTorch.Synaptic L1/L2"
         init_contract = "Exp3 shared_backbone_init + timestep_ce head_init"
-        loader_contract = "Exp3 train/val/test loader seeds"
+        loader_contract = "Exp3 train/val/test loader streams"
+        role = "historical Exp3 reproduction gate"
+    elif spec.condition == EXP3_EXP5_STREAM:
+        hidden_contract = "Exp3 snnTorch.Synaptic L1/L2 under Exp5 paired random/data stream"
+        init_contract = "Exp5.0 exp5_0_paired model_init stream"
+        loader_contract = "Exp5.0 exp5_0_paired train/val/test loader streams"
+        role = "paired Synaptic control for hidden-dynamics comparison"
     else:
         hidden_contract = "exact Exp5.0 binary MacroMultiSpikeLIF hidden dynamics through L2"
-        init_contract = "Exp5.0 exp5_0_paired model_init stream; f1/f2 paired with Exp5"
-        loader_contract = "Exp5.0 exp5_0_paired train/val/test loader seeds"
+        init_contract = "Exp5.0 exp5_0_paired model_init stream"
+        loader_contract = "Exp5.0 exp5_0_paired train/val/test loader streams"
+        role = "paired Macro control for hidden-dynamics and output-path comparison"
     return {
         "question": (
-            "Separate hidden-dynamics implementation from the spiking-output bottleneck by "
-            "training both Exp3 Synaptic and Exp5 Macro binary hidden backbones with the same "
-            "analog Linear timestep head."
+            "Separate protocol reproduction, hidden-dynamics implementation, and the Exp5 "
+            "spiking-output path by using three analog-head controls."
         ),
         "condition": spec.condition,
+        "role": role,
         "hidden_contract": hidden_contract,
         "width": WIDTH,
         "l1_shifts": list(L1_SHIFTS),
