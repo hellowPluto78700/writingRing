@@ -51,7 +51,7 @@ def test_run_matrix_and_condition_contract() -> None:
     assert exp53.SEEDS == (11, 23, 37, 53, 71)
     assert exp53.CONDITION_NAMES == (
         "direct",
-        "lif_beta025",
+        "lif_beta100",
         "lif_beta050",
         "syn_single_s4",
         "syn_single_s5",
@@ -67,16 +67,14 @@ def test_run_matrix_and_condition_contract() -> None:
     assert len({spec.key for spec in specs}) == 55
 
 
-def test_lif_beta025_and_beta050_are_explicit_controls() -> None:
-    beta025 = exp53.CONDITION_BY_NAME["lif_beta025"]
+def test_lif_beta100_and_beta050_are_explicit_controls() -> None:
+    beta100 = exp53.CONDITION_BY_NAME["lif_beta100"]
     beta050 = exp53.CONDITION_BY_NAME["lif_beta050"]
-    assert beta025.family == beta050.family == "lif"
-    assert beta025.beta == 0.25
+    assert beta100.family == beta050.family == "lif"
+    assert beta100.beta == 1.00
     assert beta050.beta == 0.50
-    assert beta025.shifts_syn == beta050.shifts_syn == ()
-    assert math.isclose(
-        exp53.tau_ms_from_decay(0.25, 64.0), 11.27, rel_tol=0.02
-    )
+    assert beta100.shifts_syn == beta050.shifts_syn == ()
+    assert math.isinf(exp53.tau_ms_from_decay(1.00, 64.0))
     assert math.isclose(
         exp53.tau_ms_from_decay(0.50, 64.0), 22.54, rel_tol=0.02
     )
@@ -151,7 +149,7 @@ def test_trajectory_shapes_and_state_reset_path() -> None:
 def test_initialization_is_paired_for_shared_modules() -> None:
     device = torch.device("cpu")
     specs = [
-        exp53.RunSpec("lif_beta025", 11),
+        exp53.RunSpec("lif_beta100", 11),
         exp53.RunSpec("lif_beta050", 11),
         exp53.RunSpec("syn_single_s4", 11),
         exp53.RunSpec("syn_multi_s456", 11),
@@ -261,7 +259,7 @@ def test_notebook_is_analysis_only_and_uses_validation_selection() -> None:
         "state_reset",
         "temporal_shuffle",
         "lif_beta050",
-        "lif_beta025",
+        "lif_beta100",
         "plt.subplots",
         "fill_between",
     ):
@@ -281,7 +279,7 @@ def test_readme_states_scientific_and_execution_contract() -> None:
     text = README.read_text(encoding="utf-8")
     for token in (
         "Synaptic history contextualization",
-        "lif_beta025",
+        "lif_beta100",
         "lif_beta050",
         "single-tau sweep is therefore `(4, 5, 6)`",
         "`(2,3,4,5,6)` versus `(4,5,6)` versus `(5,6)`",

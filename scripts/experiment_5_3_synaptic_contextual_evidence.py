@@ -65,7 +65,7 @@ class Condition:
 
 CONDITIONS = (
     Condition("direct", "direct", None),
-    Condition("lif_beta025", "lif", 0.25),
+    Condition("lif_beta100", "lif", 1.00),
     Condition("lif_beta050", "lif", 0.50),
     Condition("syn_single_s4", "syn", 0.50, (4,)),
     Condition("syn_single_s5", "syn", 0.50, (5,)),
@@ -155,8 +155,10 @@ def decay_from_shift(shift: int) -> float:
 
 
 def tau_ms_from_decay(decay: float, fs: float) -> float:
+    if decay == 1.0:
+        return math.inf
     if not 0.0 < decay < 1.0:
-        raise ValueError(f"Decay must be in (0, 1), got {decay}")
+        raise ValueError(f"Decay must be in (0, 1], got {decay}")
     return -(1000.0 / float(fs)) / math.log(float(decay))
 
 

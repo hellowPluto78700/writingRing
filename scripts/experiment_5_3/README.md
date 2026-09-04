@@ -47,7 +47,7 @@ There are 11 conditions.
 | Condition | Context mechanism | Fixed dynamics |
 |---|---|---|
 | `direct` | no contextualizer; local spike goes directly to evidence head | none |
-| `lif_beta025` | one short LIF layer | beta = 0.25 |
+| `lif_beta100` | one short LIF layer | beta = 1.00 |
 | `lif_beta050` | one short LIF layer | beta = 0.50 |
 | `syn_single_s4` | one Synaptic-LIF layer | shift_syn = 4 |
 | `syn_single_s5` | one Synaptic-LIF layer | shift_syn = 5 |
@@ -73,7 +73,7 @@ The single-tau sweep is therefore `(4, 5, 6)`. The multi-tau comparison is `(2,3
 The two pure-LIF controls differ only in beta:
 
 ```text
-lif_beta025: tau_mem about 11.3 ms at 64 Hz
+lif_beta100: tau_mem = inf (no passive membrane leak)
 lif_beta050: tau_mem about 22.5 ms at 64 Hz
 ```
 
@@ -242,7 +242,7 @@ Runs record valid context events, two-second zero-input tail activity, accumulat
 The analysis notebook reports paired effects by master seed for:
 
 ```text
-lif_beta050 - lif_beta025
+lif_beta100 - lif_beta050
 single_s5 - single_s4
 single_s6 - single_s5
 multi_s56 - single_s5
