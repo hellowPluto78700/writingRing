@@ -107,11 +107,15 @@ def test_exp5_macro_analog_hidden_matches_exp5_binary_through_l2() -> None:
     assert control.head.bias is not None
     assert not hasattr(control, "output_lif")
 
+    # Strong impulses ensure the equality check is not vacuously comparing two
+    # all-zero spike trajectories.
     x = torch.zeros(2, 12, exp501.base.EVENT_CHANNELS)
-    x[:, 0, 0] = 1.0
-    x[:, 4, 7] = 0.5
+    x[:, 0, 0] = 10.0
+    x[:, 4, 7] = 5.0
     control_layers = control.layer_features(x)
     historical_layers = historical.forward_trajectory(x)
+    assert float(control_layers["L1"].sum()) > 0.0
+    assert float(control_layers["L2"].sum()) > 0.0
     assert torch.equal(control_layers["L1"], historical_layers["l1_spikes"])
     assert torch.equal(control_layers["L2"], historical_layers["l2_spikes"])
 
