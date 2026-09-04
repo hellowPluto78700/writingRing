@@ -1,0 +1,188 @@
+{
+  "best_epoch": 30,
+  "experiment_id": "experiment_5_2_1_ff_multitau_objectives",
+  "native": {
+    "test": {
+      "accuracy": 0.5821917808219178,
+      "aux_loss": 1.741378315507549,
+      "balanced_accuracy": 0.5691731879231878,
+      "endpoint_loss": 1.6946319749910537,
+      "endpoint_membrane_l2_mean": 67.92706884096746,
+      "hidden_events_per_neuron_second": 13.891153081510934,
+      "hidden_tail_event_fraction": 0.04411370722726055,
+      "hidden_tail_events_per_neuron_second": 0.4141160102739726,
+      "loss": 3.4360101712893134,
+      "macro_f1": 0.5722338729678326
+    },
+    "train": {
+      "accuracy": 0.9397590361445783,
+      "aux_loss": 0.053825979547418024,
+      "balanced_accuracy": 0.9394504865010757,
+      "endpoint_loss": 0.24804058985178729,
+      "endpoint_membrane_l2_mean": 70.5278891794858,
+      "hidden_events_per_neuron_second": 13.20076372954595,
+      "hidden_tail_event_fraction": 0.03545552502262435,
+      "hidden_tail_events_per_neuron_second": 0.38958288511187605,
+      "loss": 0.3018665621233479,
+      "macro_f1": 0.9398390651141177
+    },
+    "val": {
+      "accuracy": 0.5873015873015873,
+      "aux_loss": 1.8281831741333008,
+      "balanced_accuracy": 0.5812289562289562,
+      "endpoint_loss": 1.3089851140975952,
+      "endpoint_membrane_l2_mean": 61.416585286458336,
+      "hidden_events_per_neuron_second": 11.49806865068914,
+      "hidden_tail_event_fraction": 0.03614426798934401,
+      "hidden_tail_events_per_neuron_second": 0.30453249007936506,
+      "loss": 3.1371684074401855,
+      "macro_f1": 0.5875353843546063
+    }
+  },
+  "probes": [
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.001,
+      "probe_test_accuracy": 0.5616438356164384,
+      "probe_test_balanced_accuracy": 0.5397699522699523,
+      "probe_test_macro_f1": 0.5224869670179518,
+      "probe_type": "hidden_whole_count",
+      "probe_val_balanced_accuracy": 0.49888167388167387
+    },
+    {
+      "feature_dim": 2048,
+      "input_feature_dim": 2048,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.1,
+      "probe_test_accuracy": 0.5616438356164384,
+      "probe_test_balanced_accuracy": 0.5503239815739815,
+      "probe_test_macro_f1": 0.5613551024841347,
+      "probe_type": "hidden_fixed250_ordered",
+      "probe_val_balanced_accuracy": 0.5434283309283309
+    },
+    {
+      "feature_dim": 1280,
+      "input_feature_dim": 1280,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.636986301369863,
+      "probe_test_balanced_accuracy": 0.6143481518481518,
+      "probe_test_macro_f1": 0.6084917611516076,
+      "probe_type": "hidden_relative10_ordered",
+      "probe_val_balanced_accuracy": 0.6224687349687349
+    },
+    {
+      "feature_dim": 128,
+      "input_feature_dim": 128,
+      "pca_explained_variance_ratio_sum": null,
+      "probe_C": 0.01,
+      "probe_test_accuracy": 0.6164383561643836,
+      "probe_test_balanced_accuracy": 0.601316045066045,
+      "probe_test_macro_f1": 0.5985805349268355,
+      "probe_type": "hidden_uend",
+      "probe_val_balanced_accuracy": 0.5804353054353054
+    }
+  ],
+  "protocol_version": "frozen_exp3_l2_ff_multitau_objectives_v1",
+  "provenance": {
+    "architecture": "ff",
+    "aux_lambda": 1.0,
+    "auxiliary_supervision": "training-only hidden Fixed250 ordered spike-count CE; auxiliary head is discarded at deployment",
+    "batch_size": 128,
+    "checkpoint_selection": "max validation native endpoint BA; tie-break validation endpoint CE",
+    "deployed_readout": "Linear(hidden Uend 128 -> classes, bias=True); no output LIF",
+    "epochs": 100,
+    "experiment_id": "experiment_5_2_1_ff_multitau_objectives",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "local_width": 128,
+    "memory_group_widths": {
+      "4": 32,
+      "5": 32,
+      "6": 32,
+      "7": 32
+    },
+    "memory_mode": "multitau_4567",
+    "memory_shifts": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "objective": "endpoint_fixed250_aux_ce",
+    "parameter_counts": {
+      "aux_head_training_only": 24588,
+      "deployed_trainable_total": 17932,
+      "endpoint_head": 1548,
+      "input_hidden": 16384,
+      "training_trainable_total": 42520
+    },
+    "primary_loss": "endpoint_ce = CE(Linear(U_hidden[valid_end]), y)",
+    "protocol_version": "frozen_exp3_l2_ff_multitau_objectives_v1",
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 11,
+    "source_cache_reused": true,
+    "source_experiment": "experiment_5_2_frozen_local_tauR_sweep",
+    "source_local_frozen": true,
+    "source_protocol": "frozen_exp3_l2_endpoint_tauR_v1",
+    "source_results_dir": "notebooks/artifacts/experiment_5_2_frozen_local_tauR_sweep/frozen_exp3_l2_endpoint_tauR_v1",
+    "split_seed": 12345,
+    "tail_seconds": 2.0,
+    "tau_mem_ms": [
+      242.10347130039656,
+      492.1461612435418,
+      992.1669944116244,
+      1992.177287539818
+    ],
+    "temporal_update_rate": "raw 64Hz frozen L2 trajectory; no pooling/compressor/downsampling",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0
+  },
+  "spec": {
+    "memory_mode": "multitau_4567",
+    "objective": "endpoint_fixed250_aux_ce",
+    "seed": 11
+  }
+}

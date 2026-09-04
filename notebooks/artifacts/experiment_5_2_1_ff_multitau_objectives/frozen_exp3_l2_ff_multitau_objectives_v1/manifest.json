@@ -1,0 +1,41 @@
+{
+  "analysis_policy": "notebook is analysis-only and computes paired memory-mode, objective, interaction, representation, and head-utilization effects",
+  "architecture": "ff",
+  "aux_lambda": 1.0,
+  "checkpoint_selection": "per-run max validation native endpoint BA; tie-break validation endpoint CE",
+  "deployed_readout": "hidden Uend -> Linear -> class logits",
+  "expected_runs": 20,
+  "experiment_id": "experiment_5_2_1_ff_multitau_objectives",
+  "files": {
+    "histories": "histories.csv",
+    "local_reference": "local_reference.csv",
+    "runs": "runs.csv"
+  },
+  "memory_modes": [
+    "single_shift7",
+    "multitau_4567"
+  ],
+  "multi_shifts": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "objectives": [
+    "endpoint_ce",
+    "endpoint_fixed250_aux_ce"
+  ],
+  "primary_metric": "native validation/test balanced accuracy from deployed Uend endpoint head",
+  "protocol_version": "frozen_exp3_l2_ff_multitau_objectives_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "single_shift": 7,
+  "source_cache_policy": "reuse committed Exp5.2 frozen L2 caches; fail on missing/mismatched source",
+  "source_experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_protocol_version": "frozen_exp3_l2_endpoint_tauR_v1"
+}
