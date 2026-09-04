@@ -9,15 +9,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from torch import nn
+import torch.nn.functional as F
 
 from scripts import experiment_3_0_1_single_tau_objectives as base
 from scripts import experiment_3_0_4_l2_width_representation_capacity as exp304
 from scripts import experiment_3_0_5_frozen_representation_accessibility as exp305
+from scripts import experiment_5_0_local_evidence_objectives as exp50
 
 
 EXPERIMENT_ID = "experiment_5_0_1_exp3_analog_head_control"
-PROTOCOL_VERSION = "exp3_exact_analog_timestep_head_v1"
+PROTOCOL_VERSION = "analog_head_hidden_dynamics_control_v2"
 OBJECTIVE = "timestep_ce"
+CONDITIONS = (
+    "exp3_synaptic_analog",
+    "exp5_macro_binary_analog",
+)
 SEEDS = base.SEEDS
 WIDTH = 128
 L1_SHIFTS = (2, 3, 4)
@@ -31,16 +38,17 @@ PRIMARY_PROBES = (
 EPOCHS = base.EPOCHS
 BATCH_SIZE = base.BATCH_SIZE
 LR = base.LR
-EXPECTED_RUNS = len(SEEDS)
+EXPECTED_RUNS = len(CONDITIONS) * len(SEEDS)
 
 
 @dataclass(frozen=True)
 class RunSpec:
+    condition: str
     seed: int
 
     @property
     def key(self) -> str:
-        return f"analog_timestep__seed{self.seed}"
+        return f"{self.condition}__seed{self.seed}"
 
 
 @dataclass(frozen=True)
@@ -72,7 +80,7 @@ def results_dir(repo_root: Path) -> Path:
 
 
 def run_specs() -> list[RunSpec]:
-    return [RunSpec(seed) for seed in SEEDS]
+    return [RunSpec(condition, seed) for condition in CONDITIONS for seed in SEEDS]
 
 
 def checkpoint_path(root: Path, spec: RunSpec) -> Path:
@@ -96,35 +104,124 @@ def prepare_data(repo_root: Path) -> base.Data:
     return base.prepare_data(repo_root)
 
 
-def build_model(data: base.Data) -> exp304.L2WidthNet:
-    model = exp304.L2WidthNet(
-        WIDTH,
-        OBJECTIVE,
-        len(data.labels),
-        data.T,
-        data.fs,
-        data.bin_steps,
-    )
-    if model.last_layer != "L2":
-        raise RuntimeError(f"Expected L2 to be the final hidden layer, got {model.last_layer}")
-    if model.layer_shifts["L1"] != L1_SHIFTS or model.layer_shifts["L2"] != L2_SHIFTS:
-        raise RuntimeError("Exp3 exact-control shift contract changed")
-    return model
+class Exp5MacroBinaryAnalogNet(nn.Module):
+    """Exp5 binary hidden dynamics with the Exp3 analog timestep head.
+
+    The hidden forward equations match Exp5.0 binary LocalEvidenceSNN through L2:
+    explicit exponential synaptic state + MacroMultiSpikeLIF(cap=1). The 12-neuron
+    spiking output layer is removed and replaced by Linear(128, 12, bias=True).
+    """
+
+    def __init__(self, n_classes: int, fs: float) -> None:
+        super().__init__()
+        self.layer_order = ("L1", "L2")
+        self.layer_widths = {"L1": WIDTH, "L2": WIDTH}
+        self.layer_shifts = {"L1": L1_SHIFTS, "L2": L2_SHIFTS}
+        self.last_layer = "L2"
+        self.last_width = WIDTH
+        self.fs = float(fs)
+
+        beta = exp50.beta_value(self.fs)
+        self.f1 = nn.Linear(base.EVENT_CHANNELS, WIDTH, bias=False)
+        self.f2 = nn.Linear(WIDTH, WIDTH, bias=False)
+        # This constructor occupies the same third Linear position as Exp5.0's
+        # output_linear, so f1/f2 initialization remains exactly paired.
+        self.head = nn.Linear(WIDTH, n_classes, bias=True)
+        self.l1_lif = exp50.exp401.MacroMultiSpikeLIF(
+            beta=beta,
+            threshold=base.THRESHOLD,
+            max_spikes_per_dt=1,
+            surrogate_slope=base.SURROGATE_SLOPE,
+        )
+        self.l2_lif = exp50.exp401.MacroMultiSpikeLIF(
+            beta=beta,
+            threshold=base.THRESHOLD,
+            max_spikes_per_dt=1,
+            surrogate_slope=base.SURROGATE_SLOPE,
+        )
+        self.register_buffer("alpha1", exp50.alpha_vector(WIDTH, L1_SHIFTS))
+        self.register_buffer("alpha2", exp50.alpha_vector(WIDTH, L2_SHIFTS))
+
+    def layer_features(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        batch, n_steps, channels = x.shape
+        if channels != base.EVENT_CHANNELS:
+            raise ValueError(f"Expected {base.EVENT_CHANNELS} channels, got {channels}")
+        syn1 = torch.zeros(batch, WIDTH, device=x.device, dtype=x.dtype)
+        mem1 = torch.zeros_like(syn1)
+        syn2 = torch.zeros(batch, WIDTH, device=x.device, dtype=x.dtype)
+        mem2 = torch.zeros_like(syn2)
+        seq1: list[torch.Tensor] = []
+        seq2: list[torch.Tensor] = []
+        for timestep in range(n_steps):
+            syn1 = self.alpha1 * syn1 + self.f1(x[:, timestep])
+            s1, mem1, _ = self.l1_lif(syn1, mem1)
+            syn2 = self.alpha2 * syn2 + self.f2(s1)
+            s2, mem2, _ = self.l2_lif(syn2, mem2)
+            seq1.append(s1)
+            seq2.append(s2)
+        return {
+            "L1": torch.stack(seq1, dim=1),
+            "L2": torch.stack(seq2, dim=1),
+        }
+
+    def loss_logits(
+        self,
+        spikes: torch.Tensor,
+        lengths: torch.Tensor,
+        y: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch, n_steps, _ = spikes.shape
+        logits_t = self.head(spikes)
+        valid = base.mask(lengths, n_steps)
+        targets = y[:, None].expand(batch, n_steps)
+        loss = F.cross_entropy(logits_t[valid], targets[valid])
+        weights = valid.to(logits_t.dtype).unsqueeze(-1)
+        segment_logits = (logits_t * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1)
+        return loss, segment_logits
 
 
-def paired_initialize(model: exp304.L2WidthNet, seed: int) -> None:
-    """Match the exact Exp3.0.4/3.0.3-B initialization contract."""
-    base.seed_all(base.dseed(seed, "shared_backbone_init"))
-    # Recreate the model weights under the exact shared-backbone seed.
-    for module in (model.f1, model.f2):
-        module.reset_parameters()
-    base.seed_all(base.dseed(seed, OBJECTIVE, "head_init"))
-    model.head.reset_parameters()
+def build_model(data: base.Data, condition: str) -> nn.Module:
+    if condition == "exp3_synaptic_analog":
+        model = exp304.L2WidthNet(
+            WIDTH,
+            OBJECTIVE,
+            len(data.labels),
+            data.T,
+            data.fs,
+            data.bin_steps,
+        )
+        if model.last_layer != "L2":
+            raise RuntimeError(f"Expected L2 final layer, got {model.last_layer}")
+        return model
+    if condition == "exp5_macro_binary_analog":
+        return Exp5MacroBinaryAnalogNet(len(data.labels), data.fs)
+    raise ValueError(f"Unknown condition: {condition}")
+
+
+def _initialize_model(spec: RunSpec, data: base.Data, device: torch.device) -> nn.Module:
+    if spec.condition == "exp3_synaptic_analog":
+        # Exact historical Exp3.0.3-B / Exp3.0.4 initialization contract.
+        base.seed_all(base.dseed(spec.seed, "shared_backbone_init"))
+        model = build_model(data, spec.condition).to(device)
+        base.seed_all(base.dseed(spec.seed, OBJECTIVE, "head_init"))
+        model.head.reset_parameters()  # type: ignore[attr-defined]
+        return model
+
+    # Exact Exp5.0 model-init stream. The analog head replaces output_linear but
+    # f1/f2 are constructed first and therefore retain the exact Exp5 initial weights.
+    base.seed_all(base.dseed(spec.seed, "exp5_0_paired", "model_init"))
+    return build_model(data, spec.condition).to(device)
+
+
+def _loader_seed(spec: RunSpec, split: str) -> int:
+    if spec.condition == "exp3_synaptic_analog":
+        return base.dseed(spec.seed, split, "loader")
+    return base.dseed(spec.seed, "exp5_0_paired", f"{split}_loader")
 
 
 def make_loaders(
     data: base.Data,
-    seed: int,
+    spec: RunSpec,
     batch_size: int,
     train_shuffle: bool,
 ) -> dict[str, torch.utils.data.DataLoader]:
@@ -138,10 +235,39 @@ def make_loaders(
             *partition,
             batch_size,
             train_shuffle if split == "train" else False,
-            base.dseed(seed, split, "loader"),
+            _loader_seed(spec, split),
         )
         for split, partition in partitions.items()
     }
+
+
+def evaluate_native(
+    model: nn.Module,
+    data_loader: torch.utils.data.DataLoader,
+    device: torch.device,
+) -> dict[str, float]:
+    model.eval()
+    y_true_parts: list[np.ndarray] = []
+    y_pred_parts: list[np.ndarray] = []
+    loss_sum = 0.0
+    n_total = 0
+    with torch.no_grad():
+        for X, y, lengths in data_loader:
+            X = X.to(device)
+            y = y.to(device)
+            lengths = lengths.to(device)
+            spikes = model.layer_features(X)["L2"]  # type: ignore[attr-defined]
+            loss, logits = model.loss_logits(spikes, lengths, y)  # type: ignore[attr-defined]
+            n = len(y)
+            n_total += n
+            loss_sum += float(loss.item()) * n
+            y_true_parts.append(y.cpu().numpy())
+            y_pred_parts.append(logits.argmax(dim=1).cpu().numpy())
+    y_true = np.concatenate(y_true_parts)
+    y_pred = np.concatenate(y_pred_parts)
+    out = base.metrics(y_true, y_pred)
+    out["loss"] = loss_sum / max(n_total, 1)
+    return out
 
 
 def train_one(
@@ -156,38 +282,10 @@ def train_one(
 
     torch.set_num_threads(config.threads)
     device = torch.device(config.device)
-
-    # Match Exp3 construction/init exactly: construct under shared_backbone_init,
-    # then reset only the task head under the objective-specific head seed.
-    base.seed_all(base.dseed(spec.seed, "shared_backbone_init"))
-    model = build_model(data).to(device)
-    base.seed_all(base.dseed(spec.seed, OBJECTIVE, "head_init"))
-    model.head.reset_parameters()
-
+    model = _initialize_model(spec, data, device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    train_loader = base.loader(
-        data.Xtr,
-        data.ytr,
-        data.ltr,
-        config.batch_size,
-        True,
-        base.dseed(spec.seed, "train", "loader"),
-    )
-    eval_loaders = {
-        split: base.loader(
-            X,
-            y,
-            lengths,
-            config.batch_size,
-            False,
-            base.dseed(spec.seed, split, "loader"),
-        )
-        for split, (X, y, lengths) in {
-            "train": (data.Xtr, data.ytr, data.ltr),
-            "val": (data.Xva, data.yva, data.lva),
-            "test": (data.Xte, data.yte, data.lte),
-        }.items()
-    }
+    train_loader = make_loaders(data, spec, config.batch_size, train_shuffle=True)["train"]
+    eval_loaders = make_loaders(data, spec, config.batch_size, train_shuffle=False)
 
     best_val_ba = -np.inf
     best_val_loss = np.inf
@@ -207,8 +305,8 @@ def train_one(
             y = y.to(device)
             lengths = lengths.to(device)
             optimizer.zero_grad(set_to_none=True)
-            spikes = model.layer_features(X)["L2"]
-            loss, logits = model.loss_logits(spikes, lengths, y)
+            spikes = model.layer_features(X)["L2"]  # type: ignore[attr-defined]
+            loss, logits = model.loss_logits(spikes, lengths, y)  # type: ignore[attr-defined]
             loss.backward()
             optimizer.step()
 
@@ -219,7 +317,7 @@ def train_one(
             train_pred.append(logits.detach().argmax(dim=1).cpu().numpy())
 
         train_metrics = base.metrics(np.concatenate(train_true), np.concatenate(train_pred))
-        val_metrics = exp304.evaluate_native(model, eval_loaders["val"], device)
+        val_metrics = evaluate_native(model, eval_loaders["val"], device)
         val_ba = float(val_metrics["balanced_accuracy"])
         val_loss = float(val_metrics["loss"])
         history.append(
@@ -246,10 +344,11 @@ def train_one(
     model.load_state_dict(best_state)
 
     final = {
-        split: exp304.evaluate_native(model, loader, device)
+        split: evaluate_native(model, loader, device)
         for split, loader in eval_loaders.items()
     }
     result = {
+        "condition": spec.condition,
         "seed": spec.seed,
         "objective": OBJECTIVE,
         "best_epoch": best_epoch,
@@ -264,7 +363,7 @@ def train_one(
             "experiment_id": EXPERIMENT_ID,
             "protocol_version": PROTOCOL_VERSION,
             "spec": spec.__dict__,
-            "provenance": provenance(data, config),
+            "provenance": provenance(spec, data, config),
             "result": result,
             "state_dict": best_state,
         },
@@ -280,7 +379,7 @@ def load_model(
     spec: RunSpec,
     data: base.Data,
     config: Config,
-) -> tuple[exp304.L2WidthNet, dict[str, object]]:
+) -> tuple[nn.Module, dict[str, object]]:
     path = checkpoint_path(config.results_dir, spec)
     if not path.exists():
         raise FileNotFoundError(f"Missing Exp5.0.1 checkpoint: {path}")
@@ -291,7 +390,7 @@ def load_model(
         raise ValueError(f"Wrong protocol version in {path}")
     if payload.get("spec") != spec.__dict__:
         raise ValueError(f"Checkpoint identity mismatch for {spec.key}")
-    model = build_model(data).to(torch.device(config.device))
+    model = build_model(data, spec.condition).to(torch.device(config.device))
     model.load_state_dict(payload["state_dict"], strict=True)
     model.eval()
     return model, payload
@@ -324,7 +423,7 @@ def evaluate_one(
     }
     extracted = {
         split: exp305._partition_features(
-            model,
+            model,  # type: ignore[arg-type]
             *partition,
             split,
             OBJECTIVE,
@@ -375,12 +474,13 @@ def evaluate_one(
     payload: dict[str, object] = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
+        "condition": spec.condition,
         "seed": spec.seed,
         "objective": OBJECTIVE,
         "best_epoch": int(checkpoint["result"]["best_epoch"]),
         "native": checkpoint["result"]["native"],
         "probes": probes,
-        "provenance": provenance(data, config),
+        "provenance": provenance(spec, data, config),
     }
     _save_json(destination, payload)
     return payload
@@ -396,14 +496,23 @@ def run_one(
     return evaluate_one(spec, data, config, force)
 
 
-def provenance(data: base.Data, config: Config) -> dict[str, object]:
+def provenance(spec: RunSpec, data: base.Data, config: Config) -> dict[str, object]:
+    if spec.condition == "exp3_synaptic_analog":
+        hidden_contract = "exact Exp3.0.3-B snnTorch.Synaptic L1/L2"
+        init_contract = "Exp3 shared_backbone_init + timestep_ce head_init"
+        loader_contract = "Exp3 train/val/test loader seeds"
+    else:
+        hidden_contract = "exact Exp5.0 binary MacroMultiSpikeLIF hidden dynamics through L2"
+        init_contract = "Exp5.0 exp5_0_paired model_init stream; f1/f2 paired with Exp5"
+        loader_contract = "Exp5.0 exp5_0_paired train/val/test loader seeds"
     return {
         "question": (
-            "Does restoring the Exp3 analog Linear timestep head recover the strong "
-            "local representation that degrades when timestep supervision is routed "
-            "through the Exp5 spiking output layer?"
+            "Separate hidden-dynamics implementation from the spiking-output bottleneck by "
+            "training both Exp3 Synaptic and Exp5 Macro binary hidden backbones with the same "
+            "analog Linear timestep head."
         ),
-        "source_model_class": "experiment_3_0_4_l2_width_representation_capacity.L2WidthNet",
+        "condition": spec.condition,
+        "hidden_contract": hidden_contract,
         "width": WIDTH,
         "l1_shifts": list(L1_SHIFTS),
         "l2_shifts": list(L2_SHIFTS),
@@ -415,7 +524,9 @@ def provenance(data: base.Data, config: Config) -> dict[str, object]:
         "objective": OBJECTIVE,
         "checkpoint_selection": "native analog-head validation BA, tie-break validation CE",
         "probe_protocol": "exact Exp3.0.5 StandardScaler + LogisticRegression C-grid/PCA controls",
-        "seeds": list(SEEDS),
+        "initialization": init_contract,
+        "loader_contract": loader_contract,
+        "seed": spec.seed,
         "split_seed": base.SPLIT_SEED,
         "train_users": list(data.split["train_users"]),
         "val_users": list(data.split["val_users"]),
@@ -461,11 +572,18 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
         if not path.exists():
             raise FileNotFoundError(f"Missing required Exp5.0.1 artifact: {path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("protocol_version") != PROTOCOL_VERSION or int(payload.get("seed")) != spec.seed:
-            raise ValueError(f"Evaluation identity mismatch in {path}")
+        expected = (PROTOCOL_VERSION, spec.condition, spec.seed)
+        actual = (
+            str(payload.get("protocol_version")),
+            str(payload.get("condition")),
+            int(payload.get("seed")),
+        )
+        if actual != expected:
+            raise ValueError(f"Evaluation identity mismatch in {path}: {actual} != {expected}")
         probe_map = {probe["probe_type"]: probe for probe in payload["probes"]}
         row: dict[str, object] = {
-            "source": "exp5_0_1_analog_head_control",
+            "source": "exp5_0_1_control",
+            "condition": spec.condition,
             "seed": spec.seed,
             "native_test_ba": float(payload["native"]["test"]["balanced_accuracy"]),
             "native_val_ba": float(payload["native"]["val"]["balanced_accuracy"]),
@@ -477,9 +595,9 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
             row[f"{probe_type}_val_ba"] = float(probe["probe_val_balanced_accuracy"])
         rows.append(row)
 
-    runs = pd.DataFrame(rows).sort_values("seed", ignore_index=True)
-    runs_file = root / "runs.csv"
+    runs = pd.DataFrame(rows).sort_values(["condition", "seed"], ignore_index=True)
     root.mkdir(parents=True, exist_ok=True)
+    runs_file = root / "runs.csv"
     runs.to_csv(runs_file, index=False)
 
     exp3_probe_path, exp3_native_path = _exp3_reference_paths(repo_root)
@@ -496,8 +614,8 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
     for _, row in runs.iterrows():
         comparison_rows.append(
             {
-                "source": "exp5_0_1_analog_head_control",
-                "variant": "analog_linear_head",
+                "source": "exp5_0_1_control",
+                "variant": str(row["condition"]),
                 "seed": int(row["seed"]),
                 "native_or_output_ba": float(row["native_test_ba"]),
                 "full_count_ba": float(row["full_count_test_ba"]),
@@ -513,7 +631,7 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
         comparison_rows.append(
             {
                 "source": "exp3_0_5_reference",
-                "variant": "analog_linear_head",
+                "variant": "historical_exp3_analog",
                 "seed": seed,
                 "native_or_output_ba": float(exp3_native_ts.loc[seed, "test_balanced_accuracy"]),
                 "full_count_ba": float(by_probe.loc["full_count", "probe_test_balanced_accuracy"]),
@@ -546,19 +664,20 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "expected_runs": EXPECTED_RUNS,
+        "conditions": list(CONDITIONS),
         "seeds": list(SEEDS),
         "objective": OBJECTIVE,
         "primary_probes": list(PRIMARY_PROBES),
         "comparison_sources": [
-            "Exp3.0.5 exact analog-head reference",
-            "Exp5.0 timestep_ce binary",
-            "Exp5.0 timestep_ce multi_ho",
+            "Exp3.0.5 historical analog-head reference",
+            "Exp5.0 timestep_ce binary spiking-output reference",
+            "Exp5.0 timestep_ce multi_ho spiking-output reference",
         ],
         "files": {
             "runs": runs_file.name,
             "comparison_runs": comparison_file.name,
         },
-        "notebook_role": "read finalized run tables and compute mean/SD, paired deltas, and plots",
+        "notebook_role": "compute mean/SD, paired deltas, and plots from finalized run tables",
     }
     manifest_file = root / "manifest.json"
     _save_json(manifest_file, manifest)
@@ -582,6 +701,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--force", action="store_true")
 
     eval_parser = subparsers.add_parser("eval-one")
+    eval_parser.add_argument("--condition", choices=CONDITIONS, required=True)
     eval_parser.add_argument("--seed", type=int, choices=SEEDS, required=True)
     eval_parser.add_argument("--device", default="cpu")
     eval_parser.add_argument("--threads", type=int, default=1)
@@ -616,7 +736,7 @@ def main() -> None:
         spec = specs[args.array_task_id]
         payload = run_one(spec, data, config, args.force)
     else:
-        spec = RunSpec(args.seed)
+        spec = RunSpec(args.condition, args.seed)
         payload = evaluate_one(spec, data, config, args.force)
 
     probe_map = {probe["probe_type"]: probe for probe in payload["probes"]}
