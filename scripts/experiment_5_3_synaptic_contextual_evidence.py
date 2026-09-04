@@ -65,7 +65,7 @@ class Condition:
 
 CONDITIONS = (
     Condition("direct", "direct", None),
-    Condition("lif_beta100", "lif", 1.00),
+    Condition("lif_tau242", "lif", 0.9375),
     Condition("lif_beta050", "lif", 0.50),
     Condition("syn_single_s4", "syn", 0.50, (4,)),
     Condition("syn_single_s5", "syn", 0.50, (5,)),
