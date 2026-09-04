@@ -1,0 +1,89 @@
+name: Temporary Exp5.3 beta1 migration
+
+on:
+  push:
+    branches:
+      - exp5-3-synaptic-contextual-evidence
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[beta1-migrated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: exp5-3-synaptic-contextual-evidence
+          fetch-depth: 0
+      - name: Replace beta 0.25 control with beta 1.0
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          code_path = Path('scripts/experiment_5_3_synaptic_contextual_evidence.py')
+          code = code_path.read_text(encoding='utf-8')
+          old = '    Condition("lif_beta025", "lif", 0.25),'
+          new = '    Condition("lif_beta100", "lif", 1.00),'
+          assert code.count(old) == 1, code.count(old)
+          code = code.replace(old, new)
+          old_tau = '''def tau_ms_from_decay(decay: float, fs: float) -> float:\n    if not 0.0 < decay < 1.0:\n        raise ValueError(f"Decay must be in (0, 1), got {decay}")\n    return -(1000.0 / float(fs)) / math.log(float(decay))'''
+          new_tau = '''def tau_ms_from_decay(decay: float, fs: float) -> float:\n    if decay == 1.0:\n        return math.inf\n    if not 0.0 < decay < 1.0:\n        raise ValueError(f"Decay must be in (0, 1], got {decay}")\n    return -(1000.0 / float(fs)) / math.log(float(decay))'''
+          assert code.count(old_tau) == 1, code.count(old_tau)
+          code = code.replace(old_tau, new_tau)
+          assert 'lif_beta025' not in code
+          code_path.write_text(code, encoding='utf-8')
+
+          test_path = Path('tests/test_experiment_5_3_contract.py')
+          test = test_path.read_text(encoding='utf-8')
+          test = test.replace('"lif_beta025"', '"lif_beta100"')
+          test = test.replace('test_lif_beta025_and_beta050_are_explicit_controls', 'test_lif_beta100_and_beta050_are_explicit_controls')
+          test = test.replace('beta025 = exp53.CONDITION_BY_NAME["lif_beta100"]', 'beta100 = exp53.CONDITION_BY_NAME["lif_beta100"]')
+          test = test.replace('assert beta025.family == beta050.family == "lif"', 'assert beta100.family == beta050.family == "lif"')
+          test = test.replace('assert beta025.beta == 0.25', 'assert beta100.beta == 1.00')
+          test = test.replace('assert beta025.shifts_syn == beta050.shifts_syn == ()', 'assert beta100.shifts_syn == beta050.shifts_syn == ()')
+          old_tau_test = '''    assert math.isclose(\n        exp53.tau_ms_from_decay(0.25, 64.0), 11.27, rel_tol=0.02\n    )'''
+          assert test.count(old_tau_test) == 1, test.count(old_tau_test)
+          test = test.replace(old_tau_test, '    assert math.isinf(exp53.tau_ms_from_decay(1.00, 64.0))')
+          assert 'beta025' not in test
+          assert '0.25' not in test
+          test_path.write_text(test, encoding='utf-8')
+
+          readme_path = Path('scripts/experiment_5_3/README.md')
+          readme = readme_path.read_text(encoding='utf-8')
+          readme = readme.replace('`lif_beta025`', '`lif_beta100`')
+          readme = readme.replace('beta = 0.25', 'beta = 1.00')
+          readme = readme.replace('lif_beta025: tau_mem about 11.3 ms at 64 Hz', 'lif_beta100: tau_mem = inf (no passive membrane leak)')
+          readme = readme.replace('lif_beta050 - lif_beta025', 'lif_beta100 - lif_beta050')
+          assert 'beta025' not in readme
+          assert '0.25' not in readme
+          readme_path.write_text(readme, encoding='utf-8')
+
+          notebook_path = Path('notebooks/experiment_5_3_synaptic_contextual_evidence.ipynb')
+          notebook = notebook_path.read_text(encoding='utf-8')
+          notebook = notebook.replace('lif_beta025', 'lif_beta100')
+          notebook = notebook.replace('beta=0.25` versus `beta=0.50', 'beta=1.00` versus `beta=0.50')
+          notebook = notebook.replace('("lif_beta050","lif_beta100")', '("lif_beta100","lif_beta050")')
+          assert 'beta025' not in notebook
+          assert 'beta=0.25' not in notebook
+          notebook_path.write_text(notebook, encoding='utf-8')
+          PY
+      - name: Sanity check edited sources
+        run: |
+          python -m py_compile scripts/experiment_5_3_synaptic_contextual_evidence.py tests/test_experiment_5_3_contract.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          nb = json.loads(Path('notebooks/experiment_5_3_synaptic_contextual_evidence.ipynb').read_text(encoding='utf-8'))
+          for i, cell in enumerate(nb['cells']):
+              if cell.get('cell_type') == 'code':
+                  compile(''.join(cell.get('source', [])), f'cell-{i}', 'exec')
+          PY
+      - name: Commit migration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/experiment_5_3_synaptic_contextual_evidence.py tests/test_experiment_5_3_contract.py scripts/experiment_5_3/README.md notebooks/experiment_5_3_synaptic_contextual_evidence.ipynb
+          git commit -m '[beta1-migrated] Replace Exp5.3 beta 0.25 control with beta 1.0'
+          git push origin HEAD:exp5-3-synaptic-contextual-evidence
