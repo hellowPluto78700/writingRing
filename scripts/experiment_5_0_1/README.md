@@ -4,33 +4,65 @@
 
 Experiment 3 learned strong local representations with a two-layer multi-`tau_syn` backbone and `timestep_ce`, while Experiment 5.0 showed a large degradation when timestep supervision was routed through a 12-neuron spiking output layer.
 
-A single Exp3 rerun would only prove reproducibility. It would not isolate whether the Exp3/Exp5 gap comes from the hidden-neuron implementation or from the spiking output bottleneck. Exp5.0.1 therefore trains two paired analog-head controls:
+A single Exp3 rerun only proves reproducibility. A two-condition comparison can still be confounded by using different random/data streams. Exp5.0.1 therefore uses **three** analog-head controls so the three possible causes are separated cleanly.
 
-1. `exp3_synaptic_analog`: exact historical Exp3 `snnTorch.Synaptic` hidden dynamics.
-2. `exp5_macro_binary_analog`: exact Exp5.0 binary MacroMultiSpike hidden dynamics through L2, but with the output LIF removed.
+## Conditions
 
-Both use the same task head:
+### A. `exp3_exact_analog`
+
+Historical reproduction gate:
 
 ```text
-L2 spike -> Linear(128,12,bias=True) -> timestep CE
+Exp3 snnTorch.Synaptic hidden dynamics
++ Exp3 initialization/data-loader streams
++ Linear(128,12,bias=True)
++ timestep CE
 ```
 
-This gives three mechanistic comparisons:
+This should reproduce historical Exp3.0.3-B / Exp3.0.5.
+
+### B. `exp3_synaptic_exp5stream_analog`
+
+Paired hidden-dynamics control:
 
 ```text
-new Exp3 analog vs historical Exp3
+Exp3 snnTorch.Synaptic hidden dynamics
++ Exp5.0 paired initialization/data-loader streams
++ Linear(128,12,bias=True)
++ timestep CE
+```
+
+### C. `exp5_macro_exp5stream_analog`
+
+Paired Exp5-hidden control:
+
+```text
+Exp5.0 binary MacroMultiSpike hidden dynamics through L2
++ Exp5.0 paired initialization/data-loader streams
++ Linear(128,12,bias=True)
++ timestep CE
+```
+
+The experiment intentionally has **no output LIF** in any new condition.
+
+This gives three interpretation gates:
+
+```text
+A vs historical Exp3
     -> reproducibility / protocol-drift check
 
-new Exp3 analog vs new Exp5-Macro analog
+B vs C
     -> hidden implementation / surrogate-dynamics effect
+       (same initialization, same data order, same analog head)
 
-new Exp5-Macro analog vs existing Exp5 binary spiking-output
-    -> effect of routing timestep supervision through the spiking output path
+C vs existing Exp5 timestep_ce + binary
+    -> spiking-output-path effect
+       (same Exp5 hidden dynamics and paired Exp5 random/data stream)
 ```
 
 ## Shared architecture
 
-Both new conditions use:
+All new conditions use:
 
 ```text
 Raw64 30-channel unsigned weighted events
@@ -38,8 +70,6 @@ Raw64 30-channel unsigned weighted events
   -> L2: 128 neurons, shifts (2,3,4)
   -> Linear(128,12,bias=True)
 ```
-
-The experiment intentionally has **no output LIF** in either new condition.
 
 Shared constants:
 
@@ -52,11 +82,9 @@ Shared constants:
 - user split seed `12345`
 - training seeds `(11,23,101)`
 
-## Condition A — exact Exp3 Synaptic hidden dynamics
+## Exact pairing contracts
 
-This condition directly reuses `experiment_3_0_4_l2_width_representation_capacity.L2WidthNet(128, timestep_ce)` and therefore matches the historical `No-L3` Exp3.0.3-B model through L2.
-
-Initialization and loader streams exactly match Exp3:
+For condition A, the code reuses `experiment_3_0_4_l2_width_representation_capacity.L2WidthNet(128, timestep_ce)` and the historical Exp3 seed streams:
 
 ```text
 shared_backbone_init
@@ -64,25 +92,20 @@ objective-specific timestep_ce head_init
 Exp3 train / val / test loader seeds
 ```
 
-The contract test additionally verifies that, for the same seed, the initial `state_dict` is elementwise identical to historical `L3AblationNet('B')`.
+The contract test verifies its initial `state_dict` is elementwise identical to historical `L3AblationNet('B')`.
 
-## Condition B — Exp5 Macro binary hidden dynamics + analog head
-
-This condition reproduces Exp5.0 binary hidden dynamics through L2:
+Conditions B and C both use the same Exp5 stream:
 
 ```text
-syn_t = alpha * syn_(t-1) + W x_t
-membrane/spike = MacroMultiSpikeLIF(..., cap=1)
+exp5_0_paired / model_init
+exp5_0_paired / train_loader
+exp5_0_paired / val_loader
+exp5_0_paired / test_loader
 ```
 
-It uses the Exp5.0 `exp5_0_paired/model_init` random stream and the Exp5.0 paired loader streams. `f1` and `f2` are constructed in the same order as Exp5.0, so their initial weights are directly paired with the existing Exp5 binary model.
+Their random parameterized modules are constructed in the same order (`f1`, `f2`, `head`), so B and C start with identical feedforward/head parameters. Only the hidden neuron dynamics differ.
 
-The only task-head change is:
-
-```text
-Exp5.0: 128 -> Linear(bias=False) -> output LIF -> output spikes
-Exp5.0.1: 128 -> Linear(bias=True) -> analog logits
-```
+Condition C is additionally checked against existing Exp5.0 binary: with the same seed and input, its L1/L2 spike trajectories must be identical to `LocalEvidenceSNN(... hidden_cap=1, output_cap=1)` through L2.
 
 ## Loss and checkpoint selection
 
@@ -100,7 +123,7 @@ Every new run selects its checkpoint by:
 1. maximum validation native analog-head balanced accuracy;
 2. tie-break minimum validation CE.
 
-This matches the historical Exp3 selection criterion. Exp5.0 used validation Output WholeCount BA, which remains part of the historical reference rather than being silently mixed into the new controls.
+This matches historical Exp3. Exp5.0 used validation Output WholeCount BA; that remains part of the existing Exp5 reference rather than being silently mixed into the new controls.
 
 ## Frozen probes
 
@@ -135,18 +158,18 @@ The finalizer reads committed source artifacts from:
 
 `comparison_runs.csv` places all sources into one schema. The notebook performs mean/SD and paired-delta aggregation.
 
-Pairing rules are explicit:
+Pairing rules:
 
-- new Exp3 vs historical Exp3: seeds `11,23,101`;
-- new Exp3 vs new Exp5-Macro analog: seeds `11,23,101`;
-- new Exp5-Macro analog vs existing Exp5: only common seeds `11,23` are treated as paired.
+- A vs historical Exp3: seeds `11,23,101`;
+- B vs C: seeds `11,23,101`;
+- C vs existing Exp5: only common seeds `11,23` are treated as paired.
 
 ## Multi-CPU execution
 
-Two conditions x three seeds = six independent training runs:
+Three conditions x three seeds = nine independent training runs:
 
 ```text
-#SBATCH --array=0-5%6
+#SBATCH --array=0-8%9
 #SBATCH --cpus-per-task=1
 ```
 
@@ -156,7 +179,7 @@ Each array task performs:
 train -> select best checkpoint -> frozen probe evaluation -> per-run JSON
 ```
 
-The `afterok` finalizer requires all six artifacts and writes:
+The `afterok` finalizer requires all nine artifacts and writes:
 
 ```text
 runs.csv
@@ -179,5 +202,5 @@ bash scripts/bash_script/SNN_Bash/submit_exp_5_0_1_cpu.bash
 Artifacts are written under:
 
 ```text
-notebooks/artifacts/experiment_5_0_1_exp3_analog_head_control/analog_head_hidden_dynamics_control_v2/
+notebooks/artifacts/experiment_5_0_1_exp3_analog_head_control/analog_head_three_way_control_v3/
 ```
