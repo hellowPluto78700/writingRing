@@ -18,16 +18,18 @@ NOTEBOOK = REPO_ROOT / "notebooks" / "experiment_5_0_1_exp3_analog_head_control.
 README = REPO_ROOT / "scripts" / "experiment_5_0_1" / "README.md"
 
 
-def test_run_matrix_is_two_conditions_x_three_exp3_seeds() -> None:
+def test_run_matrix_is_three_conditions_x_three_exp3_seeds() -> None:
     specs = exp501.run_specs()
-    assert exp501.EXPECTED_RUNS == 6
+    assert exp501.PROTOCOL_VERSION == "analog_head_three_way_control_v3"
+    assert exp501.EXPECTED_RUNS == 9
     assert exp501.CONDITIONS == (
-        "exp3_synaptic_analog",
-        "exp5_macro_binary_analog",
+        "exp3_exact_analog",
+        "exp3_synaptic_exp5stream_analog",
+        "exp5_macro_exp5stream_analog",
     )
     assert exp501.SEEDS == (11, 23, 101)
-    assert len(specs) == 6
-    assert len({spec.key for spec in specs}) == 6
+    assert len(specs) == 9
+    assert len({spec.key for spec in specs}) == 9
     for condition in exp501.CONDITIONS:
         assert [spec.seed for spec in specs if spec.condition == condition] == [11, 23, 101]
     assert exp501.OBJECTIVE == "timestep_ce"
@@ -56,7 +58,7 @@ def test_exp3_model_is_exact_two_layer_analog_head_contract() -> None:
     assert exp501.base.THRESHOLD == 0.5
 
 
-def test_exp3_initialization_matches_historical_no_l3_model() -> None:
+def test_exp3_exact_initialization_matches_historical_no_l3_model() -> None:
     seed = 11
     shared_seed = exp501.base.dseed(seed, "shared_backbone_init")
     head_seed = exp501.base.dseed(seed, "timestep_ce", "head_init")
@@ -74,6 +76,18 @@ def test_exp3_initialization_matches_historical_no_l3_model() -> None:
     assert set(control.state_dict()) == set(historical.state_dict())
     for name in control.state_dict():
         assert torch.equal(control.state_dict()[name], historical.state_dict()[name]), name
+
+
+def test_exp5_stream_synaptic_and_macro_controls_start_with_same_trainable_weights() -> None:
+    seed = exp501.base.dseed(11, "exp5_0_paired", "model_init")
+
+    exp501.base.seed_all(seed)
+    synaptic = exp501.exp304.L2WidthNet(128, "timestep_ce", 12, 256, 64.0, 16)
+    exp501.base.seed_all(seed)
+    macro = exp501.Exp5MacroBinaryAnalogNet(12, 64.0)
+
+    for name in ("f1.weight", "f2.weight", "head.weight", "head.bias"):
+        assert torch.equal(synaptic.state_dict()[name], macro.state_dict()[name]), name
 
 
 def test_exp5_macro_analog_hidden_matches_exp5_binary_through_l2() -> None:
@@ -102,14 +116,14 @@ def test_exp5_macro_analog_hidden_matches_exp5_binary_through_l2() -> None:
     assert torch.equal(control_layers["L2"], historical_layers["l2_spikes"])
 
 
-def test_timestep_loss_is_direct_analog_linear_for_both_controls() -> None:
+def test_timestep_loss_is_direct_analog_linear_for_both_hidden_implementations() -> None:
     spikes = torch.zeros(2, 8, 128)
     lengths = torch.tensor([8, 5])
     y = torch.tensor([1, 2])
 
-    exp3_model = exp501.exp304.L2WidthNet(128, "timestep_ce", 12, 8, 64.0, 16)
+    synaptic_model = exp501.exp304.L2WidthNet(128, "timestep_ce", 12, 8, 64.0, 16)
     macro_model = exp501.Exp5MacroBinaryAnalogNet(12, 64.0)
-    for model in (exp3_model, macro_model):
+    for model in (synaptic_model, macro_model):
         loss, segment_logits = model.loss_logits(spikes, lengths, y)
         assert loss.ndim == 0
         assert torch.isfinite(loss)
@@ -138,7 +152,7 @@ def test_multi_cpu_afterok_contract() -> None:
     array_text = ARRAY_SCRIPT.read_text(encoding="utf-8")
     finalizer_text = FINALIZE_SCRIPT.read_text(encoding="utf-8")
     submit_text = SUBMIT_SCRIPT.read_text(encoding="utf-8")
-    assert "#SBATCH --array=0-5%6" in array_text
+    assert "#SBATCH --array=0-8%9" in array_text
     assert "#SBATCH --cpus-per-task=1" in array_text
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         assert f"export {name}=1" in array_text
@@ -147,7 +161,7 @@ def test_multi_cpu_afterok_contract() -> None:
     assert "run-one" in array_text
     assert "finalize" in finalizer_text
     assert "afterok:${ARRAY_JOB}" in submit_text
-    assert "6 runs" in submit_text
+    assert "9 runs" in submit_text
 
 
 def test_notebook_is_analysis_only_and_performs_requested_aggregation() -> None:
@@ -161,12 +175,14 @@ def test_notebook_is_analysis_only_and_performs_requested_aggregation() -> None:
             compile(source, f"notebook-cell-{index}", "exec")
     joined = "\n".join(sources)
     for token in (
+        "analog_head_three_way_control_v3",
         "runs.csv",
         "comparison_runs.csv",
         "groupby",
         "mean_delta",
-        "exp3_synaptic_analog",
-        "exp5_macro_binary_analog",
+        "exp3_exact_analog",
+        "exp3_synaptic_exp5stream_analog",
+        "exp5_macro_exp5stream_analog",
         "Exp3",
         "binary",
         "multi_ho",
@@ -179,14 +195,15 @@ def test_notebook_is_analysis_only_and_performs_requested_aggregation() -> None:
         assert forbidden not in joined
 
 
-def test_readme_states_two_control_and_execution_contract() -> None:
+def test_readme_states_three_control_and_execution_contract() -> None:
     text = README.read_text(encoding="utf-8")
     for token in (
         "no output LIF",
         "Linear(128,12,bias=True)",
-        "exp3_synaptic_analog",
-        "exp5_macro_binary_analog",
-        "0-5%6",
+        "exp3_exact_analog",
+        "exp3_synaptic_exp5stream_analog",
+        "exp5_macro_exp5stream_analog",
+        "0-8%9",
         "Exp3.0.5",
         "Exp5.0",
         "notebook",
