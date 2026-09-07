@@ -219,7 +219,7 @@ def test_readme_states_attribution_and_aggregation_contract() -> None:
         "HiddenRelative10",
         "ordered-trained transfer probe",
         "active_feature_gate_history_mae",
-        "4 conditions x five seeds",
+        "Four conditions x five seeds",
         "0-19%20",
         "afterok",
         "finalizer never retrains",
