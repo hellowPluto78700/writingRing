@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from scripts import experiment_5_3_2_when_representation as exp532
+from scripts import experiment_5_3_2_when_representation_runtime as exp532
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
