@@ -1,0 +1,82 @@
+{
+  "aggregation_policy": "finalizer only aggregates completed run/baseline artifacts; notebook is analysis-only",
+  "baselines": [
+    "what_only",
+    "elapsed_time_only"
+  ],
+  "causal_ablation": [
+    "state_reset",
+    "temporal_shuffle"
+  ],
+  "checkpoint_selection": "min validation weighted objective loss; tie lower progress MAE; tie higher phase BA",
+  "expected_runs": 25,
+  "experiment_id": "experiment_5_3_2_1_when_objective_sweep",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "baseline_runs": "baseline_runs.csv",
+    "gradient_diagnostics": "gradient_diagnostics.csv",
+    "histories": "histories.csv",
+    "history_gain_runs": "history_gain_runs.csv",
+    "local_reference": "local_reference.csv",
+    "probe_runs": "probe_runs.csv",
+    "runs": "runs.csv"
+  },
+  "fixed_when_architecture": "rsnn_shortmem",
+  "gradient_diagnostic": "raw and objective-weighted gradient norms on shared RSNN input_projection + recurrent weights, one fixed train batch per epoch",
+  "objectives": [
+    {
+      "name": "phase_only",
+      "phase_weight": 1.0,
+      "progress_weight": 0.0
+    },
+    {
+      "name": "phase_heavy",
+      "phase_weight": 5.0,
+      "progress_weight": 1.0
+    },
+    {
+      "name": "joint",
+      "phase_weight": 1.0,
+      "progress_weight": 1.0
+    },
+    {
+      "name": "progress_heavy",
+      "phase_weight": 0.2,
+      "progress_weight": 1.0
+    },
+    {
+      "name": "progress_only",
+      "phase_weight": 0.0,
+      "progress_weight": 1.0
+    }
+  ],
+  "primary_cross_objective_readout": "common post-hoc Linear/Ridge probes on frozen U_t",
+  "primary_metrics": [
+    "U phase balanced accuracy",
+    "U progress sample-balanced MAE",
+    "per-gesture progress Spearman",
+    "monotonic violation rate",
+    "H_reset and H_shuffle for phase/progress",
+    "elapsed-time baseline delta"
+  ],
+  "protocol_version": "rsnn_when_objective_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "shuffle_replicates": 5,
+  "source_local_experiment": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_local_protocol": "frozen_exp3_l2_endpoint_tauR_v1",
+  "source_when_experiment": "experiment_5_3_2_when_representation",
+  "source_when_protocol": "supervised_causal_when_v1",
+  "spike_readouts": [
+    "membrane",
+    "synaptic",
+    "instantaneous spike",
+    "trailing 250ms spike count",
+    "trailing 500ms spike count"
+  ]
+}
