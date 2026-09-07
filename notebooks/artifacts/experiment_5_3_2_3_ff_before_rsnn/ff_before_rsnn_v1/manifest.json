@@ -1,0 +1,73 @@
+{
+  "aggregation_policy": "finalizer requires 15 new train/evaluate runs, 5 direct references, and five baseline artifacts; it only aggregates existing artifacts",
+  "architecture_contract": {
+    "direct_rsnn64": "WHAT128 -> RSNN64",
+    "ffsnn128_rsnn64": "WHAT128 -> short-tau FF-SNN128 spikes -> RSNN64",
+    "ffsnn64_rsnn64": "WHAT128 -> short-tau FF-SNN64 spikes -> RSNN64",
+    "linear64_rsnn64": "WHAT128 -> Linear64 -> RSNN64"
+  },
+  "causality_contract": "T_i is used only to construct phase/progress supervision and valid masks; no model condition receives final duration",
+  "checkpoint_selection": "min validation joint objective loss; tie lower progress MAE; tie higher phase BA",
+  "conditions": [
+    "direct_rsnn64",
+    "linear64_rsnn64",
+    "ffsnn64_rsnn64",
+    "ffsnn128_rsnn64"
+  ],
+  "direct_reuse": "Exp5.3.2.2 rsnn_h64 checkpoints/evaluations/histories are reused by identity-validated references and are never retrained",
+  "expected_comparison_rows": 20,
+  "expected_train_runs": 15,
+  "experiment_id": "experiment_5_3_2_3_ff_before_rsnn",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "activity_runs": "activity_runs.csv",
+    "baseline_runs": "baseline_runs.csv",
+    "histories": "histories.csv",
+    "history_gain_runs": "history_gain_runs.csv",
+    "local_reference": "local_reference.csv",
+    "paired_deltas": "paired_deltas.csv",
+    "probe_runs": "probe_runs.csv",
+    "representation_runs": "representation_runs.csv",
+    "runs": "runs.csv"
+  },
+  "fixed_objective": {
+    "name": "joint",
+    "phase_weight": 1.0,
+    "progress_weight": 1.0
+  },
+  "fixed_rsnn_width": 64,
+  "linear_control_role": "linear64_rsnn64 has the same trainable weight shapes and paired initial weights as ffsnn64_rsnn64; the LIF transform is the only difference",
+  "primary_comparisons": [
+    "ffsnn64_rsnn64 vs direct_rsnn64",
+    "ffsnn64_rsnn64 vs linear64_rsnn64",
+    "ffsnn128_rsnn64 vs ffsnn64_rsnn64"
+  ],
+  "primary_metrics": [
+    "U phase balanced accuracy",
+    "U progress sample-balanced MAE",
+    "per-gesture progress Spearman",
+    "monotonic violation rate",
+    "H_reset and H_shuffle",
+    "train/val/test generalization",
+    "spike-domain accessibility",
+    "parameter count and firing-rate utilization",
+    "effective dimension and PCA90 dimension",
+    "paired per-seed deltas against direct RSNN64"
+  ],
+  "protocol_version": "ff_before_rsnn_v1",
+  "run_order": "condition-major: tasks 0-4 linear64_rsnn64, 5-9 ffsnn64_rsnn64, 10-14 ffsnn128_rsnn64; direct_rsnn64 is identity-validated reuse",
+  "scientific_question": "whether a pre-recurrent feedforward SNN transform improves the supervised causal WHEN representation relative to direct RSNN64",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "trainable_conditions": [
+    "linear64_rsnn64",
+    "ffsnn64_rsnn64",
+    "ffsnn128_rsnn64"
+  ],
+  "winner_rule": "prefer strict Pareto improvement over direct on mean phase BA and mean progress MAE; then use history gains, generalization gap, spike accessibility, and parameter cost as diagnostics"
+}
