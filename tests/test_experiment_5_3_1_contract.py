@@ -223,6 +223,6 @@ def test_readme_states_attribution_and_aggregation_contract() -> None:
         "0-19%20",
         "afterok",
         "finalizer never retrains",
-        "analysis-only notebook",
+        "Analysis-only notebook",
     ):
         assert token in text
