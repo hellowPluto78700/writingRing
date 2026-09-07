@@ -1,0 +1,572 @@
+{
+  "ablations": [
+    {
+      "ablation": "state_reset",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 0.1,
+        "phase_probe_test_accuracy": 0.3179257786613651,
+        "phase_probe_test_ba": 0.31331580297593653,
+        "phase_probe_test_macro_f1": 0.2910896656873081,
+        "phase_probe_val_ba": 0.302317060437162,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.14312303066253662,
+        "progress_probe_test_r2": 0.6431328654289246,
+        "progress_probe_val_mae": 0.15686726570129395
+      },
+      "native": {
+        "test": {
+          "loss": 2.3971188460310846,
+          "phase_accuracy": 0.1058648111332008,
+          "phase_balanced_accuracy": 0.10802795308403437,
+          "phase_ce": 2.3499519498380894,
+          "phase_macro_f1": 0.03003187852175862,
+          "progress_loss": 0.04716685521480155,
+          "progress_mae": 0.26436758041381836,
+          "progress_r2": -0.10424506664276123,
+          "progress_sample_balanced_mae": 0.26441559726244784
+        },
+        "train": {
+          "loss": 2.3771705528955245,
+          "phase_accuracy": 0.10558226003651164,
+          "phase_balanced_accuracy": 0.10682430773738956,
+          "phase_ce": 2.3308863820389503,
+          "phase_macro_f1": 0.031798560839542425,
+          "progress_loss": 0.04628419984459056,
+          "progress_mae": 0.2614392042160034,
+          "progress_r2": -0.08821403980255127,
+          "progress_sample_balanced_mae": 0.26152146908994794
+        },
+        "val": {
+          "loss": 2.3917245864868164,
+          "phase_accuracy": 0.10218593626547275,
+          "phase_balanced_accuracy": 0.10390437925667222,
+          "phase_ce": 2.34488582611084,
+          "phase_macro_f1": 0.027014397022371663,
+          "progress_loss": 0.04683871567249298,
+          "progress_mae": 0.2633315920829773,
+          "progress_r2": -0.09949815273284912,
+          "progress_sample_balanced_mae": 0.26332855224609375
+        }
+      },
+      "replicate": 0
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 10.0,
+        "phase_probe_test_accuracy": 0.44276010603048377,
+        "phase_probe_test_ba": 0.4397558815913838,
+        "phase_probe_test_macro_f1": 0.4271398089208125,
+        "phase_probe_val_ba": 0.4064335558256074,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.11368583887815475,
+        "progress_probe_test_r2": 0.7354077100753784,
+        "progress_probe_val_mae": 0.11967811733484268
+      },
+      "native": {
+        "test": {
+          "loss": 2.578385379216442,
+          "phase_accuracy": 0.15929423459244532,
+          "phase_balanced_accuracy": 0.15516212332043253,
+          "phase_ce": 2.5593250189742,
+          "phase_macro_f1": 0.11390754049341678,
+          "progress_loss": 0.019060464180393578,
+          "progress_mae": 0.16185444593429565,
+          "progress_r2": 0.554050087928772,
+          "progress_sample_balanced_mae": 0.1613972725933545
+        },
+        "train": {
+          "loss": 2.892547321812011,
+          "phase_accuracy": 0.13572947895556636,
+          "phase_balanced_accuracy": 0.13199794114972915,
+          "phase_ce": 2.8710387163441276,
+          "phase_macro_f1": 0.08085742839986322,
+          "progress_loss": 0.02150862989386162,
+          "progress_mae": 0.17996181547641754,
+          "progress_r2": 0.4718301296234131,
+          "progress_sample_balanced_mae": 0.17524381923183105
+        },
+        "val": {
+          "loss": 2.5754241943359375,
+          "phase_accuracy": 0.16556930910367834,
+          "phase_balanced_accuracy": 0.1619943583046473,
+          "phase_ce": 2.5548880100250244,
+          "phase_macro_f1": 0.12689220923852487,
+          "progress_loss": 0.02053610421717167,
+          "progress_mae": 0.17033427953720093,
+          "progress_r2": 0.5068449378013611,
+          "progress_sample_balanced_mae": 0.16744613647460938
+        }
+      },
+      "replicate": 0
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 10.0,
+        "phase_probe_test_accuracy": 0.4300861497680583,
+        "phase_probe_test_ba": 0.42722031866389665,
+        "phase_probe_test_macro_f1": 0.4189593762158899,
+        "phase_probe_val_ba": 0.41369791200709216,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.1112302616238594,
+        "progress_probe_test_r2": 0.7491518259048462,
+        "progress_probe_val_mae": 0.11852578073740005
+      },
+      "native": {
+        "test": {
+          "loss": 2.545784189276499,
+          "phase_accuracy": 0.15763750828363154,
+          "phase_balanced_accuracy": 0.1535698272072947,
+          "phase_ce": 2.5275913787214725,
+          "phase_macro_f1": 0.11137447574777037,
+          "progress_loss": 0.0181928917714586,
+          "progress_mae": 0.15761518478393555,
+          "progress_r2": 0.572303056716919,
+          "progress_sample_balanced_mae": 0.15679037407652974
+        },
+        "train": {
+          "loss": 2.895647019814706,
+          "phase_accuracy": 0.13710285226187885,
+          "phase_balanced_accuracy": 0.1334325139833332,
+          "phase_ce": 2.8737405241048686,
+          "phase_macro_f1": 0.08312055310728132,
+          "progress_loss": 0.021906472755381243,
+          "progress_mae": 0.18188291788101196,
+          "progress_r2": 0.46332281827926636,
+          "progress_sample_balanced_mae": 0.17731806743575865
+        },
+        "val": {
+          "loss": 2.610750436782837,
+          "phase_accuracy": 0.1597752611711,
+          "phase_balanced_accuracy": 0.15598784313597197,
+          "phase_ce": 2.5903916358947754,
+          "phase_macro_f1": 0.11602536688207132,
+          "progress_loss": 0.020358797162771225,
+          "progress_mae": 0.17055414617061615,
+          "progress_r2": 0.5103718042373657,
+          "progress_sample_balanced_mae": 0.16755848839169457
+        }
+      },
+      "replicate": 1
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 10.0,
+        "phase_probe_test_accuracy": 0.44888999337309476,
+        "phase_probe_test_ba": 0.4461814747556961,
+        "phase_probe_test_macro_f1": 0.4352179698264978,
+        "phase_probe_val_ba": 0.39548196035167205,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.11172940582036972,
+        "progress_probe_test_r2": 0.744279146194458,
+        "progress_probe_val_mae": 0.12252248078584671
+      },
+      "native": {
+        "test": {
+          "loss": 2.6009339077831948,
+          "phase_accuracy": 0.1594599072233267,
+          "phase_balanced_accuracy": 0.15538260683761843,
+          "phase_ce": 2.5819018572977144,
+          "phase_macro_f1": 0.11216823082818292,
+          "progress_loss": 0.019031995346080768,
+          "progress_mae": 0.16133107244968414,
+          "progress_r2": 0.5504969358444214,
+          "progress_sample_balanced_mae": 0.16011485334945053
+        },
+        "train": {
+          "loss": 2.9173623481428765,
+          "phase_accuracy": 0.13512653457718526,
+          "phase_balanced_accuracy": 0.13138787340245478,
+          "phase_ce": 2.8956074940358096,
+          "phase_macro_f1": 0.08034805626935841,
+          "progress_loss": 0.02175489955432649,
+          "progress_mae": 0.1808454394340515,
+          "progress_r2": 0.4668337106704712,
+          "progress_sample_balanced_mae": 0.1763169145830322
+        },
+        "val": {
+          "loss": 2.571350336074829,
+          "phase_accuracy": 0.1607409358265297,
+          "phase_balanced_accuracy": 0.15710513633097223,
+          "phase_ce": 2.551239013671875,
+          "phase_macro_f1": 0.11877998001553106,
+          "progress_loss": 0.02011139504611492,
+          "progress_mae": 0.16905929148197174,
+          "progress_r2": 0.5191867351531982,
+          "progress_sample_balanced_mae": 0.1665368458581349
+        }
+      },
+      "replicate": 2
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 10.0,
+        "phase_probe_test_accuracy": 0.4517064280980782,
+        "phase_probe_test_ba": 0.4490815864927537,
+        "phase_probe_test_macro_f1": 0.437657895731497,
+        "phase_probe_val_ba": 0.40603283404510115,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.11381425708532333,
+        "progress_probe_test_r2": 0.7342709302902222,
+        "progress_probe_val_mae": 0.11872916668653488
+      },
+      "native": {
+        "test": {
+          "loss": 2.6253274597533762,
+          "phase_accuracy": 0.15987408880053014,
+          "phase_balanced_accuracy": 0.15583057935162564,
+          "phase_ce": 2.6065434984964866,
+          "phase_macro_f1": 0.11388278871633965,
+          "progress_loss": 0.018783992513605994,
+          "progress_mae": 0.1607479304075241,
+          "progress_r2": 0.5581796765327454,
+          "progress_sample_balanced_mae": 0.15994369003870715
+        },
+        "train": {
+          "loss": 2.9254035330064942,
+          "phase_accuracy": 0.13599745423484683,
+          "phase_balanced_accuracy": 0.13232610908250547,
+          "phase_ce": 2.9034291040056135,
+          "phase_macro_f1": 0.08181728545215658,
+          "progress_loss": 0.021974448791084726,
+          "progress_mae": 0.1820436418056488,
+          "progress_r2": 0.45997321605682373,
+          "progress_sample_balanced_mae": 0.17710629921156446
+        },
+        "val": {
+          "loss": 2.5871458053588867,
+          "phase_accuracy": 0.16038978140637344,
+          "phase_balanced_accuracy": 0.1566745034848591,
+          "phase_ce": 2.5668492317199707,
+          "phase_macro_f1": 0.11772054880078626,
+          "progress_loss": 0.020296569913625717,
+          "progress_mae": 0.17161095142364502,
+          "progress_r2": 0.5153378248214722,
+          "progress_sample_balanced_mae": 0.16895157950265066
+        }
+      },
+      "replicate": 3
+    },
+    {
+      "ablation": "temporal_shuffle",
+      "membrane_probe": {
+        "feature_dim": 128,
+        "feature_type": "membrane",
+        "phase_probe_C": 1.0,
+        "phase_probe_test_accuracy": 0.4309973492379059,
+        "phase_probe_test_ba": 0.4280643394329253,
+        "phase_probe_test_macro_f1": 0.41606534050842525,
+        "phase_probe_val_ba": 0.3975270250382676,
+        "progress_probe_alpha": 10.0,
+        "progress_probe_test_mae": 0.11593823879957199,
+        "progress_probe_test_r2": 0.7324126362800598,
+        "progress_probe_val_mae": 0.1194714605808258
+      },
+      "native": {
+        "test": {
+          "loss": 2.5769909505974757,
+          "phase_accuracy": 0.15838303512259774,
+          "phase_balanced_accuracy": 0.15419322792606396,
+          "phase_ce": 2.5581436875748307,
+          "phase_macro_f1": 0.11038210883858597,
+          "progress_loss": 0.018847171829579627,
+          "progress_mae": 0.1606368124485016,
+          "progress_r2": 0.5546131134033203,
+          "progress_sample_balanced_mae": 0.15932169189191844
+        },
+        "train": {
+          "loss": 2.9203928427934236,
+          "phase_accuracy": 0.13376990972582778,
+          "phase_balanced_accuracy": 0.13011162490877135,
+          "phase_ce": 2.89832726238927,
+          "phase_macro_f1": 0.08037417262761293,
+          "progress_loss": 0.022065531853554376,
+          "progress_mae": 0.18245550990104675,
+          "progress_r2": 0.4584340453147888,
+          "progress_sample_balanced_mae": 0.17768613483737544
+        },
+        "val": {
+          "loss": 2.6211154460906982,
+          "phase_accuracy": 0.16504257747344395,
+          "phase_balanced_accuracy": 0.1615523938496795,
+          "phase_ce": 2.6009833812713623,
+          "phase_macro_f1": 0.12582056623294308,
+          "progress_loss": 0.020131966099143028,
+          "progress_mae": 0.16884687542915344,
+          "progress_r2": 0.5152191519737244,
+          "progress_sample_balanced_mae": 0.16576910775805276
+        }
+      },
+      "replicate": 4
+    }
+  ],
+  "best_epoch": 62,
+  "experiment_id": "experiment_5_3_2_when_representation",
+  "group_probes": [
+    {
+      "feature_dim": 43,
+      "feature_type": "synaptic_s4",
+      "group": "synaptic_s4",
+      "phase_probe_C": 0.1,
+      "phase_probe_test_accuracy": 0.3314280980781975,
+      "phase_probe_test_ba": 0.3266082647403378,
+      "phase_probe_test_macro_f1": 0.30374205368977514,
+      "phase_probe_val_ba": 0.338579830301009,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.1193171963095665,
+      "progress_probe_test_r2": 0.7240317463874817,
+      "progress_probe_val_mae": 0.1346382349729538
+    },
+    {
+      "feature_dim": 43,
+      "feature_type": "synaptic_s5",
+      "group": "synaptic_s5",
+      "phase_probe_C": 10.0,
+      "phase_probe_test_accuracy": 0.3302683896620278,
+      "phase_probe_test_ba": 0.3254846941181583,
+      "phase_probe_test_macro_f1": 0.3019102444900797,
+      "phase_probe_val_ba": 0.32705289762439826,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.11073140054941177,
+      "progress_probe_test_r2": 0.7569166421890259,
+      "progress_probe_val_mae": 0.1266447752714157
+    },
+    {
+      "feature_dim": 42,
+      "feature_type": "synaptic_s6",
+      "group": "synaptic_s6",
+      "phase_probe_C": 0.1,
+      "phase_probe_test_accuracy": 0.34749834327369117,
+      "phase_probe_test_ba": 0.34272185936116195,
+      "phase_probe_test_macro_f1": 0.3209574849202988,
+      "phase_probe_val_ba": 0.3367639168489236,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.11654149740934372,
+      "progress_probe_test_r2": 0.7211621999740601,
+      "progress_probe_val_mae": 0.12147486954927444
+    }
+  ],
+  "native": {
+    "test": {
+      "loss": 1.9289583914900479,
+      "phase_accuracy": 0.3205765407554672,
+      "phase_balanced_accuracy": 0.3214522772864017,
+      "phase_ce": 1.9021017322801563,
+      "phase_macro_f1": 0.2783175577499156,
+      "progress_loss": 0.02685665938850135,
+      "progress_mae": 0.1767047494649887,
+      "progress_r2": 0.42685192823410034,
+      "progress_sample_balanced_mae": 0.18743504890023846
+    },
+    "train": {
+      "loss": 1.5678655050707766,
+      "phase_accuracy": 0.3945433533756511,
+      "phase_balanced_accuracy": 0.39392968271066076,
+      "phase_ce": 1.5482896687446897,
+      "phase_macro_f1": 0.3559144616642015,
+      "progress_loss": 0.019575828250350105,
+      "progress_mae": 0.15277838706970215,
+      "progress_r2": 0.5457912683486938,
+      "progress_sample_balanced_mae": 0.15406773545861038
+    },
+    "val": {
+      "loss": 1.8654550313949585,
+      "phase_accuracy": 0.3186726362918093,
+      "phase_balanced_accuracy": 0.3198446244672008,
+      "phase_ce": 1.8400813341140747,
+      "phase_macro_f1": 0.2884179539988213,
+      "progress_loss": 0.02537372335791588,
+      "progress_mae": 0.17485681176185608,
+      "progress_r2": 0.4427039623260498,
+      "progress_sample_balanced_mae": 0.18184586176796566
+    }
+  },
+  "probes": [
+    {
+      "feature_dim": 128,
+      "feature_type": "membrane",
+      "phase_probe_C": 0.1,
+      "phase_probe_test_accuracy": 0.341948310139165,
+      "phase_probe_test_ba": 0.33807631239012376,
+      "phase_probe_test_macro_f1": 0.32260283376090954,
+      "phase_probe_val_ba": 0.3451739596699544,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.11758589744567871,
+      "progress_probe_test_r2": 0.7172967195510864,
+      "progress_probe_val_mae": 0.12242075055837631
+    },
+    {
+      "feature_dim": 128,
+      "feature_type": "synaptic",
+      "phase_probe_C": 0.1,
+      "phase_probe_test_accuracy": 0.34782968853545393,
+      "phase_probe_test_ba": 0.34412491184755434,
+      "phase_probe_test_macro_f1": 0.32903570143179006,
+      "phase_probe_val_ba": 0.34898555811766274,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.1199314296245575,
+      "progress_probe_test_r2": 0.7147803902626038,
+      "progress_probe_val_mae": 0.12545791268348694
+    },
+    {
+      "feature_dim": 128,
+      "feature_type": "spike",
+      "phase_probe_C": 0.01,
+      "phase_probe_test_accuracy": 0.2998674618952949,
+      "phase_probe_test_ba": 0.29507889436148715,
+      "phase_probe_test_macro_f1": 0.2711605293651725,
+      "phase_probe_val_ba": 0.3037505280879124,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.12747232615947723,
+      "progress_probe_test_r2": 0.6934956312179565,
+      "progress_probe_val_mae": 0.13627229630947113
+    },
+    {
+      "feature_dim": 128,
+      "feature_type": "spike250",
+      "phase_probe_C": 0.01,
+      "phase_probe_test_accuracy": 0.2944831013916501,
+      "phase_probe_test_ba": 0.28995456727665786,
+      "phase_probe_test_macro_f1": 0.2651827345250647,
+      "phase_probe_val_ba": 0.31709047333054935,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.12174626439809799,
+      "progress_probe_test_r2": 0.7171093821525574,
+      "progress_probe_val_mae": 0.12495613843202591
+    },
+    {
+      "feature_dim": 128,
+      "feature_type": "spike500",
+      "phase_probe_C": 0.01,
+      "phase_probe_test_accuracy": 0.29705102717031145,
+      "phase_probe_test_ba": 0.291995805234242,
+      "phase_probe_test_macro_f1": 0.2624973617989663,
+      "phase_probe_val_ba": 0.31138352081639636,
+      "progress_probe_alpha": 10.0,
+      "progress_probe_test_mae": 0.11724001914262772,
+      "progress_probe_test_r2": 0.7304997444152832,
+      "progress_probe_val_mae": 0.1196899488568306
+    }
+  ],
+  "protocol_version": "supervised_causal_when_v1",
+  "provenance": {
+    "batch_size": 128,
+    "checkpoint_selection": "max validation native U phase BA; tie lower progress MAE; tie lower total loss",
+    "condition": "syn_multi_s456",
+    "epochs": 100,
+    "experiment_id": "experiment_5_3_2_when_representation",
+    "family": "syn",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "local_source_experiment": "experiment_5_2_frozen_local_tauR_sweep",
+    "local_source_frozen": true,
+    "local_source_protocol": "frozen_exp3_l2_endpoint_tauR_v1",
+    "local_width": 128,
+    "loss_reduction": "mean over valid timesteps within each sample, then mean over samples",
+    "mem_group_counts": [
+      128
+    ],
+    "objective": "supervised_when",
+    "objective_formula": "L_phase(U_t) + L_progress(U_t)",
+    "parameter_counts": {
+      "input_projection": 16384,
+      "phase_head": 1290,
+      "progress_head": 129,
+      "recurrent": 0,
+      "trainable_total": 17803
+    },
+    "phase_target": "q_t=min(9,floor(10*t/(T-1))); T used only to construct supervision",
+    "progress_target": "p_t=t/(T-1); T used only to construct supervision",
+    "protocol_version": "supervised_causal_when_v1",
+    "recurrent": false,
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 53,
+    "shifts_mem": [
+      1
+    ],
+    "shifts_syn": [
+      4,
+      5,
+      6
+    ],
+    "shuffle_replicates": 5,
+    "spike_windows_seconds": [
+      0.25,
+      0.5
+    ],
+    "split_seed": 12345,
+    "syn_group_counts": [
+      43,
+      43,
+      42
+    ],
+    "tau_mem_ms": [
+      22.542110013890053
+    ],
+    "tau_syn_ms": [
+      242.10347130039656,
+      492.1461612435418,
+      992.1669944116244
+    ],
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0,
+    "when_width": 128
+  },
+  "spec": {
+    "condition": "syn_multi_s456",
+    "seed": 53
+  }
+}

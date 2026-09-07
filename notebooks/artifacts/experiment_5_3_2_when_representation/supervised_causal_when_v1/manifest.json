@@ -1,0 +1,149 @@
+{
+  "aggregation_policy": "finalizer only aggregates completed run/baseline artifacts; notebook is analysis-only",
+  "baselines": [
+    "current WHAT z_t only",
+    "elapsed time t/fs only"
+  ],
+  "causal_ablation": [
+    "state_reset",
+    "temporal_shuffle"
+  ],
+  "checkpoint_selection": "max validation native U phase BA; tie lower progress MAE; tie lower total loss",
+  "conditions": [
+    {
+      "family": "mem",
+      "name": "mem_single_s4",
+      "recurrent": false,
+      "shifts_mem": [
+        4
+      ],
+      "shifts_syn": [
+        1
+      ]
+    },
+    {
+      "family": "mem",
+      "name": "mem_single_s5",
+      "recurrent": false,
+      "shifts_mem": [
+        5
+      ],
+      "shifts_syn": [
+        1
+      ]
+    },
+    {
+      "family": "mem",
+      "name": "mem_single_s6",
+      "recurrent": false,
+      "shifts_mem": [
+        6
+      ],
+      "shifts_syn": [
+        1
+      ]
+    },
+    {
+      "family": "mem",
+      "name": "mem_multi_s456",
+      "recurrent": false,
+      "shifts_mem": [
+        4,
+        5,
+        6
+      ],
+      "shifts_syn": [
+        1
+      ]
+    },
+    {
+      "family": "syn",
+      "name": "syn_single_s4",
+      "recurrent": false,
+      "shifts_mem": [
+        1
+      ],
+      "shifts_syn": [
+        4
+      ]
+    },
+    {
+      "family": "syn",
+      "name": "syn_single_s5",
+      "recurrent": false,
+      "shifts_mem": [
+        1
+      ],
+      "shifts_syn": [
+        5
+      ]
+    },
+    {
+      "family": "syn",
+      "name": "syn_single_s6",
+      "recurrent": false,
+      "shifts_mem": [
+        1
+      ],
+      "shifts_syn": [
+        6
+      ]
+    },
+    {
+      "family": "syn",
+      "name": "syn_multi_s456",
+      "recurrent": false,
+      "shifts_mem": [
+        1
+      ],
+      "shifts_syn": [
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "family": "rsnn",
+      "name": "rsnn_shortmem",
+      "recurrent": true,
+      "shifts_mem": [
+        1
+      ],
+      "shifts_syn": [
+        1
+      ]
+    }
+  ],
+  "expected_runs": 45,
+  "experiment_id": "experiment_5_3_2_when_representation",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "baseline_runs": "baseline_runs.csv",
+    "group_probe_runs": "group_probe_runs.csv",
+    "histories": "histories.csv",
+    "local_reference": "local_reference.csv",
+    "probe_runs": "probe_runs.csv",
+    "runs": "runs.csv"
+  },
+  "phase_supervision": "10-way relative progress, diagnostic target built from known training segment end",
+  "primary_ranking": "high ordered U phase BA; positive ordered-reset history gain; low progress MAE; prefer spike-window accessibility",
+  "primary_when_interface": "post-reset membrane U_t",
+  "progress_supervision": "continuous t/(T-1), target only; final duration is not an input",
+  "protocol_version": "supervised_causal_when_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "shuffle_replicates": 5,
+  "source_experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_protocol_version": "frozen_exp3_l2_endpoint_tauR_v1",
+  "spike_readouts": [
+    "instantaneous spike",
+    "trailing 250ms count",
+    "trailing 500ms count"
+  ],
+  "training_objective": "L_WHEN = L_phase(U_t) + L_progress(U_t)"
+}
