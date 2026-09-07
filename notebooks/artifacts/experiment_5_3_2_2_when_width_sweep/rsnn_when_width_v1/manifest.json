@@ -1,0 +1,101 @@
+{
+  "activity_thresholds": {
+    "dead_neuron_fraction": "FR < 0.0001",
+    "highly_active_neuron_fraction": "FR > 0.1 spikes/timestep"
+  },
+  "aggregation_policy": "finalizer requires all 25 evaluations, all 25 histories, all five baseline artifacts, and only aggregates existing artifacts",
+  "baseline_reuse": "identity-validated Exp5.3.2.1 baseline artifacts; no refitting",
+  "baselines": [
+    "what_only",
+    "elapsed_time_only"
+  ],
+  "causality_contract": "T_i is used only to construct phase/progress supervision; T_i is not an RSNN/head/deployment input",
+  "checkpoint_selection": "min validation joint objective loss; tie lower progress MAE; tie higher phase BA",
+  "conditions": [
+    "rsnn_h16",
+    "rsnn_h32",
+    "rsnn_h64",
+    "rsnn_h128",
+    "rsnn_h256"
+  ],
+  "evaluation_required_sections": [
+    "parameter_count",
+    "parameter_counts",
+    "native",
+    "probes",
+    "trajectory_metrics",
+    "history_attribution",
+    "activity",
+    "representation"
+  ],
+  "expected_runs": 25,
+  "expected_runs_per_width": 5,
+  "experiment_id": "experiment_5_3_2_2_when_width_sweep",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "activity_runs": "activity_runs.csv",
+    "baseline_runs": "baseline_runs.csv",
+    "histories": "histories.csv",
+    "history_gain_runs": "history_gain_runs.csv",
+    "local_reference": "local_reference.csv",
+    "probe_runs": "probe_runs.csv",
+    "representation_runs": "representation_runs.csv",
+    "runs": "runs.csv"
+  },
+  "fixed_objective": {
+    "name": "joint",
+    "phase_weight": 1.0,
+    "progress_weight": 1.0
+  },
+  "fixed_when_architecture": "one-layer short-tau recurrent SNN; only hidden width changes",
+  "paired_initialization": "deterministic width-specific component seeds; no prefix copying",
+  "paired_minibatch_order": "same Exp5.3.2 loader seed for every width within a master seed",
+  "primary_metrics": [
+    "U phase balanced accuracy",
+    "U progress sample-balanced MAE",
+    "per-gesture progress Spearman",
+    "monotonic violation rate",
+    "H_reset and H_shuffle for phase/progress",
+    "train/val/test probe generalization",
+    "spike-domain phase/progress accessibility",
+    "firing-rate utilization",
+    "effective dimension and PCA90 dimension"
+  ],
+  "protocol_version": "rsnn_when_width_v1",
+  "representation_diagnostic": "covariance eigenspectrum of all valid test U_t; participation ratio and number of PCs explaining >=90% variance",
+  "run_order": "width-major: tasks 0-4 H16, 5-9 H32, 10-14 H64, 15-19 H128, 20-24 H256",
+  "scientific_question": "whether the supervised causal WHEN ceiling is limited by single-layer RSNN hidden-state capacity",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "source_local_experiment": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_local_protocol": "frozen_exp3_l2_endpoint_tauR_v1",
+  "source_objective_experiment": "experiment_5_3_2_1_when_objective_sweep",
+  "source_objective_protocol": "rsnn_when_objective_v1",
+  "source_when_experiment": "experiment_5_3_2_when_representation",
+  "source_when_protocol": "supervised_causal_when_v1",
+  "spike_readouts": [
+    "membrane",
+    "synaptic",
+    "instantaneous spike",
+    "trailing 250ms spike count",
+    "trailing 500ms spike count"
+  ],
+  "widths": [
+    16,
+    32,
+    64,
+    128,
+    256
+  ],
+  "winner_selection": [
+    "require mean ProgressMAE < elapsed-time mean",
+    "require positive mean H_reset and H_shuffle for both phase and progress",
+    "then prefer higher PhaseBA, lower ProgressMAE, larger history gain",
+    "then prefer fewer parameters and better spike accessibility"
+  ]
+}
