@@ -1,0 +1,65 @@
+{
+  "aggregation_policy": "finalizer only aggregates completed run artifacts; notebook performs summaries and plots",
+  "causal_metrics": [
+    "trained factorized FF vs stateful conditions",
+    "ordered vs state_reset HiddenWholeCount",
+    "ordered vs temporal_shuffle HiddenWholeCount",
+    "ordered-trained transfer probe",
+    "gate/evidence history sensitivity"
+  ],
+  "checkpoint_selection": "native validation BA only; tie-break validation CE",
+  "conditions": [
+    {
+      "beta": 0.0,
+      "family": "ff_gate",
+      "name": "factorized_ff_gate",
+      "recurrent": false,
+      "stateful": false
+    },
+    {
+      "beta": 0.5,
+      "family": "lif_gate",
+      "name": "factorized_lif22",
+      "recurrent": false,
+      "stateful": true
+    },
+    {
+      "beta": 0.9375,
+      "family": "lif_gate",
+      "name": "factorized_lif242",
+      "recurrent": false,
+      "stateful": true
+    },
+    {
+      "beta": 0.5,
+      "family": "rsnn_gate",
+      "name": "factorized_rsnn22",
+      "recurrent": true,
+      "stateful": true
+    }
+  ],
+  "expected_runs": 20,
+  "experiment_id": "experiment_5_3_1_factorized_gate_attribution",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "histories": "histories.csv",
+    "history_sensitivity_runs": "history_sensitivity_runs.csv",
+    "local_reference": "local_reference.csv",
+    "phase_probe_runs": "phase_probe_runs.csv",
+    "probe_runs": "probe_runs.csv",
+    "runs": "runs.csv"
+  },
+  "preservation_metric": "HiddenRelative10 as ordered-trajectory ceiling only",
+  "primary_representation_metric": "HiddenWholeCount - LocalWholeCount",
+  "protocol_version": "factorized_gate_causal_attribution_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "shuffle_replicates": 5,
+  "source_experiment_id": "experiment_5_2_frozen_local_tauR_sweep",
+  "source_protocol_version": "frozen_exp3_l2_endpoint_tauR_v1"
+}
