@@ -27,7 +27,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
-python -u -m scripts.experiment_5_3_2_when_representation run-one \
+python -u -m scripts.experiment_5_3_2_when_representation_runtime run-one \
     --array-task-id "${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}" \
     --device cpu \
     --threads 1
