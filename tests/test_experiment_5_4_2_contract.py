@@ -10,8 +10,16 @@ from scripts import experiment_5_4_1_constrained_conjunction_residual as exp541
 from scripts import experiment_5_4_2_phase_conditioned_readout as exp542
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCREEN = REPO_ROOT / "scripts/bash_script/SNN_Bash/submit_exp_5_4_2_screen_cpu.bash"
-REFINE = REPO_ROOT / "scripts/bash_script/SNN_Bash/submit_exp_5_4_2_refine_cpu.bash"
+SLURM_DIR = REPO_ROOT / "scripts/bash_script/SNN_Bash"
+SCREEN = SLURM_DIR / "submit_exp_5_4_2_screen_cpu.bash"
+REFINE = SLURM_DIR / "submit_exp_5_4_2_refine_cpu.bash"
+PREP_RUNNER = SLURM_DIR / "prepare_exp_5_4_2_source_cpu_array.bash"
+SCREEN_RUNNER = SLURM_DIR / "run_exp_5_4_2_screen_cpu_array.bash"
+SCREEN_FINALIZER = SLURM_DIR / "finalize_exp_5_4_2_screen_cpu.bash"
+REFINE_RUNNER = SLURM_DIR / "run_exp_5_4_2_refine_cpu_array.bash"
+REFINE_FINALIZER = SLURM_DIR / "finalize_exp_5_4_2_refine_cpu.bash"
+FINAL_RUNNER = SLURM_DIR / "run_exp_5_4_2_final_cpu_array.bash"
+FINALIZER = SLURM_DIR / "finalize_exp_5_4_2_cpu.bash"
 README = REPO_ROOT / "scripts/experiment_5_4_2/README.md"
 NOTEBOOK = REPO_ROOT / "notebooks/experiment_5_4_2_phase_conditioned_readout.ipynb"
 
@@ -119,17 +127,47 @@ def test_selection_is_validation_only() -> None:
 def test_slurm_contract() -> None:
     screen = SCREEN.read_text(encoding="utf-8")
     refine = REFINE.read_text(encoding="utf-8")
-    assert "--array=0-4%5" in screen
-    assert "--array=0-49%50" in screen
+    runners = {
+        "prep": PREP_RUNNER.read_text(encoding="utf-8"),
+        "screen": SCREEN_RUNNER.read_text(encoding="utf-8"),
+        "screen_finalizer": SCREEN_FINALIZER.read_text(encoding="utf-8"),
+        "refine": REFINE_RUNNER.read_text(encoding="utf-8"),
+        "refine_finalizer": REFINE_FINALIZER.read_text(encoding="utf-8"),
+        "final": FINAL_RUNNER.read_text(encoding="utf-8"),
+        "finalizer": FINALIZER.read_text(encoding="utf-8"),
+    }
+
+    # Match the proven Exp5.4.1 pattern: submit real Bash Slurm scripts, never
+    # `sbatch --wrap`, because Unity executes --wrap payloads through /bin/sh.
+    assert "--wrap" not in screen
+    assert "--wrap" not in refine
+    assert "prepare_exp_5_4_2_source_cpu_array.bash" in screen
+    assert "run_exp_5_4_2_screen_cpu_array.bash" in screen
+    assert "finalize_exp_5_4_2_screen_cpu.bash" in screen
+    assert "run_exp_5_4_2_refine_cpu_array.bash" in refine
+    assert "finalize_exp_5_4_2_refine_cpu.bash" in refine
+    assert "run_exp_5_4_2_final_cpu_array.bash" in refine
+    assert "finalize_exp_5_4_2_cpu.bash" in refine
+
+    assert "#SBATCH --array=0-4%5" in runners["prep"]
+    assert "#SBATCH --array=0-49%50" in runners["screen"]
     assert '--array="0-${REFINE_MAX}%50"' in refine
     assert "REFINE_COUNT=45" in refine
     assert "REFINE_COUNT=15" in refine
-    for text in (screen, refine):
+    assert "#SBATCH --array=0-4%5" in runners["final"]
+
+    for text in runners.values():
+        assert text.startswith("#!/usr/bin/env bash")
         assert "--cpus-per-task=1" in text
+        assert "module load conda/latest" in text
+        assert 'eval "$(conda shell.bash hook)"' in text
+        assert "conda activate writingring-gpu" in text
+        assert "conda activate writingring-viz" in text
         assert "OMP_NUM_THREADS=1" in text
         assert "MKL_NUM_THREADS=1" in text
         assert "OPENBLAS_NUM_THREADS=1" in text
         assert "NUMEXPR_NUM_THREADS=1" in text
+
     assert 'afterok:${PREP_JOB}' in screen
     assert 'afterok:${SCREEN_JOB}' in screen
     assert 'afterok:${REFINE_JOB}' in refine
