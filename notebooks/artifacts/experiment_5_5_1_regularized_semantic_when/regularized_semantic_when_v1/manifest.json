@@ -1,0 +1,43 @@
+{
+  "architecture": "frozen WHAT128 -> GRU64 -> strict-history semantic q8/full 12x128 experts + auxiliary progress head",
+  "experiment_id": "experiment_5_5_1_regularized_semantic_when",
+  "loss": "whole-gesture CE + selected weak progress/sticky/confidence auxiliaries; no balance loss",
+  "multi_cpu_policy": "5 source-validation -> 15 ordered screen -> selector -> 5 matched reset -> 5 final test/diagnostic -> artifact-only finalizer",
+  "notebook_policy": "analysis-only; finalized CSV/JSON input only; no training, Slurm, selection, or regeneration",
+  "progress_contract": "progress_t = sigmoid(P h_t), supervised by t/(T-1) on valid timesteps only",
+  "protocol_version": "regularized_semantic_when_v1",
+  "regularization_rescue_supported": true,
+  "routing_contract": "q_t = softmax(G h_(t-1)) for ordered mode; predicted progress never enters q or expert weights",
+  "screen_recipes": [
+    {
+      "complexity": 1,
+      "lambda_confidence": 0.0,
+      "lambda_progress": 0.3,
+      "lambda_sticky": 0.0,
+      "name": "progress"
+    },
+    {
+      "complexity": 2,
+      "lambda_confidence": 0.0,
+      "lambda_progress": 0.3,
+      "lambda_sticky": 0.1,
+      "name": "progress_sticky"
+    },
+    {
+      "complexity": 3,
+      "lambda_confidence": 0.02,
+      "lambda_progress": 0.3,
+      "lambda_sticky": 0.1,
+      "name": "progress_sticky_confidence"
+    }
+  ],
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selected_recipe": "progress",
+  "selection_policy": "validation-only nested recipe screen; test unavailable until selection.json is fixed"
+}
