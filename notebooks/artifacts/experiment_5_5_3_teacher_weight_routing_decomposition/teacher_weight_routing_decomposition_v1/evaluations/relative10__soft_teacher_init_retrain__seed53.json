@@ -1,0 +1,49 @@
+{
+  "best_epoch": 34,
+  "condition": "soft_teacher_init_retrain",
+  "experiment_id": "experiment_5_5_3_teacher_weight_routing_decomposition",
+  "family": "relative10",
+  "initial_train_balanced_accuracy": 0.9199071812404146,
+  "initial_val_balanced_accuracy": 0.5606661856661858,
+  "initialization": "teacher",
+  "protocol_version": "teacher_weight_routing_decomposition_v1",
+  "routing": "soft",
+  "seed": 53,
+  "selection_policy": "epoch 0 and trained epochs compete by validation balanced accuracy, tie-broken by validation CE",
+  "source_cache_seed": 53,
+  "spec": {
+    "condition": "soft_teacher_init_retrain",
+    "family": "relative10",
+    "seed": 53
+  },
+  "stopped_after_epoch": 59,
+  "test": {
+    "accuracy": 0.6095890410958904,
+    "balanced_accuracy": 0.6014534077034076,
+    "loss": 2.0329273174864877,
+    "macro_f1": 0.5990018592555945,
+    "n_samples": 146
+  },
+  "test_used_for_checkpoint_selection": false,
+  "train": {
+    "accuracy": 0.9913941480206541,
+    "balanced_accuracy": 0.9916109435227082,
+    "loss": 0.035241878663051174,
+    "macro_f1": 0.9918661208681572,
+    "n_samples": 581
+  },
+  "trainable_parameter_count": 15372,
+  "val": {
+    "accuracy": 0.6349206349206349,
+    "balanced_accuracy": 0.6404280904280905,
+    "loss": 1.70167088991663,
+    "macro_f1": 0.6315964332020777,
+    "n_samples": 126
+  },
+  "weight_diagnostics": {
+    "bias_l2_distance_to_teacher": 0.09095308231702537,
+    "weight_cosine_to_teacher": 0.6426757016775402,
+    "weight_frobenius_distance_to_teacher": 2.3217651938915496,
+    "weight_relative_distance_to_teacher": 1.84778044444418
+  }
+}

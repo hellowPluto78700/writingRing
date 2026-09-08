@@ -1,0 +1,37 @@
+{
+  "conditions": [
+    "hard_teacher_frozen",
+    "soft_teacher_frozen",
+    "hard_random_train",
+    "soft_random_train",
+    "soft_teacher_init_retrain",
+    "soft_linear_refit"
+  ],
+  "equivalence_atol": 1e-06,
+  "experiment_id": "experiment_5_5_3_teacher_weight_routing_decomposition",
+  "families": [
+    "relative10",
+    "fixed250"
+  ],
+  "linear_refit": "train-only StandardScaler + LogisticRegression(lbfgs), C selected on validation BA",
+  "multi_cpu_policy": "5 teacher tasks -> 30 independent train/evaluate tasks plus 10 independent soft-linear-refit tasks -> one artifact-only finalizer",
+  "n_states_by_family": {
+    "fixed250": 16,
+    "relative10": 10
+  },
+  "notebook_policy": "analysis-only; reads finalized CSV/JSON artifacts and never trains, refits, or regenerates missing artifacts",
+  "optimizer": "AdamW(lr=1e-3, weight_decay=1e-4), grad clip 1.0",
+  "protocol_version": "teacher_weight_routing_decomposition_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selection_policy": "epoch 0 and trained epochs are validation-selected within each train run; test never selects checkpoints, C, routing, or conditions",
+  "soft_sigma_multiplier": 1.5,
+  "source_experiment": "experiment_5_5_non_snn_history_experts",
+  "source_protocol": "non_snn_history_experts_v1",
+  "source_what_frozen": true
+}
