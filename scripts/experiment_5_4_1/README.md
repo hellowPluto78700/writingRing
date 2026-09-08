@@ -1,79 +1,97 @@
-# Experiment 5.4.1 — Constrained WHAT×WHEN residual conjunction
+# Experiment 5.4.1 — Direct WHAT base + constrained WHAT×WHEN residual conjunction
 
 ## Question
 
-Exp5.4 established two facts that must be separated:
+Exp5.4 showed that WHAT/WHEN temporal alignment affects the trained Fusion-LIF, but the jointly trained Fusion-LIF did not consistently beat WHAT-only or matched linear controls. The earlier Exp5.4.1 draft still reused Exp5.4 `what_only_lif`, which inserted another 128-neuron LIF between the original WHAT branch and the classifier.
 
-1. the jointly trained Fusion-LIF is sensitive to WHAT/WHEN temporal alignment;
-2. that alignment sensitivity did **not** produce a consistent final-BA improvement over WHAT-only, elapsed-time, reset-WHEN, or the matched linear control.
+That extra layer is removed here.
 
-In addition, WHEN-only retained substantial letter identity. Therefore Exp5.4.1 does not add capacity to the old fusion. It asks a narrower question:
+The cleaner question is:
 
-> **Can frozen WHEN spikes provide incremental class information when they are structurally prevented from becoming an independent classifier and may only correct an already learned WHAT-only decision through a spike-domain conjunction?**
+> **Starting from the original frozen WHAT L2 spikes themselves, can frozen WHEN spikes provide incremental classification value only through a structurally constrained WHAT×WHEN conjunction residual?**
 
-## Fixed sources
+## Frozen source representations
 
-For every seed `(11, 23, 37, 53, 71)`:
+For each seed `(11, 23, 37, 53, 71)`:
 
-- frozen WHAT trajectory: the same 128D Local-SNN L2 spikes cached by Exp5.4;
-- frozen WHEN trajectory: Exp5.3.2.3 `ffsnn128_rsnn64` 64D output spikes cached by Exp5.4;
-- frozen base classifier: Exp5.4 `what_only_lif` checkpoint for the same seed;
-- user-disjoint split and labels are unchanged.
+- WHAT is the same frozen 128D binary Local-SNN L2 spike trajectory used throughout Exp5.x;
+- WHEN is the frozen Exp5.3.2.3 `ffsnn128_rsnn64` 64D output-spike trajectory cached by Exp5.4;
+- ordered and state-reset WHEN trajectories come from the same frozen source checkpoint;
+- the user-disjoint train/val/test split is unchanged.
 
-The Exp5.4 WHAT-only model is:
+No Exp5.4 Fusion-LIF checkpoint is used as the base classifier.
 
-```text
-WHAT128 spikes
-    -> frozen W_what
-    -> short-memory Fusion-LIF128
-    -> frozen Fusion spikes s_base[t]
-    -> frozen W_out
-    -> whole-sequence base logits
-```
+## Stage A — direct WHAT base
 
-All base parameters are frozen in Exp5.4.1.
-
-## Residual path
-
-The new path **does not read raw WHAT**. It receives only the already learned frozen base Fusion spikes plus frozen WHEN spikes:
+The base classifier reads the original WHAT spikes directly:
 
 ```text
-frozen base Fusion128 spikes -> Base selector128 spikes ---\
-                                                        AND -> Conjunction128 spikes -> residual W_out -> delta evidence
-frozen WHEN64 spikes         -> WHEN selector128 spikes --/
+frozen WHAT128 spikes
+        -> bias-free Linear(128 -> 12)
+        -> per-timestep class evidence
+        -> sum over valid timesteps
+        -> one final 12D class bias
 ```
 
-The selector layers are bias-free fixed-synapse projections followed by a spike threshold.
-
-The conjunction neuron receives two binary selector spikes. Each side contributes `0.75` and the conjunction threshold is `1.0`:
-
-- base selector only: `0.75 < 1.0` -> no conjunction spike;
-- WHEN selector only: `0.75 < 1.0` -> no conjunction spike;
-- both selectors: `1.50 > 1.0` -> conjunction spike.
-
-Therefore the residual path is structurally constrained:
+For timestep `t`:
 
 \[
-C_t \approx B_t \land H_t.
+e_t^{base}=W_{base}s_t^{WHAT}.
 \]
 
-It cannot emit residual evidence when either input side is absent.
+The whole-sequence base logits are
+
+\[
+L_{base}=\sum_{t\in valid}e_t^{base}+b_{base}.
+\]
+
+Because the projection is linear,
+
+\[
+L_{base}=W_{base}\sum_{t\in valid}s_t^{WHAT}+b_{base}.
+\]
+
+So this is deliberately a **direct whole-count readout of the original WHAT representation**. There is no additional Fusion-LIF, no extra membrane state, and no temporal pooling before the final valid-time sum.
+
+Stage A is trained with final whole-sequence CE and checkpointed by validation balanced accuracy.
+
+## Stage B — freeze the base and train only contextual correction
+
+After Stage A, `W_base` and `b_base` are frozen.
+
+The residual path receives the **same original WHAT spikes** plus frozen WHEN spikes:
+
+```text
+WHAT128 spikes -> WHAT selector128 spikes ---\
+                                           AND -> conjunction128 spikes -> residual Linear(128 -> 12) -> delta evidence
+WHEN64 spikes -> WHEN selector128 spikes ----/
+```
+
+The selector projections are bias-free. Their outputs are thresholded into binary selector spikes.
+
+The conjunction population is structurally constrained. Each side contributes `0.75`; the conjunction threshold is `1.0`:
+
+- WHAT selector only: `0.75 < 1.0` -> no conjunction spike;
+- WHEN selector only: `0.75 < 1.0` -> no conjunction spike;
+- both selector spikes: `1.50 > 1.0` -> conjunction spike.
+
+Thus
+
+\[
+C_t \approx Q_t^{WHAT}\land Q_t^{WHEN}.
+\]
+
+The residual branch cannot emit class evidence from WHEN alone and cannot emit class evidence from WHAT alone.
 
 ## Final prediction
 
-The frozen base logits are preserved:
+Residual class evidence is
 
 \[
-L_{base}=\sum_t W_{base}^{out}s_t^{base}+b_{base}.
+\Delta L=\sum_{t\in valid}W_{res}C_t.
 \]
 
-The context path produces only a correction:
-
-\[
-\Delta L=\sum_t W_{res}s_t^{conj}.
-\]
-
-Final logits are:
+Final logits are
 
 \[
 \boxed{L=L_{base}+\Delta L}.
@@ -81,122 +99,126 @@ Final logits are:
 
 There is no second class bias.
 
-`W_res` is initialized to exactly zero. Thus at epoch 0:
+`W_res` is initialized to exactly zero, so before residual training:
 
 \[
 \boxed{L=L_{base}}
 \]
 
-exactly. Epoch 0 is a legal checkpoint candidate, so the optimizer is not required to replace the frozen base if validation BA does not improve.
+exactly. Epoch 0 is a legal residual checkpoint candidate. If validation BA never improves, the experiment is allowed to retain the direct WHAT base unchanged.
 
 ## What is trainable
 
-Only:
+Stage A trains only:
 
-- `base_selector: 128 -> 128`, bias-free;
+- `base_output: 128 -> 12`, bias-free;
+- one final 12D class bias.
+
+Stage B freezes Stage A and trains only:
+
+- `what_selector: 128 -> 128`, bias-free;
 - `when_selector: 64 -> 128`, bias-free;
 - `residual_output: 128 -> 12`, bias-free.
 
-The frozen Exp5.4 base classifier and frozen WHAT/WHEN source representations are never updated.
+The original WHAT and WHEN source networks remain frozen throughout.
 
-The context path has **no temporal recurrence and no membrane history**. It is deliberately instantaneous. Any long/order-dependent context must therefore arrive through the frozen WHEN spikes.
+The residual path has **no recurrence, no synaptic state, and no membrane memory across timesteps**. Any long/history-dependent information must arrive through the frozen WHEN spikes.
 
 ## Objective and causality
 
-Training uses final whole-sequence CE only:
+Both stages use final whole-sequence CE only:
 
 \[
 \mathcal L=CE(L,y).
 \]
 
-No Fixed250, Relative10, flattening, attention, or recurrent classifier is introduced.
+There is no Fixed250, Relative10, flattening, attention, RNN classifier, or extra Fusion-LIF.
 
-Final duration `T_i` is never a model input. Valid length is used only to mask padded timesteps and select the whole-sequence endpoint.
+Final duration `T_i` is never a model input. Valid length is used only to mask padded timesteps and determine where accumulation stops.
 
-## Primary evaluation
+## Primary test
 
-Five independent runs are trained, one per seed.
+Five independent seeds are used.
 
-Primary quantity:
+The primary paired quantity is
 
 \[
-\Delta BA_{WHEN}=BA(\text{base + constrained residual})-BA(\text{frozen WHAT-only base}).
+\boxed{
+\Delta BA_{WHEN}=BA(WHAT+WHEN\ residual)-BA(direct\ WHAT\ base)
+}
 \]
 
-The finalizer also compares the new model against the committed Exp5.4 controls:
+where both terms use the same frozen WHAT trajectory for that seed.
 
-- `what_only_lif`;
-- `what_elapsed_lif`;
-- `what_resetwhen_lif`;
-- `what_when_linear`;
-- `what_when_fusion_lif`.
-
-These sources are reused, not retrained.
+If this is consistently positive, the gain cannot be attributed to retraining a new WHAT classifier: the direct WHAT base is frozen before the residual branch is trained.
 
 ## Test-time attribution
 
-The selected residual checkpoint is evaluated under:
+The selected residual checkpoint is evaluated with:
 
-1. `ordered` — normal aligned WHEN;
-2. `reset_when` — Exp5.3.2.3 FF/RSNN state reset every timestep;
-3. `when_zero` — WHEN spikes removed;
-4. `when_shuffle` — valid WHEN timesteps shuffled, five deterministic replicates;
-5. `when_circular_shift` — same gesture-specific WHEN trajectory shifted by roughly one third of valid length;
-6. `base_context_zero` — the residual path receives zero base-Fusion spikes while the frozen base classifier itself remains intact.
+1. `ordered` — correctly aligned causal WHEN;
+2. `reset_when` — WHEN FF/RSNN state reset every timestep;
+3. `when_zero` — remove WHEN spikes;
+4. `when_shuffle` — shuffle valid WHEN timesteps, five deterministic replicates;
+5. `when_circular_shift` — shift the same gesture-specific WHEN trajectory by about one third of valid length;
+6. `residual_what_zero` — zero WHAT only inside the residual branch while keeping the frozen direct WHAT base intact.
 
-Structural expectations:
+Two architecture-level invariants must hold:
 
 \[
-\boxed{\Delta L(\text{base spikes},0)=0}
+\boxed{\Delta L(WHAT,0)=0}
 \]
 
 and
 
 \[
-\boxed{\Delta L(0,\text{WHEN})=0}.
+\boxed{\Delta L(0,WHEN)=0}.
 \]
 
-Therefore `when_zero` and `base_context_zero` must collapse exactly to the frozen WHAT-only base prediction. This is a hard architecture contract, not merely a desired empirical trend.
+Therefore `when_zero` and `residual_what_zero` must recover the direct WHAT base exactly.
 
-The informative attribution comparisons are then:
+The useful temporal-context comparisons are
 
 \[
-BA_{ordered}-BA_{reset}
+BA_{ordered}-BA_{reset},
 \]
 
 \[
-BA_{ordered}-BA_{shuffle}
+BA_{ordered}-BA_{shuffle},
 \]
+
+and
 
 \[
 BA_{ordered}-BA_{shift}.
 \]
 
-A useful WHEN correction should improve over the frozen base and lose that incremental gain when history/alignment is broken.
-
 ## Interpretation
 
-Strong support requires all of the following:
+Strong support for the factorization requires:
 
-- positive paired BA gain vs the exact frozen WHAT-only base;
-- the gain is reasonably consistent across seeds;
-- ordered WHEN beats reset/shuffled/shifted WHEN;
-- zeroing either conjunction side gives exactly the frozen base;
-- the residual path remains small enough that it is clearly a correction rather than a replacement classifier.
+- residual model > direct WHAT base on paired test BA;
+- ordered WHEN > reset/shuffled/shifted WHEN;
+- `when_zero` and `residual_what_zero` produce exactly zero residual logits and recover the base classifier;
+- the selected checkpoint is not simply epoch 0 for most seeds.
 
-If the best checkpoint remains epoch 0 for most seeds, the correct conclusion is that the frozen WHEN representation did not provide reliable incremental classification value under the constrained routing rule.
+If most seeds choose epoch 0, the correct conclusion is that the frozen WHEN representation did not provide reliable incremental classification value under this constrained routing rule.
 
 ## Multi-CPU execution
 
 The experiment follows `AGENTS.md`:
 
 ```text
-5 source-validation tasks (one seed each)
+5 input-preparation tasks
         -> afterok
-5 train/evaluate tasks (one seed each, one CPU each)
+5 direct-WHAT-base training tasks
+        -> afterok
+5 residual train/evaluate tasks
         -> afterok
 1 aggregation-only finalizer
 ```
+
+Every array task uses one CPU core.
 
 Run from repository root:
 
@@ -208,16 +230,17 @@ Artifacts are written to:
 
 ```text
 notebooks/artifacts/experiment_5_4_1_constrained_conjunction_residual/
-    constrained_conjunction_residual_v1/
+    direct_what_conjunction_residual_v2/
 ```
 
 Final files:
 
+- `base_runs.csv`
+- `base_histories.csv`
 - `runs.csv`
 - `histories.csv`
 - `ablation_runs.csv`
 - `activity_runs.csv`
-- `source_runs.csv`
 - `paired_deltas.csv`
 - `manifest.json`
 
