@@ -4,6 +4,11 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 cd "$REPO_ROOT"
 
+if ! command -v sbatch >/dev/null 2>&1; then
+  echo "ERROR: sbatch is not available on PATH. Run this launcher from a Slurm login node." >&2
+  exit 127
+fi
+
 SELECTION="notebooks/artifacts/experiment_5_4_2_phase_conditioned_readout/phase_conditioned_readout_v1/screen_selection.json"
 if [[ ! -f "$SELECTION" ]]; then
   echo "Missing $SELECTION. Run the screen workflow first." >&2
