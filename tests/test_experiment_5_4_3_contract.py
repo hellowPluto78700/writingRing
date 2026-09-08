@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -103,6 +104,7 @@ def test_slurm_multi_cpu_and_environment_contract() -> None:
     assert "#SBATCH --array=0-44%45" in texts[RUNNERS[1]]
     assert "#SBATCH --array=0-14%15" in texts[RUNNERS[3]]
     assert "#SBATCH --array=0-4%5" in texts[RUNNERS[5]]
+    assert "scripts.experiment_5_4_3_capacity_finalize" in texts[RUNNERS[2]]
     for text in texts.values():
         assert "--cpus-per-task=1" in text
         assert "module load conda/latest" in text
@@ -123,8 +125,12 @@ def test_docs_and_notebook_are_analysis_only() -> None:
     assert "streaming_fixed250" in readme
     assert NOTEBOOK.is_file()
     notebook = NOTEBOOK.read_text(encoding="utf-8")
+    parsed = json.loads(notebook)
+    assert parsed["nbformat"] == 4
     assert "analysis-only" in notebook.lower()
     assert "capacity_runs.csv" in notebook
+    assert "extension_summary.csv" in notebook
     assert "final_runs.csv" in notebook
+    assert "gate_activity.csv" in notebook
     assert "train_one(" not in notebook
     assert "sbatch" not in notebook
