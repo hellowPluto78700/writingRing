@@ -224,7 +224,7 @@ def test_readme_freezes_incremental_conjunction_question() -> None:
         "base_context_zero",
         "when_circular_shift",
         "final whole-sequence CE only",
-        "five independent runs",
+        "Five independent runs",
         "afterok",
         "analysis-only",
     ):
