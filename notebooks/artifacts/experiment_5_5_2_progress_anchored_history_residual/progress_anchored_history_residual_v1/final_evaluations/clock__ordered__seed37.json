@@ -1,0 +1,246 @@
+{
+  "alpha": 0.25,
+  "best_epoch": 2,
+  "clock_progress_alignment": {
+    "anchor_progress_mae": 0.28678546001967253,
+    "fraction_timesteps_improved": 0.18530483764082173,
+    "mae_change_residual_minus_anchor": 0.0019436221277903676,
+    "n_valid_timesteps": 12072,
+    "progress_proxy": "routing center-of-mass over normalized expert index",
+    "residual_progress_mae": 0.2887290821474629
+  },
+  "experiment_id": "experiment_5_5_2_progress_anchored_history_residual",
+  "metrics": {
+    "test": {
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7459356098958891,
+      "macro_f1": 0.5656768645172973,
+      "n_samples": 146
+    },
+    "train": {
+      "accuracy": 0.9862306368330465,
+      "balanced_accuracy": 0.9869569450636783,
+      "loss": 0.10539732934352453,
+      "macro_f1": 0.9860447974652007,
+      "n_samples": 581
+    },
+    "val": {
+      "accuracy": 0.5793650793650794,
+      "balanced_accuracy": 0.5914742664742665,
+      "loss": 1.6638059616088867,
+      "macro_f1": 0.5780032418038878,
+      "n_samples": 126
+    }
+  },
+  "ordered_alignment_test": [
+    {
+      "ablation": "circular_shift",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7553356250283443,
+      "macro_f1": 0.5656768645172973,
+      "n_samples": 146,
+      "replicate": 0
+    },
+    {
+      "ablation": "circular_shift",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7528032179985107,
+      "macro_f1": 0.5656768645172973,
+      "n_samples": 146,
+      "replicate": 1
+    },
+    {
+      "ablation": "circular_shift",
+      "accuracy": 0.5684931506849316,
+      "balanced_accuracy": 0.5639991952491953,
+      "loss": 1.7552879483211044,
+      "macro_f1": 0.5609666727482819,
+      "n_samples": 146,
+      "replicate": 2
+    },
+    {
+      "ablation": "circular_shift",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7549163089200601,
+      "macro_f1": 0.5656768645172973,
+      "n_samples": 146,
+      "replicate": 3
+    },
+    {
+      "ablation": "circular_shift",
+      "accuracy": 0.5684931506849316,
+      "balanced_accuracy": 0.5639991952491953,
+      "loss": 1.7523415501012969,
+      "macro_f1": 0.5601662386145144,
+      "n_samples": 146,
+      "replicate": 4
+    },
+    {
+      "ablation": "random_shuffle",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.75165721812211,
+      "macro_f1": 0.5648764303835297,
+      "n_samples": 146,
+      "replicate": 0
+    },
+    {
+      "ablation": "random_shuffle",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7524484161534475,
+      "macro_f1": 0.5648764303835297,
+      "n_samples": 146,
+      "replicate": 1
+    },
+    {
+      "ablation": "random_shuffle",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.753065825469209,
+      "macro_f1": 0.5648764303835297,
+      "n_samples": 146,
+      "replicate": 2
+    },
+    {
+      "ablation": "random_shuffle",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.7520804640128507,
+      "macro_f1": 0.5648764303835297,
+      "n_samples": 146,
+      "replicate": 3
+    },
+    {
+      "ablation": "random_shuffle",
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5699515762015762,
+      "loss": 1.752179569466328,
+      "macro_f1": 0.5648764303835297,
+      "n_samples": 146,
+      "replicate": 4
+    }
+  ],
+  "parameter_counts": {
+    "frozen_class_bias": 12,
+    "frozen_expert_bank": 12288,
+    "stored_total": 50068,
+    "trainable_total": 37768
+  },
+  "protocol_version": "progress_anchored_history_residual_v1",
+  "residual_diagnostics": {
+    "test": {
+      "anchor_argmax_changed_fraction": 0.182571239231279,
+      "anchor_vs_residual_weight_cosine_mean": 0.999358033677788,
+      "delta_z_l2_mean": 0.12276774158968215,
+      "delta_z_l2_median": 0.14760996916061345,
+      "delta_z_saturation_fraction": 0.0,
+      "n_valid_timesteps": 12072,
+      "q_kl_to_anchor_mean": 0.0013270032512671887,
+      "q_l1_mean": 0.04145361480264489,
+      "relative_evidence_correction_mean": 0.030570022746765596,
+      "relative_evidence_correction_median": 0.03141862202536491,
+      "relative_weight_correction_mean": 0.03157016051254442,
+      "relative_weight_correction_median": 0.03685129549026267
+    },
+    "train": {
+      "anchor_argmax_changed_fraction": 0.18100055269901352,
+      "anchor_vs_residual_weight_cosine_mean": 0.9994046956400088,
+      "delta_z_l2_mean": 0.11641585358233986,
+      "delta_z_l2_median": 0.13438532793385055,
+      "delta_z_saturation_fraction": 0.0,
+      "n_valid_timesteps": 59707,
+      "q_kl_to_anchor_mean": 0.0012291581220683762,
+      "q_l1_mean": 0.04024400233251188,
+      "relative_evidence_correction_mean": 0.026804571139750565,
+      "relative_evidence_correction_median": 0.026689424719588205,
+      "relative_weight_correction_mean": 0.030367614662417688,
+      "relative_weight_correction_median": 0.03429604758652509
+    },
+    "val": {
+      "anchor_argmax_changed_fraction": 0.17320691774207708,
+      "anchor_vs_residual_weight_cosine_mean": 0.9994468224496469,
+      "delta_z_l2_mean": 0.10977370386909041,
+      "delta_z_l2_median": 0.12668176592014957,
+      "delta_z_saturation_fraction": 0.0,
+      "n_valid_timesteps": 11391,
+      "q_kl_to_anchor_mean": 0.0011388806724586947,
+      "q_l1_mean": 0.03769749553085866,
+      "relative_evidence_correction_mean": 0.02718318056913106,
+      "relative_evidence_correction_median": 0.027873910031199992,
+      "relative_weight_correction_mean": 0.028519246304049287,
+      "relative_weight_correction_median": 0.03211630838079807
+    }
+  },
+  "residual_only_probes": [
+    {
+      "accuracy": 0.459552495697074,
+      "balanced_accuracy": 0.4421007489567885,
+      "feature": "mean_delta_z",
+      "loss": 1.5952682392895807,
+      "macro_f1": 0.42416817005858104,
+      "n_samples": 581,
+      "split": "train"
+    },
+    {
+      "accuracy": 0.30952380952380953,
+      "balanced_accuracy": 0.2911135161135161,
+      "feature": "mean_delta_z",
+      "loss": 1.9154319852898611,
+      "macro_f1": 0.2784054264839015,
+      "n_samples": 126,
+      "split": "val"
+    },
+    {
+      "accuracy": 0.4041095890410959,
+      "balanced_accuracy": 0.39718753468753465,
+      "feature": "mean_delta_z",
+      "loss": 1.8612806287939643,
+      "macro_f1": 0.3784543015427573,
+      "n_samples": 146,
+      "split": "test"
+    },
+    {
+      "accuracy": 0.3614457831325301,
+      "balanced_accuracy": 0.34708329841908264,
+      "feature": "final_delta_z",
+      "loss": 1.9030483884775617,
+      "macro_f1": 0.32641843622120126,
+      "n_samples": 581,
+      "split": "train"
+    },
+    {
+      "accuracy": 0.2777777777777778,
+      "balanced_accuracy": 0.25963203463203466,
+      "feature": "final_delta_z",
+      "loss": 2.0922218138229356,
+      "macro_f1": 0.23175235794801008,
+      "n_samples": 126,
+      "split": "val"
+    },
+    {
+      "accuracy": 0.3013698630136986,
+      "balanced_accuracy": 0.28056804306804306,
+      "feature": "final_delta_z",
+      "loss": 2.005126416088363,
+      "macro_f1": 0.2707678772269639,
+      "n_samples": 146,
+      "split": "test"
+    }
+  ],
+  "same_what_same_coordinate": "notebooks/artifacts/experiment_5_5_2_progress_anchored_history_residual/progress_anchored_history_residual_v1/same_what/clock__ordered__seed37.csv",
+  "source_checkpoint": "notebooks/artifacts/experiment_5_5_non_snn_history_experts/non_snn_history_experts_v1/checkpoints/clock__seed37.pt",
+  "spec": {
+    "anchor": "clock",
+    "residual_mode": "ordered",
+    "seed": 37
+  },
+  "stage": "final",
+  "stopped_after_epoch": 27,
+  "test_evaluated": true,
+  "trajectory": "notebooks/artifacts/experiment_5_5_2_progress_anchored_history_residual/progress_anchored_history_residual_v1/trajectories/clock__ordered__seed37__test.npz"
+}

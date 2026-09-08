@@ -1,0 +1,46 @@
+{
+  "alpha_screen": [
+    0.25,
+    0.5,
+    1.0
+  ],
+  "anchors": [
+    "clock",
+    "oracle_progress"
+  ],
+  "architecture": "frozen Exp5.5 Clock/Oracle expert bank + bounded residual routing logits",
+  "clock_residual_rescue_supported_by_mode": {
+    "coordinate": true,
+    "lag1": true,
+    "ordered": true,
+    "reset": true
+  },
+  "experiment_id": "experiment_5_5_2_progress_anchored_history_residual",
+  "loss": "whole-gesture classification CE only; no progress/confidence/sticky/diversity auxiliary",
+  "multi_cpu_policy": "5 source validation -> 60 Clock screen tasks (max 50 concurrent) -> selector -> 20 Clock final evaluations + 20 Oracle train/evaluate tasks -> artifact-only finalizer",
+  "note": "the five stochastic seeds share one fixed user-disjoint split and are not five independent split replicates",
+  "notebook_policy": "analysis-only; consumes finalized CSV/JSON only and never trains/selects/regenerates",
+  "protocol_version": "progress_anchored_history_residual_v1",
+  "residual_modes": [
+    "coordinate",
+    "reset",
+    "lag1",
+    "ordered"
+  ],
+  "routing_contract": "q_t = softmax(a_anchor_t + alpha*tanh(delta_t)); Ordered delta_t sees h_(t-1), Reset sees m_t, Lag1 sees only m_(t-1), Coordinate sees only anchor coordinate",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selected_alpha_by_mode": {
+    "coordinate": 0.25,
+    "lag1": 0.25,
+    "ordered": 0.25,
+    "reset": 0.25
+  },
+  "selection_policy": "mode-specific alpha selected only on Clock validation; Oracle and test are excluded from selection",
+  "source_equivalence_contract": "zero residual projection must reproduce the paired Exp5.5 anchor logits/q/predictions within 1e-6"
+}
