@@ -3,7 +3,7 @@
 #SBATCH --array=0-4%5
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
-#SBATCH --time=02:00:00
+#SBATCH --time=08:00:00
 #SBATCH --output=exp5_4_1_prep_%A_%a.out
 #SBATCH --error=exp5_4_1_prep_%A_%a.err
 
@@ -27,7 +27,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
-python -u -m scripts.experiment_5_4_1_constrained_conjunction_residual prepare-source \
+python -u -m scripts.experiment_5_4_1_constrained_conjunction_residual prepare-inputs \
     --array-task-id "${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}" \
     --device cpu \
     --threads 1
