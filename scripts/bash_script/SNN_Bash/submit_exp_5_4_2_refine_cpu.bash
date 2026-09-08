@@ -3,6 +3,14 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 cd "$REPO_ROOT"
+export REPO_ROOT
+
+WORKER="$REPO_ROOT/scripts/bash_script/SNN_Bash/run_exp_5_4_2_cpu_job.bash"
+if [[ ! -f "$WORKER" ]]; then
+  echo "Missing Exp5.4.2 worker: $WORKER" >&2
+  exit 2
+fi
+
 SELECTION="notebooks/artifacts/experiment_5_4_2_phase_conditioned_readout/phase_conditioned_readout_v1/screen_selection.json"
 if [[ ! -f "$SELECTION" ]]; then
   echo "Missing $SELECTION. Run the screen workflow first." >&2
@@ -28,27 +36,25 @@ else
 fi
 REFINE_MAX=$((REFINE_COUNT - 1))
 
-COMMON='module load conda/latest; eval "$(conda shell.bash hook)"; if conda env list | awk '\''{print $1}'\'' | grep -qx writingring-gpu; then conda activate writingring-gpu; else conda activate writingring-viz; fi; export CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 PYTHONUNBUFFERED=1; cd '"$REPO_ROOT"'; '
-
 REFINE_JOB=$(sbatch --parsable \
   --job-name=exp5_4_2_ref --array="0-${REFINE_MAX}%50" --cpus-per-task=1 --mem=12G --time=24:00:00 \
   --output=exp5_4_2_ref_%A_%a.out --error=exp5_4_2_ref_%A_%a.err \
-  --wrap="${COMMON} python -u -m scripts.experiment_5_4_2_phase_conditioned_readout refine-run-one --array-task-id \${SLURM_ARRAY_TASK_ID} --device cpu --threads 1")
+  --wrap="bash -l \"$WORKER\" refine-run-one --array-task-id \${SLURM_ARRAY_TASK_ID} --device cpu --threads 1")
 
 SELECT_JOB=$(sbatch --parsable --dependency="afterok:${REFINE_JOB}" \
   --job-name=exp5_4_2_rfin --cpus-per-task=1 --mem=4G --time=01:00:00 \
   --output=exp5_4_2_rfin_%j.out --error=exp5_4_2_rfin_%j.err \
-  --wrap="${COMMON} python -u -m scripts.experiment_5_4_2_phase_conditioned_readout refine-finalize")
+  --wrap="bash -l \"$WORKER\" refine-finalize")
 
 TEST_JOB=$(sbatch --parsable --dependency="afterok:${SELECT_JOB}" \
   --job-name=exp5_4_2_test --array=0-4%5 --cpus-per-task=1 --mem=12G --time=12:00:00 \
   --output=exp5_4_2_test_%A_%a.out --error=exp5_4_2_test_%A_%a.err \
-  --wrap="${COMMON} python -u -m scripts.experiment_5_4_2_phase_conditioned_readout final-run-one --array-task-id \${SLURM_ARRAY_TASK_ID} --device cpu --threads 1")
+  --wrap="bash -l \"$WORKER\" final-run-one --array-task-id \${SLURM_ARRAY_TASK_ID} --device cpu --threads 1")
 
 FINAL_JOB=$(sbatch --parsable --dependency="afterok:${TEST_JOB}" \
   --job-name=exp5_4_2_fin --cpus-per-task=1 --mem=4G --time=01:00:00 \
   --output=exp5_4_2_fin_%j.out --error=exp5_4_2_fin_%j.err \
-  --wrap="${COMMON} python -u -m scripts.experiment_5_4_2_phase_conditioned_readout finalize")
+  --wrap="bash -l \"$WORKER\" finalize")
 
 echo "Selected: ${CONDITION} (${MECHANISM})"
 echo "Refine array: ${REFINE_JOB} (${REFINE_COUNT} tasks, max 50 concurrent)"
