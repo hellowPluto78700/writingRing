@@ -1,0 +1,132 @@
+{
+  "ablations": [],
+  "best_epoch": 98,
+  "condition": "when_only_lif",
+  "experiment_id": "experiment_5_4_snn_native_fusion",
+  "fusion_mode": "lif",
+  "native": {
+    "test": {
+      "accuracy": 0.3424657534246575,
+      "balanced_accuracy": 0.34069610944610945,
+      "fusion_firing_fraction": 0.22069406477799866,
+      "loss": 3.2949492441464776,
+      "macro_f1": 0.3479216117867187,
+      "n_samples": 146
+    },
+    "train": {
+      "accuracy": 0.9896729776247849,
+      "balanced_accuracy": 0.9900083794201442,
+      "fusion_firing_fraction": 0.2263435924598456,
+      "loss": 0.0966084831988955,
+      "macro_f1": 0.9903916753807667,
+      "n_samples": 581
+    },
+    "val": {
+      "accuracy": 0.3888888888888889,
+      "balanced_accuracy": 0.3854497354497355,
+      "fusion_firing_fraction": 0.20576963172680185,
+      "loss": 3.139155149459839,
+      "macro_f1": 0.3799669848389014,
+      "n_samples": 126
+    }
+  },
+  "parameter_counts": {
+    "class_bias": 12,
+    "output_projection": 1536,
+    "trainable_total": 26124,
+    "what_projection": 16384,
+    "when_projection": 8192
+  },
+  "protocol_version": "snn_native_what_when_fusion_v1",
+  "provenance": {
+    "batch_size": 128,
+    "causality_contract": "final duration is never a model/fusion/context input; valid length is used only to stop padded state/evidence updates and to choose the endpoint",
+    "checkpoint_selection": "maximum validation balanced accuracy; tie lower validation cross entropy",
+    "class_bias_policy": "single class bias added once after whole-sequence accumulation",
+    "condition": "when_only_lif",
+    "elapsed_baseline": "64 fixed RBFs over absolute t/fs, centers from 0 to train-set max elapsed; test elapsed is clipped to that train-derived range; final duration is never used",
+    "epochs": 100,
+    "experiment_id": "experiment_5_4_snn_native_fusion",
+    "fusion_mode": "lif",
+    "fusion_recurrent": false,
+    "fusion_shift_mem": 1,
+    "fusion_shift_syn": 1,
+    "fusion_tau_mem_ms": 22.542110013890053,
+    "fusion_tau_syn_ms": 22.542110013890053,
+    "fusion_width": 128,
+    "initialization": "all six conditions share paired per-seed initial weights for W_what, W_when, W_out and class bias",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "minibatch_order": "paired across all conditions within seed",
+    "objective": "final whole-sequence cross entropy only",
+    "output_projection_bias": false,
+    "parameter_counts": {
+      "class_bias": 12,
+      "output_projection": 1536,
+      "trainable_total": 26124,
+      "what_projection": 16384,
+      "when_projection": 8192
+    },
+    "protocol_version": "snn_native_what_when_fusion_v1",
+    "readout": "sum per-timestep class evidence over valid timesteps; no temporal pooling before fusion",
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 11,
+    "source_when_checkpoint": "notebooks/artifacts/experiment_5_3_2_3_ff_before_rsnn/ff_before_rsnn_v1/checkpoints/ffsnn128_rsnn64__seed11.pt",
+    "source_when_condition": "ffsnn128_rsnn64",
+    "source_when_experiment": "experiment_5_3_2_3_ff_before_rsnn",
+    "source_when_protocol": "ff_before_rsnn_v1",
+    "split_seed": 12345,
+    "surrogate_slope": 25.0,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0,
+    "what_frozen": true,
+    "what_width": 128,
+    "when_frozen": true,
+    "when_width": 64
+  },
+  "seed": 11,
+  "spec": {
+    "condition": "when_only_lif",
+    "seed": 11
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "ablations": [
+    {
+      "ablation": "ordered",
+      "replicate": 0,
+      "test": {
+        "accuracy": 0.5273972602739726,
+        "balanced_accuracy": 0.5082625707625708,
+        "fusion_firing_fraction": 0.23517424101225978,
+        "loss": 3.731169792070781,
+        "macro_f1": 0.5042718185390599,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_zero",
+      "replicate": 0,
+      "test": {
+        "accuracy": 0.3150684931506849,
+        "balanced_accuracy": 0.29404137529137525,
+        "fusion_firing_fraction": 0.18581609302518223,
+        "loss": 6.900909188675554,
+        "macro_f1": 0.2725416732668949,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 0,
+      "test": {
+        "accuracy": 0.4726027397260274,
+        "balanced_accuracy": 0.45757437007437013,
+        "fusion_firing_fraction": 0.25507825443174287,
+        "loss": 4.55654212873276,
+        "macro_f1": 0.43582504772940256,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 1,
+      "test": {
+        "accuracy": 0.4246575342465753,
+        "balanced_accuracy": 0.4152763902763903,
+        "fusion_firing_fraction": 0.2553112315689198,
+        "loss": 4.571264123263425,
+        "macro_f1": 0.40775048363022653,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 2,
+      "test": {
+        "accuracy": 0.4246575342465753,
+        "balanced_accuracy": 0.411495448995449,
+        "fusion_firing_fraction": 0.2552646361414844,
+        "loss": 4.597501999711337,
+        "macro_f1": 0.3992327754103116,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 3,
+      "test": {
+        "accuracy": 0.410958904109589,
+        "balanced_accuracy": 0.3972860472860473,
+        "fusion_firing_fraction": 0.2542699531974818,
+        "loss": 4.586786083979149,
+        "macro_f1": 0.3862876515339091,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 4,
+      "test": {
+        "accuracy": 0.4520547945205479,
+        "balanced_accuracy": 0.44007797757797756,
+        "fusion_firing_fraction": 0.25467119160039764,
+        "loss": 4.511436958835549,
+        "macro_f1": 0.43262427044396357,
+        "n_samples": 146
+      }
+    },
+    {
+      "ablation": "when_circular_shift",
+      "replicate": 0,
+      "test": {
+        "accuracy": 0.4657534246575342,
+        "balanced_accuracy": 0.4462135087135087,
+        "fusion_firing_fraction": 0.2713394114479788,
+        "loss": 4.054836665114311,
+        "macro_f1": 0.426683125968023,
+        "n_samples": 146
+      }
+    }
+  ],
+  "best_epoch": 25,
+  "condition": "what_when_fusion_lif",
+  "experiment_id": "experiment_5_4_snn_native_fusion",
+  "fusion_mode": "lif",
+  "native": {
+    "test": {
+      "accuracy": 0.5273972602739726,
+      "balanced_accuracy": 0.5082625707625708,
+      "fusion_firing_fraction": 0.23517424101225978,
+      "loss": 3.731169792070781,
+      "macro_f1": 0.5042718185390599,
+      "n_samples": 146
+    },
+    "train": {
+      "accuracy": 0.9724612736660929,
+      "balanced_accuracy": 0.9707169442457966,
+      "fusion_firing_fraction": 0.24118586388530658,
+      "loss": 0.114353036331638,
+      "macro_f1": 0.9719578665092667,
+      "n_samples": 581
+    },
+    "val": {
+      "accuracy": 0.4444444444444444,
+      "balanced_accuracy": 0.440957190957191,
+      "fusion_firing_fraction": 0.2207080974014573,
+      "loss": 3.521779775619507,
+      "macro_f1": 0.43320717349186855,
+      "n_samples": 126
+    }
+  },
+  "parameter_counts": {
+    "class_bias": 12,
+    "output_projection": 1536,
+    "trainable_total": 26124,
+    "what_projection": 16384,
+    "when_projection": 8192
+  },
+  "protocol_version": "snn_native_what_when_fusion_v1",
+  "provenance": {
+    "batch_size": 128,
+    "causality_contract": "final duration is never a model/fusion/context input; valid length is used only to stop padded state/evidence updates and to choose the endpoint",
+    "checkpoint_selection": "maximum validation balanced accuracy; tie lower validation cross entropy",
+    "class_bias_policy": "single class bias added once after whole-sequence accumulation",
+    "condition": "what_when_fusion_lif",
+    "elapsed_baseline": "64 fixed RBFs over absolute t/fs, centers from 0 to train-set max elapsed; test elapsed is clipped to that train-derived range; final duration is never used",
+    "epochs": 100,
+    "experiment_id": "experiment_5_4_snn_native_fusion",
+    "fusion_mode": "lif",
+    "fusion_recurrent": false,
+    "fusion_shift_mem": 1,
+    "fusion_shift_syn": 1,
+    "fusion_tau_mem_ms": 22.542110013890053,
+    "fusion_tau_syn_ms": 22.542110013890053,
+    "fusion_width": 128,
+    "initialization": "all six conditions share paired per-seed initial weights for W_what, W_when, W_out and class bias",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "learning_rate": 0.001,
+    "minibatch_order": "paired across all conditions within seed",
+    "objective": "final whole-sequence cross entropy only",
+    "output_projection_bias": false,
+    "parameter_counts": {
+      "class_bias": 12,
+      "output_projection": 1536,
+      "trainable_total": 26124,
+      "what_projection": 16384,
+      "when_projection": 8192
+    },
+    "protocol_version": "snn_native_what_when_fusion_v1",
+    "readout": "sum per-timestep class evidence over valid timesteps; no temporal pooling before fusion",
+    "reset": "subtract",
+    "sampling_rate_hz": 64.0,
+    "seed": 53,
+    "source_when_checkpoint": "notebooks/artifacts/experiment_5_3_2_3_ff_before_rsnn/ff_before_rsnn_v1/checkpoints/ffsnn128_rsnn64__seed53.pt",
+    "source_when_condition": "ffsnn128_rsnn64",
+    "source_when_experiment": "experiment_5_3_2_3_ff_before_rsnn",
+    "source_when_protocol": "ff_before_rsnn_v1",
+    "split_seed": 12345,
+    "surrogate_slope": 25.0,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "threshold": 0.5,
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ],
+    "weight_decay": 0.0,
+    "what_frozen": true,
+    "what_width": 128,
+    "when_frozen": true,
+    "when_width": 64
+  },
+  "seed": 53,
+  "spec": {
+    "condition": "what_when_fusion_lif",
+    "seed": 53
+  }
+}
