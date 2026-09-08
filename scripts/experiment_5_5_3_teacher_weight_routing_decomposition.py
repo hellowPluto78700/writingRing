@@ -6,7 +6,6 @@ from dataclasses import asdict, dataclass
 import json
 import math
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -259,10 +258,7 @@ def _fit_linear_probe(
         for split, logits in offline.items()
     }
     effective_weight = classifier.coef_.astype(np.float64) / scaler.scale_[None, :]
-    effective_bias = (
-        classifier.intercept_.astype(np.float64)
-        - effective_weight @ scaler.mean_.astype(np.float64)
-    )
+    effective_bias = classifier.intercept_.astype(np.float64) - effective_weight @ scaler.mean_.astype(np.float64)
     return {
         "C": C,
         "scaler": scaler,
@@ -332,13 +328,12 @@ def _routed_features_numpy(
         sampling_rate_hz,
         bin_steps,
     )
-    features = np.einsum(
+    return np.einsum(
         "ntk,ntd->nkd",
         q,
         np.asarray(what, dtype=np.float64),
         optimize=True,
     )
-    return features
 
 
 def _teacher_logits_numpy(
@@ -445,10 +440,14 @@ def prepare_teacher_seed(
                 for split in ("train", "val", "test")
             }
             fit = _fit_linear_probe(
-                features["train"], data.ytr,
-                features["val"], data.yva,
-                features["test"], data.yte,
-                seed, "relative10_teacher",
+                features["train"],
+                data.ytr,
+                features["val"],
+                data.yva,
+                features["test"],
+                data.yte,
+                seed,
+                "relative10_teacher",
             )
             weight_bank = np.asarray(fit["effective_weight"], dtype=np.float64).reshape(
                 N_CLASSES, RELATIVE_STATES, WHAT_WIDTH
@@ -479,7 +478,7 @@ def prepare_teacher_seed(
             bias = np.asarray(source_npz["bias"], dtype=np.float64)
             bin_steps = int(np.asarray(source_npz["bin_steps"]).reshape(-1)[0])
             metrics = source_json["fixed250"]["metrics"]
-            offline = {}
+            offline: dict[str, np.ndarray] = {}
             C = 1.0
             save_extra = {
                 "scaler_mean": np.asarray(source_npz["scaler_mean"]),
@@ -506,12 +505,24 @@ def prepare_teacher_seed(
         for split in ("train", "val", "test"):
             _, lengths = _labels_lengths(data, split)
             hard = _teacher_logits_numpy(
-                what[split], lengths, weight_bank, bias, family, "hard",
-                float(data.fs), bin_steps,
+                what[split],
+                lengths,
+                weight_bank,
+                bias,
+                family,
+                "hard",
+                float(data.fs),
+                bin_steps,
             )
             soft = _teacher_logits_numpy(
-                what[split], lengths, weight_bank, bias, family, "soft",
-                float(data.fs), bin_steps,
+                what[split],
+                lengths,
+                weight_bank,
+                bias,
+                family,
+                "soft",
+                float(data.fs),
+                bin_steps,
             )
             hard_logits[split] = hard
             soft_logits[split] = soft
@@ -534,7 +545,15 @@ def prepare_teacher_seed(
             **save_extra,
         )
         metadata = _teacher_payload(
-            family, seed, weight_bank, bias, bin_steps, metrics, equivalence, source_meta, C
+            family,
+            seed,
+            weight_bank,
+            bias,
+            bin_steps,
+            metrics,
+            equivalence,
+            source_meta,
+            C,
         )
         _save_json(json_path, metadata)
         frozen_metrics = {
@@ -545,9 +564,7 @@ def prepare_teacher_seed(
             for routing, logits_by_split in (("hard", hard_logits), ("soft", soft_logits))
         }
         distortion = {
-            split: _distortion_metrics(
-                hard_logits[split], soft_logits[split], labels_by_split[split]
-            )
+            split: _distortion_metrics(hard_logits[split], soft_logits[split], labels_by_split[split])
             for split in ("train", "val", "test")
         }
         _save_json(
@@ -615,6 +632,8 @@ class RoutedWeightBank(nn.Module):
         self.n_states = int(n_states)
         self.bin_steps = int(bin_steps)
         self.sampling_rate_hz = float(sampling_rate_hz)
+        if self.family == FIXED250 and self.bin_steps <= 0:
+            raise ValueError("Fixed250 routing requires positive bin_steps")
         self.weight_bank = nn.Parameter(torch.empty(self.n_states, N_CLASSES, WHAT_WIDTH))
         self.class_bias = nn.Parameter(torch.zeros(N_CLASSES))
 
@@ -629,10 +648,14 @@ class RoutedWeightBank(nn.Module):
             self.weight_bank.copy_(torch.as_tensor(weight_bank, dtype=self.weight_bank.dtype))
             self.class_bias.copy_(torch.as_tensor(bias, dtype=self.class_bias.dtype))
 
-    def routing_probabilities(self, lengths: torch.Tensor, steps: int, dtype: torch.dtype) -> torch.Tensor:
+    def routing_probabilities(
+        self,
+        lengths: torch.Tensor,
+        steps: int,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
         batch = len(lengths)
         device = lengths.device
-        q = torch.zeros(batch, steps, self.n_states, device=device, dtype=dtype)
         positions = torch.arange(steps, device=device)
         valid = positions.unsqueeze(0) < lengths.unsqueeze(1)
         if self.family == RELATIVE10:
@@ -646,14 +669,17 @@ class RoutedWeightBank(nn.Module):
             ).clamp(max=self.n_states - 1)
             sigma = float(SOFT_SIGMA_MULTIPLIER)
         else:
-            coordinate = positions.to(dtype).unsqueeze(0) / self.sampling_rate_hz
+            coordinate = positions.to(dtype).unsqueeze(0).expand(batch, -1) / self.sampling_rate_hz
             bin_seconds = float(self.bin_steps / self.sampling_rate_hz)
             centers = (torch.arange(self.n_states, device=device, dtype=dtype) + 0.5) * bin_seconds
             hard_index = torch.div(
-                positions.unsqueeze(0), self.bin_steps, rounding_mode="floor"
+                positions.unsqueeze(0).expand(batch, -1),
+                self.bin_steps,
+                rounding_mode="floor",
             ).clamp(max=self.n_states - 1)
             sigma = float(SOFT_SIGMA_MULTIPLIER * bin_seconds)
         if self.routing == "hard":
+            q = torch.zeros(batch, steps, self.n_states, device=device, dtype=dtype)
             q.scatter_(2, hard_index.unsqueeze(-1), 1.0)
         else:
             logits = -0.5 * ((coordinate.unsqueeze(-1) - centers.view(1, 1, -1)) / sigma) ** 2
@@ -700,7 +726,10 @@ def _loaders(
     for split in splits:
         labels, lengths = _labels_lengths(data, split)
         output[split] = _loader(
-            what[split], labels, lengths, config.batch_size,
+            what[split],
+            labels,
+            lengths,
+            config.batch_size,
             train_shuffle if split == "train" else False,
             base.dseed(seed, EXPERIMENT_ID, "loader", split),
         )
@@ -914,21 +943,30 @@ def run_linear_one(
     destination = linear_evaluation_path(config.results_dir, spec)
     if destination.exists() and not force:
         return json.loads(destination.read_text(encoding="utf-8"))
-    teacher_weight, teacher_bias, bin_steps, _ = load_teacher(spec.family, spec.seed, config)
+    teacher_weight, _, bin_steps, _ = load_teacher(spec.family, spec.seed, config)
     what, source_meta = _what_for_seed(spec.seed, data, config)
     n_states = int(teacher_weight.shape[0])
     feature_mats: dict[str, np.ndarray] = {}
     for split in ("train", "val", "test"):
         _, lengths = _labels_lengths(data, split)
         feature_mats[split] = _routed_features_numpy(
-            what[split], lengths, spec.family, "soft", n_states,
-            float(data.fs), bin_steps,
+            what[split],
+            lengths,
+            spec.family,
+            "soft",
+            n_states,
+            float(data.fs),
+            bin_steps,
         ).reshape(len(what[split]), n_states * WHAT_WIDTH)
     fit = _fit_linear_probe(
-        feature_mats["train"], data.ytr,
-        feature_mats["val"], data.yva,
-        feature_mats["test"], data.yte,
-        spec.seed, f"{spec.family}_soft_linear_refit",
+        feature_mats["train"],
+        data.ytr,
+        feature_mats["val"],
+        data.yva,
+        feature_mats["test"],
+        data.yte,
+        spec.seed,
+        f"{spec.family}_soft_linear_refit",
     )
     weight_bank = np.asarray(fit["effective_weight"], dtype=np.float64).reshape(
         N_CLASSES, n_states, WHAT_WIDTH
@@ -956,6 +994,7 @@ def run_linear_one(
         "condition": SOFT_LINEAR_REFIT,
         "seed": spec.seed,
         "routing": "soft",
+        "n_states": n_states,
         "linear_C": fit["C"],
         "feature_dim": int(n_states * WHAT_WIDTH),
         "train": fit["metrics"]["train"],
@@ -973,6 +1012,30 @@ def _sem(values: np.ndarray) -> float:
     return 0.0 if len(values) <= 1 else float(values.std(ddof=1) / math.sqrt(len(values)))
 
 
+def _run_row(
+    family: str,
+    condition: str,
+    seed: int,
+    payload: dict[str, object],
+    trainable_parameter_count: int,
+) -> dict[str, object]:
+    return {
+        "family": family,
+        "condition": condition,
+        "seed": seed,
+        "best_epoch": payload.get("best_epoch"),
+        "trainable_parameter_count": trainable_parameter_count,
+        "val_balanced_accuracy": payload["val"]["balanced_accuracy"],
+        "val_accuracy": payload["val"]["accuracy"],
+        "val_macro_f1": payload["val"]["macro_f1"],
+        "val_loss": payload["val"]["loss"],
+        "test_balanced_accuracy": payload["test"]["balanced_accuracy"],
+        "test_accuracy": payload["test"]["accuracy"],
+        "test_macro_f1": payload["test"]["macro_f1"],
+        "test_loss": payload["test"]["loss"],
+    }
+
+
 def finalize_experiment(repo_root: Path) -> dict[str, Path]:
     root = results_dir(repo_root)
     run_rows: list[dict[str, object]] = []
@@ -980,15 +1043,22 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
     distortion_rows: list[dict[str, object]] = []
     weight_rows: list[dict[str, object]] = []
     per_run: dict[tuple[str, str, int], dict[str, object]] = {}
+    n_states_by_family: dict[str, int] = {}
 
     for family in FAMILIES:
         for seed in SEEDS:
             teacher_path = teacher_json_path(root, family, seed)
             frozen_path = frozen_evaluation_path(root, family, seed)
             if not teacher_path.exists() or not frozen_path.exists():
-                raise FileNotFoundError(f"Finalizer will not regenerate missing teacher artifacts for {family} seed {seed}")
+                raise FileNotFoundError(
+                    f"Finalizer will not regenerate missing teacher artifacts for {family} seed {seed}"
+                )
             teacher = json.loads(teacher_path.read_text(encoding="utf-8"))
             frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+            n_states = int(teacher["n_states"])
+            previous = n_states_by_family.setdefault(family, n_states)
+            if previous != n_states:
+                raise ValueError(f"Teacher state count changed across seeds for {family}")
             for split in ("train", "val", "test"):
                 equivalence_rows.append(
                     {
@@ -999,7 +1069,6 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
                         "predictions_identical": teacher["equivalence"][f"{split}_predictions_identical"],
                     }
                 )
-            for split in ("train", "val", "test"):
                 distortion_rows.append(
                     {
                         "family": family,
@@ -1017,48 +1086,29 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
                     "trainable_parameter_count": 0,
                 }
                 per_run[(family, condition, seed)] = payload
-                run_rows.append(
-                    {
-                        "family": family,
-                        "condition": condition,
-                        "seed": seed,
-                        "best_epoch": None,
-                        "trainable_parameter_count": 0,
-                        "val_balanced_accuracy": payload["val"]["balanced_accuracy"],
-                        "val_accuracy": payload["val"]["accuracy"],
-                        "val_macro_f1": payload["val"]["macro_f1"],
-                        "val_loss": payload["val"]["loss"],
-                        "test_balanced_accuracy": payload["test"]["balanced_accuracy"],
-                        "test_accuracy": payload["test"]["accuracy"],
-                        "test_macro_f1": payload["test"]["macro_f1"],
-                        "test_loss": payload["test"]["loss"],
-                    }
-                )
+                run_rows.append(_run_row(family, condition, seed, payload, trainable_parameter_count=0))
 
     for spec in train_specs():
         path = train_evaluation_path(root, spec)
         if not path.exists():
             raise FileNotFoundError(f"Finalizer will not retrain missing run: {path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("test_used_for_checkpoint_selection") is not False:
-            raise ValueError(f"Invalid test-selection flag: {path}")
+        if (
+            payload.get("experiment_id") != EXPERIMENT_ID
+            or payload.get("protocol_version") != PROTOCOL_VERSION
+            or payload.get("spec") != asdict(spec)
+            or payload.get("test_used_for_checkpoint_selection") is not False
+        ):
+            raise ValueError(f"Invalid Exp5.5.3 train artifact: {path}")
         per_run[(spec.family, spec.condition, spec.seed)] = payload
         run_rows.append(
-            {
-                "family": spec.family,
-                "condition": spec.condition,
-                "seed": spec.seed,
-                "best_epoch": payload["best_epoch"],
-                "trainable_parameter_count": payload["trainable_parameter_count"],
-                "val_balanced_accuracy": payload["val"]["balanced_accuracy"],
-                "val_accuracy": payload["val"]["accuracy"],
-                "val_macro_f1": payload["val"]["macro_f1"],
-                "val_loss": payload["val"]["loss"],
-                "test_balanced_accuracy": payload["test"]["balanced_accuracy"],
-                "test_accuracy": payload["test"]["accuracy"],
-                "test_macro_f1": payload["test"]["macro_f1"],
-                "test_loss": payload["test"]["loss"],
-            }
+            _run_row(
+                spec.family,
+                spec.condition,
+                spec.seed,
+                payload,
+                trainable_parameter_count=int(payload["trainable_parameter_count"]),
+            )
         )
         weight_rows.append(
             {
@@ -1074,23 +1124,25 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
         if not path.exists():
             raise FileNotFoundError(f"Finalizer will not refit missing linear run: {path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            payload.get("experiment_id") != EXPERIMENT_ID
+            or payload.get("protocol_version") != PROTOCOL_VERSION
+            or payload.get("family") != spec.family
+            or payload.get("seed") != spec.seed
+            or payload.get("condition") != SOFT_LINEAR_REFIT
+            or payload.get("test_used_for_checkpoint_selection") is not False
+        ):
+            raise ValueError(f"Invalid Exp5.5.3 linear artifact: {path}")
         per_run[(spec.family, SOFT_LINEAR_REFIT, spec.seed)] = payload
+        count = n_states_by_family[spec.family] * N_CLASSES * WHAT_WIDTH + N_CLASSES
         run_rows.append(
-            {
-                "family": spec.family,
-                "condition": SOFT_LINEAR_REFIT,
-                "seed": spec.seed,
-                "best_epoch": None,
-                "trainable_parameter_count": int((RELATIVE_STATES if spec.family == RELATIVE10 else 16) * N_CLASSES * WHAT_WIDTH + N_CLASSES),
-                "val_balanced_accuracy": payload["val"]["balanced_accuracy"],
-                "val_accuracy": payload["val"]["accuracy"],
-                "val_macro_f1": payload["val"]["macro_f1"],
-                "val_loss": payload["val"]["loss"],
-                "test_balanced_accuracy": payload["test"]["balanced_accuracy"],
-                "test_accuracy": payload["test"]["accuracy"],
-                "test_macro_f1": payload["test"]["macro_f1"],
-                "test_loss": payload["test"]["loss"],
-            }
+            _run_row(
+                spec.family,
+                SOFT_LINEAR_REFIT,
+                spec.seed,
+                payload,
+                trainable_parameter_count=count,
+            )
         )
 
     runs = pd.DataFrame(run_rows).sort_values(["family", "condition", "seed"])
@@ -1190,8 +1242,7 @@ def finalize_experiment(repo_root: Path) -> dict[str, Path]:
             "source_experiment": exp55.EXPERIMENT_ID,
             "source_protocol": exp55.PROTOCOL_VERSION,
             "source_what_frozen": True,
-            "relative_states": RELATIVE_STATES,
-            "fixed250_states": 16,
+            "n_states_by_family": n_states_by_family,
             "soft_sigma_multiplier": SOFT_SIGMA_MULTIPLIER,
             "equivalence_atol": EQUIVALENCE_ATOL,
             "optimizer": "AdamW(lr=1e-3, weight_decay=1e-4), grad clip 1.0",
