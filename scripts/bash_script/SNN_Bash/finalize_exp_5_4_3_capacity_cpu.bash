@@ -25,4 +25,4 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
-python -u -m scripts.experiment_5_4_3_elapsed_readout_capacity capacity-finalize
+python -u -m scripts.experiment_5_4_3_capacity_finalize
