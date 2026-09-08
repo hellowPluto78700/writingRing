@@ -1,0 +1,29 @@
+{
+  "diagnostic_only": true,
+  "experiment_id": "experiment_5_5_1_1_routing_diagnostics",
+  "functional_max_points": 50000,
+  "hard_variant": "hard_top1",
+  "multi_cpu_policy": "5 independent seed diagnostic tasks -> one artifact-only finalizer",
+  "no_temperature_selection": true,
+  "no_training": true,
+  "notebook_policy": "analysis-only; reads finalized CSV/JSON artifacts and never runs diagnostics or regenerates missing artifacts",
+  "protocol_version": "routing_diagnostics_v1",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "shuffle_replicates": 5,
+  "source_experiment_id": "experiment_5_5_1_regularized_semantic_when",
+  "source_protocol_version": "regularized_semantic_when_v1",
+  "temperatures": [
+    1.0,
+    0.8,
+    0.6,
+    0.4,
+    0.25
+  ],
+  "test_policy": "val/test are reported for post-hoc diagnosis only; no temperature or architecture is selected in Exp5.5.1.1"
+}
