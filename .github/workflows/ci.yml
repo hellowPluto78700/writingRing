@@ -52,6 +52,24 @@ jobs:
             bash -n "$script"
           done
 
+      - name: Validate Exp5.4.3 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/submit_exp_5_4_3_capacity_cpu.bash
+            scripts/bash_script/SNN_Bash/submit_exp_5_4_3_extension_cpu.bash
+            scripts/bash_script/SNN_Bash/prepare_exp_5_4_3_reference_cpu_array.bash
+            scripts/bash_script/SNN_Bash/run_exp_5_4_3_capacity_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_capacity_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_5_4_3_extension_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_extension_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_5_4_3_final_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
       - name: Run CI contract checks
         run: |
           python -m pytest -q --durations=10 \
@@ -92,4 +110,5 @@ jobs:
             tests/test_experiment_5_4_contract.py \
             tests/test_experiment_5_4_1_contract.py \
             tests/test_experiment_5_4_2_contract.py \
-            tests/test_experiment_5_4_2_slurm_ci.py
+            tests/test_experiment_5_4_2_slurm_ci.py \
+            tests/test_experiment_5_4_3_contract.py
