@@ -1,0 +1,177 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 31,
+        "group_neurons": [
+          43,
+          43,
+          42
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 31,
+        "group_neurons": [
+          43,
+          43,
+          42
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "final_readout": "frozen L2 Fixed250 + retrained Linear",
+      "neurons": 12,
+      "training_only": true,
+      "type": "temporary_analog_linear_head"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 88,
+  "best_val_native_ba": 0.48300865800865794,
+  "best_val_native_loss": 1.635672926902771,
+  "experiment_id": "experiment_0_1_general_comparison",
+  "fixed250_probe": {
+    "feature_dim": 2048,
+    "probe_C": 0.01,
+    "test": {
+      "accuracy": 0.6301369863013698,
+      "balanced_accuracy": 0.6101322288822287,
+      "macro_f1": 0.6196896537004396
+    },
+    "train": {
+      "accuracy": 0.9397590361445783,
+      "balanced_accuracy": 0.9372423688923353,
+      "macro_f1": 0.9441352021482449
+    },
+    "val": {
+      "accuracy": 0.5238095238095238,
+      "balanced_accuracy": 0.5117063492063492,
+      "macro_f1": 0.5252524548720201
+    }
+  },
+  "last_hidden_events_per_neuron_second": {
+    "test": 68.68352385685884,
+    "train": 60.94656405446597,
+    "val": 48.8472039329295
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.6301369863013698,
+      "balanced_accuracy": 0.6101322288822287,
+      "macro_f1": 0.6196896537004396
+    },
+    "train": {
+      "accuracy": 0.9397590361445783,
+      "balanced_accuracy": 0.9372423688923353,
+      "macro_f1": 0.9441352021482449
+    },
+    "val": {
+      "accuracy": 0.5238095238095238,
+      "balanced_accuracy": 0.5117063492063492,
+      "macro_f1": 0.5252524548720201
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5205479452054794,
+      "balanced_accuracy": 0.49831210456210456,
+      "loss": 1.6700268559259912,
+      "macro_f1": 0.4900442515574095
+    },
+    "train": {
+      "accuracy": 0.8382099827882961,
+      "balanced_accuracy": 0.8287190436823982,
+      "loss": 0.9517800883869296,
+      "macro_f1": 0.8335560490946411
+    },
+    "val": {
+      "accuracy": 0.49206349206349204,
+      "balanced_accuracy": 0.48300865800865794,
+      "loss": 1.635672926902771,
+      "macro_f1": 0.44555466920578485
+    }
+  },
+  "primary_readout": "l2_fixed250_ordered_linear",
+  "protocol_version": "general_comparison_v1",
+  "provenance": {
+    "checkpoint_selection": "validation native analog-head BA; tie-break native analog-head CE",
+    "input_contract": "Raw64 30-channel unsigned weighted events; no pre-SNN pooling or scaling",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "probe_contract": "freeze timestep-trained SNN; ordered 250-ms L2 spike counts; train-only StandardScaler; validation-selected LogisticRegression C",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "architecture": "local_234x2",
+    "family": "snn_fixed250_linear",
+    "hidden_cap": 31,
+    "objective": "timestep_ce",
+    "seed": 11,
+    "variant": "multi_h"
+  }
+}

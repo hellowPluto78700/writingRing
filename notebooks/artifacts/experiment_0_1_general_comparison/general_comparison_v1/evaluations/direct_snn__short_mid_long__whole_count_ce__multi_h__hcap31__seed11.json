@@ -1,0 +1,191 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 31,
+        "group_neurons": [
+          64,
+          64
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 31,
+        "group_neurons": [
+          32,
+          32,
+          32,
+          32
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 31,
+        "group_neurons": [
+          22,
+          22,
+          21,
+          21,
+          21,
+          21
+        ],
+        "layer": 3,
+        "shifts": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "event_cap": 1,
+      "neurons": 12,
+      "readout": "valid whole count",
+      "type": "spiking_class_neurons"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 87,
+  "best_val_native_ba": 0.1792989417989418,
+  "best_val_native_loss": 2.362537145614624,
+  "experiment_id": "experiment_0_1_general_comparison",
+  "fixed250_probe": null,
+  "last_hidden_events_per_neuron_second": {
+    "test": 19.346380053015242,
+    "train": 20.73344833939069,
+    "val": 7.248353963655518
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.19863013698630136,
+      "balanced_accuracy": 0.1896714396714397,
+      "loss": 2.295890700327207,
+      "macro_f1": 0.15983384094378492
+    },
+    "train": {
+      "accuracy": 0.3373493975903614,
+      "balanced_accuracy": 0.3323723719450689,
+      "loss": 1.9409154928489725,
+      "macro_f1": 0.35542928207262053
+    },
+    "val": {
+      "accuracy": 0.16666666666666666,
+      "balanced_accuracy": 0.1792989417989418,
+      "loss": 2.362537145614624,
+      "macro_f1": 0.1381580663134061
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.19863013698630136,
+      "balanced_accuracy": 0.1896714396714397,
+      "loss": 2.295890700327207,
+      "macro_f1": 0.15983384094378492
+    },
+    "train": {
+      "accuracy": 0.3373493975903614,
+      "balanced_accuracy": 0.3323723719450689,
+      "loss": 1.9409154928489725,
+      "macro_f1": 0.35542928207262053
+    },
+    "val": {
+      "accuracy": 0.16666666666666666,
+      "balanced_accuracy": 0.1792989417989418,
+      "loss": 2.362537145614624,
+      "macro_f1": 0.1381580663134061
+    }
+  },
+  "primary_readout": "output_whole_count",
+  "protocol_version": "general_comparison_v1",
+  "provenance": {
+    "checkpoint_selection": "validation Output WholeCount BA; tie-break normalized WholeCount CE",
+    "input_contract": "Raw64 30-channel unsigned weighted events; no pre-SNN pooling or scaling",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "probe_contract": null,
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "architecture": "short_mid_long",
+    "family": "direct_snn",
+    "hidden_cap": 31,
+    "objective": "whole_count_ce",
+    "seed": 11,
+    "variant": "multi_h"
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          64,
+          64
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          32,
+          32,
+          32,
+          32
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          22,
+          22,
+          21,
+          21,
+          21,
+          21
+        ],
+        "layer": 3,
+        "shifts": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "event_cap": 1,
+      "neurons": 12,
+      "readout": "valid whole count",
+      "type": "spiking_class_neurons"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 68,
+  "best_val_native_ba": 0.16666666666666666,
+  "best_val_native_loss": 2.3955042362213135,
+  "experiment_id": "experiment_0_1_general_comparison",
+  "fixed250_probe": null,
+  "last_hidden_events_per_neuron_second": {
+    "test": 2.4341865473823723,
+    "train": 2.670390406485002,
+    "val": 1.2587130190501272
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.136986301369863,
+      "balanced_accuracy": 0.1327922077922078,
+      "loss": 2.393055308355044,
+      "macro_f1": 0.105014022643333
+    },
+    "train": {
+      "accuracy": 0.270223752151463,
+      "balanced_accuracy": 0.26760543642549744,
+      "loss": 2.0722535403378037,
+      "macro_f1": 0.2754024098049377
+    },
+    "val": {
+      "accuracy": 0.15079365079365079,
+      "balanced_accuracy": 0.16666666666666666,
+      "loss": 2.3955042362213135,
+      "macro_f1": 0.10941160941160939
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.136986301369863,
+      "balanced_accuracy": 0.1327922077922078,
+      "loss": 2.393055308355044,
+      "macro_f1": 0.105014022643333
+    },
+    "train": {
+      "accuracy": 0.270223752151463,
+      "balanced_accuracy": 0.26760543642549744,
+      "loss": 2.0722535403378037,
+      "macro_f1": 0.2754024098049377
+    },
+    "val": {
+      "accuracy": 0.15079365079365079,
+      "balanced_accuracy": 0.16666666666666666,
+      "loss": 2.3955042362213135,
+      "macro_f1": 0.10941160941160939
+    }
+  },
+  "primary_readout": "output_whole_count",
+  "protocol_version": "general_comparison_v1",
+  "provenance": {
+    "checkpoint_selection": "validation Output WholeCount BA; tie-break normalized WholeCount CE",
+    "input_contract": "Raw64 30-channel unsigned weighted events; no pre-SNN pooling or scaling",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "probe_contract": null,
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "architecture": "short_mid_long",
+    "family": "direct_snn",
+    "hidden_cap": 1,
+    "objective": "timestep_ce",
+    "seed": 23,
+    "variant": "binary"
+  }
+}

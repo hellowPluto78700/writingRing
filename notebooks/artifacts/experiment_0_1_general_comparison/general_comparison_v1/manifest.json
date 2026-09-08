@@ -1,0 +1,111 @@
+{
+  "direct_architectures": {
+    "mid_long": [
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ],
+    "short_mid": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ]
+    ],
+    "short_mid_long": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ]
+  },
+  "direct_run_count": 60,
+  "experiment_id": "experiment_0_1_general_comparison",
+  "files": {
+    "baselines": "baseline_results.csv",
+    "comparison_summary": "comparison_summary.csv",
+    "paired_architecture_effects": "paired_architecture_effects.csv",
+    "paired_capacity_effects": "paired_capacity_effects.csv",
+    "paired_objective_effects": "paired_objective_effects.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce"
+  ],
+  "primary_readouts": {
+    "direct_snn": "Output WholeCount",
+    "raw_baselines": [
+      "Raw Fixed250 + Linear",
+      "Raw Relative10 + Linear"
+    ],
+    "snn_fixed250_linear": "frozen L2 Fixed250 ordered + retrained Linear"
+  },
+  "probe_architecture": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "probe_run_count": 10,
+  "protocol_version": "general_comparison_v1",
+  "question": "Can feed-forward hierarchical multi-tau SNNs turn raw spike trains into class evidence that closes the gap to explicit Fixed250/Relative10 temporal decoders?",
+  "run_count": 70,
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "split_seed": 12345,
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "name": "binary",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_h",
+      "output_cap": 1
+    }
+  ]
+}
