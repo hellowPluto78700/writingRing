@@ -79,15 +79,15 @@ def test_fixed250_offline_streaming_equivalence() -> None:
 
 
 def test_validation_selection_never_constructs_test_loader() -> None:
-    validation = inspect.getsource(exp543.evaluate_validation_one)
-    training = inspect.getsource(exp543.train_one)
-    final = inspect.getsource(exp543.evaluate_final_seed)
-    assert 'splits=("train", "val")' in validation
-    assert '("train", "val")' in training
+    validation = inspect.getsource(exp543.evaluate_validation_one).replace(" ", "")
+    training = inspect.getsource(exp543.train_one).replace(" ", "")
+    final = inspect.getsource(exp543.evaluate_final_seed).replace(" ", "")
+    assert 'splits=("train","val")' in validation
+    assert '("train","val")' in training
     assert 'splits=("test",)' in final
     assert "_load_selection" in final
-    assert '"test_evaluated":False' in validation.replace(" ", "")
-    assert '"test_evaluated":True' in final.replace(" ", "")
+    assert '"test_evaluated":False' in validation
+    assert '"test_evaluated":True' in final
 
 
 def test_slurm_multi_cpu_and_environment_contract() -> None:
