@@ -1,0 +1,30 @@
+{
+  "accumulator": "valid-timestep evidence sum plus one final 12D class bias",
+  "clock_definition": "8 smooth RBF probabilities over causal absolute elapsed time, clipped to train max elapsed",
+  "conditions": [
+    "shared",
+    "clock",
+    "oracle_progress",
+    "reset_gru",
+    "ordered_gru"
+  ],
+  "experiment_id": "experiment_5_5_non_snn_history_experts",
+  "expert_definition": "K independent full 12x128 matrices with soft gating; no per-timestep expert bias",
+  "gru_width": 64,
+  "loss": "whole-gesture cross entropy only",
+  "multi_cpu_policy": "5 reference tasks -> 25 independent train/evaluate tasks -> one artifact-only finalizer",
+  "n_states": 8,
+  "notebook_policy": "analysis-only; reads finalized CSV/JSON artifacts and never trains or regenerates missing runs",
+  "oracle_progress_definition": "8 smooth RBF probabilities over t/(T-1); diagnostic only and non-deployable",
+  "ordered_state_definition": "q_t = softmax(G h_{t-1}); h_{t-1} contains WHAT_1..WHAT_{t-1}",
+  "protocol_version": "non_snn_history_experts_v1",
+  "reset_state_definition": "q_t = softmax(G GRU(m_t, 0)); no cross-timestep history",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selection_policy": "all five conditions are predeclared; best epoch is validation-selected within each run; test does not select checkpoints or conditions"
+}
