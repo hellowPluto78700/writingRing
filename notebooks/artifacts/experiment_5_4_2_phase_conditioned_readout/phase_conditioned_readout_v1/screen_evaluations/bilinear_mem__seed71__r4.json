@@ -1,0 +1,265 @@
+{
+  "base_native": {
+    "train": {
+      "accuracy": 0.882960413080895,
+      "balanced_accuracy": 0.881225729729513,
+      "loss": 0.35834612898695284,
+      "macro_f1": 0.8802519299704237,
+      "n_samples": 581
+    },
+    "val": {
+      "accuracy": 0.5079365079365079,
+      "balanced_accuracy": 0.5133357383357383,
+      "loss": 2.6641786098480225,
+      "macro_f1": 0.49878986094823613,
+      "n_samples": 126
+    }
+  },
+  "best_epoch": 3,
+  "experiment_id": "experiment_5_4_2_phase_conditioned_readout",
+  "native": {
+    "train": {
+      "accuracy": 0.8898450946643718,
+      "balanced_accuracy": 0.8887856966443185,
+      "loss": 0.3556901922067964,
+      "macro_f1": 0.887498018679654,
+      "max_abs_logit_delta_vs_base": 0.5285358428955078,
+      "n_samples": 581,
+      "residual_ratio": {
+        "max": 0.021408867090940475,
+        "mean": 0.005634139708412423,
+        "median": 0.004534766543656588,
+        "p95": 0.013615524396300316
+      }
+    },
+    "val": {
+      "accuracy": 0.5079365079365079,
+      "balanced_accuracy": 0.5133357383357383,
+      "loss": 2.6602940559387207,
+      "macro_f1": 0.49956510685354855,
+      "max_abs_logit_delta_vs_base": 0.5044441223144531,
+      "n_samples": 126,
+      "residual_ratio": {
+        "max": 0.018181445077061653,
+        "mean": 0.006429788766480569,
+        "median": 0.005571965593844652,
+        "p95": 0.01595632079988718
+      }
+    }
+  },
+  "parameter_counts": {
+    "frozen_base": 1548,
+    "stored_total": 2365,
+    "trainable_total": 817
+  },
+  "protocol_version": "phase_conditioned_readout_v1",
+  "spec": {
+    "condition": "bilinear_mem",
+    "n_banks": 4,
+    "rank": 4,
+    "seed": 71,
+    "stage": "screen"
+  },
+  "stage": "screen",
+  "test_evaluated": false,
+  "val_ablations": [
+    {
+      "ablation": "ordered",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6602940559387207,
+        "macro_f1": 0.49956510685354855,
+        "max_abs_logit_delta_vs_base": 0.5044441223144531,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.018181445077061653,
+          "mean": 0.006429788766480569,
+          "median": 0.005571965593844652,
+          "p95": 0.01595632079988718
+        }
+      }
+    },
+    {
+      "ablation": "mean_when",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.663892984390259,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.31889820098876953,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012048695236444473,
+          "mean": 0.0036960573481684108,
+          "median": 0.0030860028928145766,
+          "p95": 0.007917252602055669
+        }
+      }
+    },
+    {
+      "ablation": "when_zero",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6641786098480225,
+        "macro_f1": 0.49878986094823613,
+        "max_abs_logit_delta_vs_base": 0.0,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "p95": 0.0
+        }
+      }
+    },
+    {
+      "ablation": "when_circular_shift",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6685593128204346,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.32608699798583984,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012745657004415989,
+          "mean": 0.0044786902038299195,
+          "median": 0.0039365876000374556,
+          "p95": 0.009323954582214355
+        }
+      }
+    },
+    {
+      "ablation": "reset_when",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6667122840881348,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.2574644088745117,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.014408844523131847,
+          "mean": 0.006584163534358913,
+          "median": 0.006558086024597287,
+          "p95": 0.009458866668865085
+        }
+      }
+    },
+    {
+      "ablation": "residual_what_zero",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6641786098480225,
+        "macro_f1": 0.49878986094823613,
+        "max_abs_logit_delta_vs_base": 0.0,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.0,
+          "mean": 0.0,
+          "median": 0.0,
+          "p95": 0.0
+        }
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 0,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6638073921203613,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.32265472412109375,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012069353833794594,
+          "mean": 0.0037613648663474514,
+          "median": 0.0032374373404309154,
+          "p95": 0.008221151307225227
+        }
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 1,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.663661241531372,
+        "macro_f1": 0.4976402633074104,
+        "max_abs_logit_delta_vs_base": 0.31332969665527344,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.01170691940933466,
+          "mean": 0.0037335500944339272,
+          "median": 0.0030431339982897043,
+          "p95": 0.0077094039879739285
+        }
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 2,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6641669273376465,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.33454322814941406,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012616188265383244,
+          "mean": 0.003781488183276018,
+          "median": 0.0032730719540268183,
+          "p95": 0.008757087402045727
+        }
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 3,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.663473606109619,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.32187843322753906,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012184664607048035,
+          "mean": 0.003960330464733055,
+          "median": 0.003463166649453342,
+          "p95": 0.008703684667125344
+        }
+      }
+    },
+    {
+      "ablation": "when_shuffle",
+      "replicate": 4,
+      "val": {
+        "accuracy": 0.5079365079365079,
+        "balanced_accuracy": 0.5133357383357383,
+        "loss": 2.6645593643188477,
+        "macro_f1": 0.49796477637555164,
+        "max_abs_logit_delta_vs_base": 0.32146644592285156,
+        "n_samples": 126,
+        "residual_ratio": {
+          "max": 0.012073900550603867,
+          "mean": 0.0037378427553607803,
+          "median": 0.0032731691608205438,
+          "p95": 0.007742811110801995
+        }
+      }
+    }
+  ]
+}
