@@ -1,0 +1,41 @@
+{
+  "ablations": [
+    "ordered",
+    "reset_when",
+    "when_zero",
+    "when_shuffle",
+    "when_circular_shift",
+    "residual_what_zero"
+  ],
+  "aggregation_policy": "finalizer only aggregates existing base/residual artifacts; no training or cache regeneration",
+  "architecture_contract": "WHAT128 -> direct bias-free Linear12 -> non-leaky valid-time accumulator + one class bias; in parallel, WHAT128 -> selector128 AND frozen WHEN64 -> selector128 -> conjunction128 -> bias-free residual Linear12 -> accumulator",
+  "base_condition": "direct_what_wholecount",
+  "baseline_preservation": "freeze trained direct WHAT base; zero-initialize residual output; epoch 0 exactly equals direct WHAT base",
+  "context_temporal_state": false,
+  "expected_base_runs": 5,
+  "expected_residual_runs": 5,
+  "experiment_id": "experiment_5_4_1_constrained_conjunction_residual",
+  "extra_fusion_lif_between_what_and_base": false,
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "activity_runs": "activity_runs.csv",
+    "base_histories": "base_histories.csv",
+    "base_runs": "base_runs.csv",
+    "histories": "histories.csv",
+    "paired_deltas": "paired_deltas.csv",
+    "runs": "runs.csv"
+  },
+  "protocol_version": "direct_what_conjunction_residual_v2",
+  "residual_condition": "direct_what_plus_constrained_when_residual",
+  "scientific_question": "whether frozen WHEN spikes add class information to the original WHAT L2 spike representation when WHEN can act only through an instantaneous structural WHAT x WHEN conjunction residual",
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "shortcut_prevention": "residual evidence is structurally zero if either residual WHAT input or WHEN input is zero",
+  "shuffle_replicates": 5,
+  "winner_logic": "primary evidence is positive paired test BA vs direct WHAT base plus ordered > reset/shuffle/shift; when_zero and residual_what_zero must exactly recover the direct WHAT base"
+}
