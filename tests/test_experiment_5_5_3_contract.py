@@ -199,7 +199,12 @@ def test_readme_and_notebook_are_analysis_artifact_driven() -> None:
     assert NOTEBOOK.is_file()
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     assert notebook["nbformat"] == 4
-    text = NOTEBOOK.read_text(encoding="utf-8")
+    source_text = "\n".join(
+        "".join(cell.get("source", []))
+        if isinstance(cell.get("source", []), list)
+        else str(cell.get("source", ""))
+        for cell in notebook.get("cells", [])
+    )
     for artifact in (
         "teacher_equivalence.csv",
         "runs.csv",
@@ -209,7 +214,7 @@ def test_readme_and_notebook_are_analysis_artifact_driven() -> None:
         "logit_distortion.csv",
         "weight_drift.csv",
     ):
-        assert artifact in text
+        assert artifact in source_text
     for forbidden in (
         "run_train_one",
         "run_linear_one",
@@ -219,4 +224,4 @@ def test_readme_and_notebook_are_analysis_artifact_driven() -> None:
         "LogisticRegression",
         "torch.optim",
     ):
-        assert forbidden not in text
+        assert forbidden not in source_text
