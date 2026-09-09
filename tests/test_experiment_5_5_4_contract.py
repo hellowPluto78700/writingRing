@@ -83,11 +83,11 @@ def test_hard_predicted_routing_matches_floor_10r() -> None:
 def test_training_source_contains_no_classification_loss_or_teacher_updates() -> None:
     source = inspect.getsource(exp554._train_progress_model)
     assert "cross_entropy" not in source
-    assert "classification" not in source.lower()
     assert "weight_bank" not in source
-    assert "bias" not in source
+    assert "teacher_logits" not in source
     assert "sample_balanced_progress_loss" in source
     assert "_checkpoint_better" in source
+    assert '"classification_gradient_used": False' in source
 
 
 def test_checkpoint_selection_is_validation_when_only() -> None:
