@@ -1,0 +1,251 @@
+{
+  "architecture": "gru64_progress",
+  "best_epoch": 64,
+  "best_val_metrics": {
+    "n_samples": 126,
+    "n_valid_timesteps": 11391,
+    "progress_r2": 0.8160038166326814,
+    "progress_spearman": 0.9024399448276491,
+    "sample_balanced_mean_abs_bin_error": 0.9296602686922241,
+    "sample_balanced_phase10_accuracy": 0.3817928737336491,
+    "sample_balanced_phase_backtrack_rate": 0.035503410040787185,
+    "sample_balanced_progress_backtrack_rate": 0.2002003101304826,
+    "sample_balanced_progress_mae": 0.09471085293201793,
+    "sample_balanced_smooth_l1": 0.058237376798396454,
+    "sample_balanced_within1_bin_accuracy": 0.7779338215284836
+  },
+  "checkpoint_selection": "minimum validation sample-balanced progress MAE; tie lower validation SmoothL1; tie higher validation Spearman",
+  "classification": {
+    "hard": {
+      "test": {
+        "accuracy": 0.4315068493150685,
+        "balanced_accuracy": 0.4254807692307692,
+        "loss": 1.7471851794896502,
+        "macro_f1": 0.4027220656593722,
+        "n_samples": 146
+      },
+      "train": {
+        "accuracy": 0.8709122203098106,
+        "balanced_accuracy": 0.8728921501476488,
+        "loss": 0.4908231208344606,
+        "macro_f1": 0.8715391239817314,
+        "n_samples": 581
+      },
+      "val": {
+        "accuracy": 0.42857142857142855,
+        "balanced_accuracy": 0.41572270322270327,
+        "loss": 1.6382189361157031,
+        "macro_f1": 0.4022928600400894,
+        "n_samples": 126
+      }
+    },
+    "local2": {
+      "test": {
+        "accuracy": 0.4383561643835616,
+        "balanced_accuracy": 0.42534548784548787,
+        "loss": 1.7128548748081216,
+        "macro_f1": 0.4023105209566884,
+        "n_samples": 146
+      },
+      "train": {
+        "accuracy": 0.8777969018932874,
+        "balanced_accuracy": 0.8785628001584288,
+        "loss": 0.4839888574499128,
+        "macro_f1": 0.8779501069262109,
+        "n_samples": 581
+      },
+      "val": {
+        "accuracy": 0.4444444444444444,
+        "balanced_accuracy": 0.4345719095719096,
+        "loss": 1.616142599922299,
+        "macro_f1": 0.4184622635772061,
+        "n_samples": 126
+      }
+    }
+  },
+  "classification_gradient_used": false,
+  "experiment_id": "experiment_5_5_4_causal_when_phase_recovery",
+  "margin_degradation": "notebooks/artifacts/experiment_5_5_4_causal_when_phase_recovery/causal_when_phase_recovery_v1/margin_degradation/gru64_progress__seed53.csv",
+  "parameter_counts": {
+    "stored_total": 37313,
+    "trainable_total": 37313
+  },
+  "phase_confusion_test": [
+    [
+      925,
+      205,
+      0,
+      146,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      241,
+      754,
+      177,
+      26,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      2,
+      310,
+      557,
+      259,
+      64,
+      14,
+      5,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      46,
+      287,
+      469,
+      242,
+      129,
+      25,
+      9,
+      0,
+      0
+    ],
+    [
+      0,
+      2,
+      114,
+      250,
+      395,
+      279,
+      92,
+      29,
+      18,
+      0
+    ],
+    [
+      0,
+      0,
+      31,
+      146,
+      289,
+      362,
+      265,
+      89,
+      36,
+      14
+    ],
+    [
+      0,
+      0,
+      12,
+      46,
+      145,
+      320,
+      322,
+      261,
+      70,
+      43
+    ],
+    [
+      0,
+      0,
+      0,
+      20,
+      86,
+      141,
+      315,
+      328,
+      226,
+      83
+    ],
+    [
+      0,
+      0,
+      0,
+      2,
+      37,
+      98,
+      183,
+      324,
+      400,
+      166
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      9,
+      55,
+      76,
+      206,
+      399,
+      396
+    ]
+  ],
+  "progress_contract": "current causal state predicts r_t=t/T; T is never a model input",
+  "progress_metrics": {
+    "test": {
+      "n_samples": 146,
+      "n_valid_timesteps": 12072,
+      "progress_r2": 0.8202224449981574,
+      "progress_spearman": 0.9082319436928603,
+      "sample_balanced_mean_abs_bin_error": 0.9531847433222083,
+      "sample_balanced_phase10_accuracy": 0.37939860257662067,
+      "sample_balanced_phase_backtrack_rate": 0.03488011376757392,
+      "sample_balanced_progress_backtrack_rate": 0.1999591625871426,
+      "sample_balanced_progress_mae": 0.09640165661883668,
+      "sample_balanced_smooth_l1": 0.059989523900630004,
+      "sample_balanced_within1_bin_accuracy": 0.7746020884095683
+    },
+    "train": {
+      "n_samples": 581,
+      "n_valid_timesteps": 59707,
+      "progress_r2": 0.8975305123791671,
+      "progress_spearman": 0.9599905240164551,
+      "sample_balanced_mean_abs_bin_error": 0.603379942767139,
+      "sample_balanced_phase10_accuracy": 0.5109901545764814,
+      "sample_balanced_phase_backtrack_rate": 0.030479930251690834,
+      "sample_balanced_progress_backtrack_rate": 0.19599965289783516,
+      "sample_balanced_progress_mae": 0.06251306233295696,
+      "sample_balanced_smooth_l1": 0.0306648732523371,
+      "sample_balanced_within1_bin_accuracy": 0.9114694097419997
+    },
+    "val": {
+      "n_samples": 126,
+      "n_valid_timesteps": 11391,
+      "progress_r2": 0.8160038166326814,
+      "progress_spearman": 0.9024399448276491,
+      "sample_balanced_mean_abs_bin_error": 0.9296602686922241,
+      "sample_balanced_phase10_accuracy": 0.3817928737336491,
+      "sample_balanced_phase_backtrack_rate": 0.035503410040787185,
+      "sample_balanced_progress_backtrack_rate": 0.2002003101304826,
+      "sample_balanced_progress_mae": 0.09471085293201793,
+      "sample_balanced_smooth_l1": 0.058237376798396454,
+      "sample_balanced_within1_bin_accuracy": 0.7779338215284836
+    }
+  },
+  "protocol_version": "causal_when_phase_recovery_v1",
+  "routing_disagreement": "notebooks/artifacts/experiment_5_5_4_causal_when_phase_recovery/causal_when_phase_recovery_v1/routing_disagreement/gru64_progress__seed53.csv",
+  "seed": 53,
+  "source_cache_seed": 53,
+  "spec": {
+    "architecture": "gru64_progress",
+    "seed": 53
+  },
+  "state_width": 64,
+  "stopped_after_epoch": 89,
+  "teacher_contract": "Exp5.5.3 Relative10 W_k and bias frozen; no classifier retraining",
+  "test_used_for_checkpoint_selection": false,
+  "training_objective": "sample-balanced SmoothL1(beta=0.1) only",
+  "trajectory": "notebooks/artifacts/experiment_5_5_4_causal_when_phase_recovery/causal_when_phase_recovery_v1/trajectories/gru64_progress__seed53__test.npz"
+}

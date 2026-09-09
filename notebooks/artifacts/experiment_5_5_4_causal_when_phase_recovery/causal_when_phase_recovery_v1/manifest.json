@@ -1,0 +1,32 @@
+{
+  "architecture_comparison": "state-width-matched GRU64 versus direct RSNN64, not parameter-matched",
+  "architectures": [
+    "gru64_progress",
+    "rsnn64_progress"
+  ],
+  "experiment_id": "experiment_5_5_4_causal_when_phase_recovery",
+  "multi_cpu_policy": "5 source-validation tasks -> 10 independent WHEN train/evaluate tasks -> one artifact-only finalizer",
+  "notebook_policy": "analysis-only; reads finalized artifacts and never trains or regenerates missing artifacts",
+  "progress_target": "r_t=t/T so floor(10*r_t) exactly matches Relative10 floor(10*t/T)",
+  "protocol_version": "causal_when_phase_recovery_v1",
+  "routing_conditions": [
+    "oracle_hard",
+    "oracle_local2",
+    "gru64_hard",
+    "gru64_local2",
+    "rsnn64_hard",
+    "rsnn64_local2"
+  ],
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "selection_policy": "minimum validation sample-balanced progress MAE, then lower validation SmoothL1, then higher validation Spearman; test excluded",
+  "source_contract": "existing frozen WHAT128 and Exp5.5.3 Relative10 teacher only; source validation never retrains either",
+  "state_width": 64,
+  "teacher_policy": "W_k and bias frozen for all downstream replay; no classification fitting",
+  "training_objective": "sample-balanced SmoothL1(beta=0.1) only; no classification CE or other regularizer"
+}
