@@ -31,7 +31,7 @@ HIDDEN_WIDTH = exp01.HIDDEN_WIDTH
 OUTPUT_CAP = exp01.OUTPUT_CAP
 
 TARGET_GRAD_RATIOS = (0.05, 0.10, 0.20)
-CALIBRATION_BATCHES = 8
+CALIBRATION_BATCHES = 5
 REG_TAU = exp014.REG_TAU
 BASE_LAMBDA_P2 = exp014.REG_LAMBDA_P2
 BASE_LAMBDA_A1 = exp014.REG_LAMBDA_A1
@@ -271,7 +271,7 @@ def calibrate_strength(
     data: exp01.exp3.Data,
     config: Config,
 ) -> dict[str, object]:
-    """One-time pre-training calibration on 8 independent train-only batches."""
+    """One-time pre-training calibration on 5 independent train-only batches."""
     device = torch.device(config.device)
     loader = calibration_loader(data, spec, config.batch_size)
     alphas = _hidden_alphas(model)
