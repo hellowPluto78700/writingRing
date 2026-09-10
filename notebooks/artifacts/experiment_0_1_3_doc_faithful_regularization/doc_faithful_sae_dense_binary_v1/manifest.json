@@ -1,0 +1,117 @@
+{
+  "base_experiment": {
+    "experiment_id": "experiment_0_1_general_comparison",
+    "protocol_version": "general_comparison_v1",
+    "reuse": "30 frozen binary direct reg-off runs + frozen binary probe/raw context"
+  },
+  "direct_architectures": {
+    "mid_long": [
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ],
+    "short_mid": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ]
+    ],
+    "short_mid_long": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ]
+  },
+  "experiment_id": "experiment_0_1_3_doc_faithful_regularization",
+  "files": {
+    "baselines": "baseline_results.csv",
+    "binary_probe_context": "binary_probe_context.csv",
+    "comparison_summary": "comparison_summary.csv",
+    "paired_regularization_effects": "paired_regularization_effects.csv",
+    "regularization_architecture_interactions": "regularization_architecture_interactions.csv",
+    "regularization_objective_interactions": "regularization_objective_interactions.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "new_training_run_count": 30,
+  "preserved_training_parameters": {
+    "batch_size": 128,
+    "checkpoint_selection": "validation Output WholeCount BA; tie-break normalized WholeCount CE",
+    "epochs": 100,
+    "hidden_width": 128,
+    "lr": 0.001,
+    "objectives": [
+      "whole_count_ce",
+      "timestep_ce"
+    ],
+    "output_cap": 1,
+    "seeds": [
+      11,
+      23,
+      37,
+      53,
+      71
+    ],
+    "weight_decay": 0.0
+  },
+  "protocol_version": "doc_faithful_sae_dense_binary_v1",
+  "question": "Does the source-document SAE-Dense regularizer improve Exp0.1 binary direct SNNs when every SNN/training parameter is otherwise unchanged?",
+  "regularization": {
+    "activity_layers": "last_hidden_latent_layer_only",
+    "activity_reduction": "per_sample_sum_over_latent_neurons_and_valid_timesteps_divided_by_valid_T; sum_over_batch",
+    "activity_signal": "binary_spike_output",
+    "activity_term": "A1",
+    "binary_only": true,
+    "configuration": "SAE-Dense",
+    "enabled": true,
+    "lambda_a1": 0.1,
+    "lambda_l2": 0.0,
+    "lambda_p1": 0.0,
+    "lambda_p2": 0.01,
+    "normalization": "doc_faithful_sum_no_neuron_or_layer_normalization",
+    "potential_layers": "all_spiking_layers_including_output",
+    "potential_reduction": "direct_sum_over_batch_neurons_and_layers",
+    "potential_source": "post_reset_membrane",
+    "potential_term": "P2",
+    "tau": 0.99,
+    "valid_length_policy": "source assumes fixed T; adaptation updates only valid timesteps and freezes cumulative potential after each sample endpoint"
+  },
+  "scope": "Exp0.1 direct SNN family only; binary hidden spikes only. The Exp0.1 SNN+Fixed250 Linear probe is frozen context and is not retrained.",
+  "variant": {
+    "hidden_cap": 1,
+    "name": "binary",
+    "output_cap": 1
+  }
+}
