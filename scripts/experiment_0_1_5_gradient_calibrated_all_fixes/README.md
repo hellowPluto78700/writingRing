@@ -66,7 +66,7 @@ Each run performs a train-only calibration before any optimizer update.
 
 Calibration uses:
 
-- exactly 8 shuffled training batches;
+- exactly 5 shuffled training batches, which covers the complete current training split at the default batch size of 128;
 - a dedicated deterministic calibration-loader seed;
 - no parameter update;
 - hidden linear weights only when measuring gradients;
@@ -163,7 +163,7 @@ The array follows the repository default:
 Each array task performs one complete independent run:
 
 ```text
-8-batch calibration
+5-batch calibration
 -> train 50-100 epochs
 -> select best validation WholeCount checkpoint
 -> evaluate train/val/test
