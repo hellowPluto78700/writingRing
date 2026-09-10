@@ -1,0 +1,141 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          43,
+          43,
+          42
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          43,
+          43,
+          42
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "event_cap": 1,
+      "neurons": 12,
+      "readout": "valid whole count",
+      "type": "spiking_class_neurons"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 96,
+  "best_val_output_whole_count_ba": 0.2906746031746032,
+  "best_val_output_whole_count_loss": 2.254202365875244,
+  "experiment_id": "experiment_0_1_1_local234_wholecount",
+  "last_hidden_events_per_neuron_second": {
+    "test": 3.8797216699801194,
+    "train": 3.5134071381915017,
+    "val": 2.1296637696427005
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.363013698630137,
+      "balanced_accuracy": 0.34413364413364417,
+      "loss": 2.125431589884301,
+      "macro_f1": 0.2801265436559554
+    },
+    "train": {
+      "accuracy": 0.5111876075731497,
+      "balanced_accuracy": 0.49935955340852684,
+      "loss": 1.7636987744428205,
+      "macro_f1": 0.4907058167619107
+    },
+    "val": {
+      "accuracy": 0.29365079365079366,
+      "balanced_accuracy": 0.2906746031746032,
+      "loss": 2.254202365875244,
+      "macro_f1": 0.2573407899480102
+    }
+  },
+  "primary_readout": "output_whole_count",
+  "protocol_version": "local234_wholecount_v1",
+  "provenance": {
+    "checkpoint_selection": "maximum validation Output WholeCount BA; tie-break minimum validation normalized WholeCount CE",
+    "input_contract": "Exp0.1 Raw64 30-channel unsigned weighted events; no pre-SNN pooling or scaling",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "model_seed": 53,
+    "paired_seed_namespace": "exp0_1_general_comparison",
+    "readout": "valid Output WholeCount for both training objectives",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "hidden_cap": 1,
+    "objective": "timestep_ce",
+    "seed": 53,
+    "variant": "binary"
+  }
+}

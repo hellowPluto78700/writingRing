@@ -1,0 +1,109 @@
+{
+  "base_experiment": {
+    "experiment_id": "experiment_0_1_general_comparison",
+    "protocol_version": "general_comparison_v1",
+    "reuse": "60 frozen direct reg-off runs + frozen probe/context and raw baselines"
+  },
+  "direct_architectures": {
+    "mid_long": [
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ],
+    "short_mid": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ]
+    ],
+    "short_mid_long": [
+      [
+        2,
+        3
+      ],
+      [
+        2,
+        3,
+        4,
+        5
+      ],
+      [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    ]
+  },
+  "experiment_id": "experiment_0_1_2_regularized_general_comparison",
+  "files": {
+    "baselines": "baseline_results.csv",
+    "comparison_summary": "comparison_summary.csv",
+    "paired_regularization_effects": "paired_regularization_effects.csv",
+    "regularization_architecture_interactions": "regularization_architecture_interactions.csv",
+    "regularization_capacity_interactions": "regularization_capacity_interactions.csv",
+    "regularization_objective_interactions": "regularization_objective_interactions.csv",
+    "runs": "runs.csv",
+    "summary": "summary.csv"
+  },
+  "new_training_run_count": 60,
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce"
+  ],
+  "protocol_version": "regularized_general_comparison_v1",
+  "question": "Does hidden-state P2+A1 regularization improve direct multi-tau SNN optimization without changing architecture, objective, input, readout, or split?",
+  "regularization": {
+    "activity_layers": "all hidden spiking layers only",
+    "activity_normalization": "event_count_divided_by_hidden_cap",
+    "activity_term": "A1",
+    "enabled": true,
+    "lambda_a1": 0.1,
+    "lambda_p2": 0.01,
+    "normalization": "mean over neurons within each layer, then mean over layers",
+    "output_layer_regularized": false,
+    "potential_layers": "all hidden spiking layers only",
+    "potential_source": "pre_reset_membrane",
+    "potential_term": "P2",
+    "tau": 0.99,
+    "valid_length_policy": "update only on valid timesteps; freeze cumulative potential after endpoint"
+  },
+  "seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "variants": [
+    {
+      "hidden_cap": 1,
+      "name": "binary",
+      "output_cap": 1
+    },
+    {
+      "hidden_cap": 31,
+      "name": "multi_h",
+      "output_cap": 1
+    }
+  ]
+}
