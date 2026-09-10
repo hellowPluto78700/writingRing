@@ -1,0 +1,269 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          32,
+          32,
+          32,
+          32
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          22,
+          22,
+          21,
+          21,
+          21,
+          21
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "event_cap": 1,
+      "neurons": 12,
+      "readout": "valid whole count",
+      "type": "spiking_class_neurons"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 30,
+  "best_val_native_ba": 0.10555555555555557,
+  "best_val_native_loss": 2.4746553897857666,
+  "condition": {
+    "a1_definition": "Exp0.1.2 mean normalized hidden firing activity over valid neuron-steps, then mean over layers",
+    "activity_layers": "all hidden spiking layers only",
+    "condition": "tau_gain_norm",
+    "diagnostic_note": "regularization values are part of the optimization loss according to this condition",
+    "enabled": true,
+    "lambda_a1_max": 0.1,
+    "lambda_p2_max": 0.01,
+    "output_layer_regularized": false,
+    "p2_reduction": "mean over batch and neurons within each layer, then mean over layers",
+    "potential_layers": "all hidden spiking layers only",
+    "potential_source": "hidden_pre_reset_membrane",
+    "tau": 0.99,
+    "tau_gain_normalization": true,
+    "tau_gain_normalization_definition": "multiply each hidden pre-reset membrane by (1-alpha_i) only inside P2",
+    "temporal_normalization": false,
+    "temporal_normalization_definition": "none; Exp0.1.2 cumulative EW sum",
+    "warmup": false,
+    "warmup_epochs": 0,
+    "warmup_schedule": "fixed"
+  },
+  "experiment_id": "experiment_0_1_4_parallel_regularization_ablation",
+  "hidden_diagnostics": {
+    "test": {
+      "layers": [
+        {
+          "active_step_fraction": 0.0005669110337972167,
+          "dead_neuron_fraction": 0.53125,
+          "events_per_neuron_second": 0.03628230616302187,
+          "fraction_at_cap": 0.0005669110337972167,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.08652713173979398,
+          "mean_events_per_neuron_step": 0.0005669110337972167,
+          "mean_normalized_activity_per_neuron_step": 0.0005669110337972167
+        },
+        {
+          "active_step_fraction": 0.006612667743538767,
+          "dead_neuron_fraction": 0.296875,
+          "events_per_neuron_second": 0.4232107355864811,
+          "fraction_at_cap": 0.006612667743538767,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.0465984124865573,
+          "mean_events_per_neuron_step": 0.006612667743538767,
+          "mean_normalized_activity_per_neuron_step": 0.006612667743538767
+        }
+      ]
+    },
+    "train": {
+      "layers": [
+        {
+          "active_step_fraction": 0.0009346422948732979,
+          "dead_neuron_fraction": 0.2265625,
+          "events_per_neuron_second": 0.05981710687189107,
+          "fraction_at_cap": 0.0009346422948732979,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.08652048607549157,
+          "mean_events_per_neuron_step": 0.0009346422948732979,
+          "mean_normalized_activity_per_neuron_step": 0.0009346422948732979
+        },
+        {
+          "active_step_fraction": 0.011955910739109317,
+          "dead_neuron_fraction": 0.0234375,
+          "events_per_neuron_second": 0.7651782873029963,
+          "fraction_at_cap": 0.011955910739109317,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.05892269603412288,
+          "mean_events_per_neuron_step": 0.011955910739109317,
+          "mean_normalized_activity_per_neuron_step": 0.011955910739109317
+        }
+      ]
+    },
+    "val": {
+      "layers": [
+        {
+          "active_step_fraction": 0.00024347620928803442,
+          "dead_neuron_fraction": 0.7265625,
+          "events_per_neuron_second": 0.015582477394434203,
+          "fraction_at_cap": 0.00024347620928803442,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.07413772343228756,
+          "mean_events_per_neuron_step": 0.00024347620928803442,
+          "mean_normalized_activity_per_neuron_step": 0.00024347620928803442
+        },
+        {
+          "active_step_fraction": 0.0028901654815204985,
+          "dead_neuron_fraction": 0.375,
+          "events_per_neuron_second": 0.1849705908173119,
+          "fraction_at_cap": 0.0028901654815204985,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.022492253448617605,
+          "mean_events_per_neuron_step": 0.0028901654815204985,
+          "mean_normalized_activity_per_neuron_step": 0.0028901654815204985
+        }
+      ]
+    }
+  },
+  "last_hidden_events_per_neuron_second": {
+    "test": 0.4232107355864811,
+    "train": 0.7651782873029963,
+    "val": 0.1849705908173119
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.06164383561643835,
+      "balanced_accuracy": 0.06818181818181819,
+      "loss": 2.5001997849712634,
+      "macro_f1": 0.010948905109489052
+    },
+    "train": {
+      "accuracy": 0.16351118760757316,
+      "balanced_accuracy": 0.16023907302532905,
+      "loss": 2.309814504009516,
+      "macro_f1": 0.13545963810456177
+    },
+    "val": {
+      "accuracy": 0.07936507936507936,
+      "balanced_accuracy": 0.10555555555555557,
+      "loss": 2.4746553897857666,
+      "macro_f1": 0.046957671957671955
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.06164383561643835,
+      "balanced_accuracy": 0.06818181818181819,
+      "loss": 2.5001997849712634,
+      "macro_f1": 0.010948905109489052
+    },
+    "train": {
+      "accuracy": 0.16351118760757316,
+      "balanced_accuracy": 0.16023907302532905,
+      "loss": 2.309814504009516,
+      "macro_f1": 0.13545963810456177
+    },
+    "val": {
+      "accuracy": 0.07936507936507936,
+      "balanced_accuracy": 0.10555555555555557,
+      "loss": 2.4746553897857666,
+      "macro_f1": 0.046957671957671955
+    }
+  },
+  "primary_readout": "output_whole_count",
+  "protocol_version": "parallel_regularization_ablation_v1",
+  "provenance": {
+    "base_experiment_id": "experiment_0_1_general_comparison",
+    "base_protocol_version": "general_comparison_v1",
+    "checkpoint_selection": "validation Output WholeCount BA; tie-break normalized WholeCount CE",
+    "input_contract": "identical to Exp0.1 direct SNN: Raw64 30-channel unsigned weighted events",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "paired_base_key": "direct_snn__mid_long__timestep_ce__binary__hcap1__seed71",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "training_contract": "binary Exp0.1 direct-SNN architecture, optimizer, LR, batch size, input, objective implementations, paired seeds, readout, and checkpoint selection are preserved; training budget is fixed at 30 epochs and only the regularization condition varies",
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "architecture": "mid_long",
+    "condition": "tau_gain_norm",
+    "objective": "timestep_ce",
+    "seed": 71
+  }
+}
