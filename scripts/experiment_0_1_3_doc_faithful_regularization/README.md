@@ -90,7 +90,7 @@ Training histories also retain total P2, A1, weighted regularizer-to-task ratio,
 
 ## Multi-CPU execution
 
-Each independent run is one Slurm array task and one CPU core:
+The Slurm layout follows Exp0.1.2 directly. Each independent run is one array task and one CPU core:
 
 ```text
 #SBATCH --array=0-29%30
@@ -99,13 +99,24 @@ Each independent run is one Slurm array task and one CPU core:
 
 Each task performs `train -> best-checkpoint selection -> evaluate -> save artifacts` atomically. The finalizer starts only through `afterok` after all 30 runs succeed and aggregates existing artifacts only.
 
+The submit wrapper exports the repository root with `--export=ALL`, matching Exp0.1.2. Array/finalizer jobs do **not** create an `outputs/` directory on the compute node.
+
 Submit from the repository root:
 
 ```bash
 bash scripts/bash_script/SNN_Bash/submit_exp_0_1_3_doc_faithful_regularization_cpu.bash
 ```
 
-The submit wrapper requires finalized Exp0.1 `runs.csv` and `baseline_results.csv` before launching.
+Slurm stdout/stderr use the same submission-directory pattern as Exp0.1.2:
+
+```text
+exp0_1_3_docreg_<ARRAY_JOB_ID>_<TASK_ID>.out
+exp0_1_3_docreg_<ARRAY_JOB_ID>_<TASK_ID>.err
+exp0_1_3_finalize_<JOB_ID>.out
+exp0_1_3_finalize_<JOB_ID>.err
+```
+
+The finalizer requires the finalized Exp0.1 `runs.csv` and `baseline_results.csv`; if they are absent, finalization fails rather than regenerating controls.
 
 ## Finalized artifacts
 
@@ -114,6 +125,8 @@ The finalizer writes under:
 ```text
 notebooks/artifacts/experiment_0_1_3_doc_faithful_regularization/doc_faithful_sae_dense_binary_v1/
 ```
+
+This mirrors Exp0.1.2's artifact strategy: per-run checkpoints/evaluations/histories live under the experiment artifact root, and the finalizer writes aggregate CSV/JSON files into the same protocol directory.
 
 Key files:
 
