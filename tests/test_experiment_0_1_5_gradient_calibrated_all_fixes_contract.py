@@ -32,7 +32,7 @@ def test_run_matrix_is_exactly_90_binary_gradient_calibrated_runs() -> None:
 
 
 def test_training_and_early_stop_contract() -> None:
-    assert exp015.CALIBRATION_BATCHES == 8
+    assert exp015.CALIBRATION_BATCHES == 5
     assert exp015.WARMUP_EPOCHS == 10
     assert exp015.MIN_EPOCHS == 50
     assert exp015.MAX_EPOCHS == 100
