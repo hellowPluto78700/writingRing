@@ -1,0 +1,348 @@
+{
+  "architecture": {
+    "hidden_layers": [
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          64,
+          64
+        ],
+        "layer": 1,
+        "shifts": [
+          2,
+          3
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          32,
+          32,
+          32,
+          32
+        ],
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418
+        ],
+        "width": 128
+      },
+      {
+        "event_cap": 1,
+        "group_neurons": [
+          22,
+          22,
+          21,
+          21,
+          21,
+          21
+        ],
+        "layer": 3,
+        "shifts": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656,
+          492.1461612435418,
+          992.1669944116244,
+          1992.177287539818
+        ],
+        "width": 128
+      }
+    ],
+    "input_channels": 30,
+    "output": {
+      "event_cap": 1,
+      "neurons": 12,
+      "readout": "valid whole count",
+      "type": "spiking_class_neurons"
+    },
+    "sampling_rate_hz": 64.0,
+    "tau_mem_ms": 22.54,
+    "threshold": 0.5
+  },
+  "best_epoch": 10,
+  "best_val_wholecount_ba": 0.09722222222222222,
+  "best_val_wholecount_loss": 2.4823760986328125,
+  "calibration": {
+    "base_lambda_a1": 0.1,
+    "base_lambda_p2": 0.01,
+    "batches": [
+      {
+        "a1": 0.008803369477391243,
+        "base_regularizer": 0.0008825485128909349,
+        "batch_index": 0,
+        "p2": 0.00022115418687462807,
+        "reg_hidden_grad_norm": 0.00031246521731339747,
+        "reg_to_task_hidden_grad_ratio": 0.013211338036484025,
+        "task_hidden_grad_norm": 0.02365129228019926,
+        "task_loss": 2.6709189414978027,
+        "task_reg_hidden_grad_cosine": 0.26232048544452596
+      },
+      {
+        "a1": 0.00795795302838087,
+        "base_regularizer": 0.0007977327913977206,
+        "batch_index": 1,
+        "p2": 0.00019374773546587676,
+        "reg_hidden_grad_norm": 0.00029986494854700695,
+        "reg_to_task_hidden_grad_ratio": 0.012915815333492415,
+        "task_hidden_grad_norm": 0.02321688107210836,
+        "task_loss": 2.66556978225708,
+        "task_reg_hidden_grad_cosine": 0.17864774646730464
+      },
+      {
+        "a1": 0.007495621684938669,
+        "base_regularizer": 0.0007514344761148095,
+        "batch_index": 2,
+        "p2": 0.00018723012180998921,
+        "reg_hidden_grad_norm": 0.0002669739688513328,
+        "reg_to_task_hidden_grad_ratio": 0.00966491980809753,
+        "task_hidden_grad_norm": 0.02762298851436458,
+        "task_loss": 2.641014575958252,
+        "task_reg_hidden_grad_cosine": 0.277460119567706
+      },
+      {
+        "a1": 0.012876104563474655,
+        "base_regularizer": 0.0012938460567966104,
+        "batch_index": 3,
+        "p2": 0.0006235548062250018,
+        "reg_hidden_grad_norm": 0.0003785006665097772,
+        "reg_to_task_hidden_grad_ratio": 0.01032956586680106,
+        "task_hidden_grad_norm": 0.03664245636172067,
+        "task_loss": 2.6725847721099854,
+        "task_reg_hidden_grad_cosine": 0.21974400777258665
+      },
+      {
+        "a1": 0.003191358642652631,
+        "base_regularizer": 0.0003199090715497732,
+        "batch_index": 4,
+        "p2": 7.731882942607626e-05,
+        "reg_hidden_grad_norm": 0.00016440151849660665,
+        "reg_to_task_hidden_grad_ratio": 0.008627206917047625,
+        "task_hidden_grad_norm": 0.019056169636055,
+        "task_loss": 2.5472092628479004,
+        "task_reg_hidden_grad_cosine": 0.13204931192374664
+      }
+    ],
+    "calibration_batches": 5,
+    "calibration_loader_seed": 2225796087,
+    "calibration_ratio_mean": 0.01094976919238453,
+    "calibration_ratio_median": 0.01032956586680106,
+    "calibration_ratio_std": 0.0020254515974068815,
+    "full_strength_calibrated_ratio_median": 0.05,
+    "kappa": 4.84047448312408,
+    "parameter_scope": "hidden linear weights only; output head excluded",
+    "target_grad_percent": 5,
+    "target_grad_ratio": 0.05
+  },
+  "early_stopped": true,
+  "epochs_trained": 72,
+  "experiment_id": "experiment_0_1_5_gradient_calibrated_all_fixes",
+  "hidden_diagnostics": {
+    "test": {
+      "layers": [
+        {
+          "active_step_fraction": 0.00017602717031146454,
+          "dead_neuron_fraction": 0.7421875,
+          "events_per_neuron_second": 0.01126573889993373,
+          "fraction_at_cap": 0.00017602717031146454,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.10945663742864266,
+          "mean_events_per_neuron_step": 0.00017602717031146454,
+          "mean_normalized_activity_per_neuron_step": 0.00017602717031146454
+        },
+        {
+          "active_step_fraction": 4.724258614976806e-05,
+          "dead_neuron_fraction": 0.84375,
+          "events_per_neuron_second": 0.0030235255135851557,
+          "fraction_at_cap": 4.724258614976806e-05,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.013366828184399564,
+          "mean_events_per_neuron_step": 4.724258614976806e-05,
+          "mean_normalized_activity_per_neuron_step": 4.724258614976806e-05
+        },
+        {
+          "active_step_fraction": 0.0006037990805168986,
+          "dead_neuron_fraction": 0.6953125,
+          "events_per_neuron_second": 0.03864314115308151,
+          "fraction_at_cap": 0.0006037990805168986,
+          "layer": 3,
+          "mean_abs_pre_reset_membrane": 0.004642357014124562,
+          "mean_events_per_neuron_step": 0.0006037990805168986,
+          "mean_normalized_activity_per_neuron_step": 0.0006037990805168986
+        }
+      ]
+    },
+    "train": {
+      "layers": [
+        {
+          "active_step_fraction": 0.00031822064414557756,
+          "dead_neuron_fraction": 0.234375,
+          "events_per_neuron_second": 0.020366121225316964,
+          "fraction_at_cap": 0.00031822064414557756,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.10300006719826874,
+          "mean_events_per_neuron_step": 0.00031822064414557756,
+          "mean_normalized_activity_per_neuron_step": 0.00031822064414557756
+        },
+        {
+          "active_step_fraction": 0.0007610079220191937,
+          "dead_neuron_fraction": 0.171875,
+          "events_per_neuron_second": 0.0487045070092284,
+          "fraction_at_cap": 0.0007610079220191937,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.01723823174882918,
+          "mean_events_per_neuron_step": 0.0007610079220191937,
+          "mean_normalized_activity_per_neuron_step": 0.0007610079220191937
+        },
+        {
+          "active_step_fraction": 0.006060192900329945,
+          "dead_neuron_fraction": 0.0234375,
+          "events_per_neuron_second": 0.3878523456211165,
+          "fraction_at_cap": 0.006060192900329945,
+          "layer": 3,
+          "mean_abs_pre_reset_membrane": 0.04130641013338443,
+          "mean_events_per_neuron_step": 0.006060192900329945,
+          "mean_normalized_activity_per_neuron_step": 0.006060192900329945
+        }
+      ]
+    },
+    "val": {
+      "layers": [
+        {
+          "active_step_fraction": 6.927069616363796e-05,
+          "dead_neuron_fraction": 0.8671875,
+          "events_per_neuron_second": 0.004433324554472829,
+          "fraction_at_cap": 6.927069616363796e-05,
+          "layer": 1,
+          "mean_abs_pre_reset_membrane": 0.09058157293175534,
+          "mean_events_per_neuron_step": 6.927069616363796e-05,
+          "mean_normalized_activity_per_neuron_step": 6.927069616363796e-05
+        },
+        {
+          "active_step_fraction": 5.34961811956808e-05,
+          "dead_neuron_fraction": 0.875,
+          "events_per_neuron_second": 0.003423755596523571,
+          "fraction_at_cap": 5.34961811956808e-05,
+          "layer": 2,
+          "mean_abs_pre_reset_membrane": 0.0049733063218340545,
+          "mean_events_per_neuron_step": 5.34961811956808e-05,
+          "mean_normalized_activity_per_neuron_step": 5.34961811956808e-05
+        },
+        {
+          "active_step_fraction": 0.0006666447195154069,
+          "dead_neuron_fraction": 0.5390625,
+          "events_per_neuron_second": 0.04266526204898604,
+          "fraction_at_cap": 0.0006666447195154069,
+          "layer": 3,
+          "mean_abs_pre_reset_membrane": 0.0039805108466293634,
+          "mean_events_per_neuron_step": 0.0006666447195154069,
+          "mean_normalized_activity_per_neuron_step": 0.0006666447195154069
+        }
+      ]
+    }
+  },
+  "last_hidden_events_per_neuron_second": {
+    "test": 0.03864314115308151,
+    "train": 0.3878523456211165,
+    "val": 0.04266526204898604
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.07534246575342465,
+      "balanced_accuracy": 0.08333333333333333,
+      "loss": 2.4850803434032285,
+      "macro_f1": 0.011752136752136752
+    },
+    "train": {
+      "accuracy": 0.10327022375215146,
+      "balanced_accuracy": 0.10354414162590263,
+      "loss": 2.458266175757587,
+      "macro_f1": 0.049908661053164625
+    },
+    "val": {
+      "accuracy": 0.07142857142857142,
+      "balanced_accuracy": 0.09722222222222222,
+      "loss": 2.4823760986328125,
+      "macro_f1": 0.032783882783882785
+    }
+  },
+  "primary_readout": "output_whole_count",
+  "protocol_version": "gradient_calibrated_all_fixes_v1",
+  "provenance": {
+    "base_experiment_id": "experiment_0_1_general_comparison",
+    "base_protocol_version": "general_comparison_v1",
+    "checkpoint_selection": "validation Output WholeCount BA; tie-break normalized WholeCount CE",
+    "input_contract": "identical to Exp0.1 direct SNN: Raw64 30-channel unsigned weighted events",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "paired_frozen_key": "direct_snn__short_mid_long__timestep_ce__binary__hcap1__seed37",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "architecture": "short_mid_long",
+    "objective": "timestep_ce",
+    "seed": 37,
+    "target_grad_ratio": 0.05
+  },
+  "stop_reason": "patience_30_after_min50"
+}
