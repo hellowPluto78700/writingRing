@@ -8,6 +8,7 @@ import torch
 
 from scripts import experiment_5_1_boundary_free_temporal_decoder as exp51
 from scripts import experiment_5_2_2_frozen_local_multitau_syn as exp522
+from scripts import experiment_5_2_2_threshold_diagnostics as exp522diag
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,7 @@ def test_model_is_ff_multitau_syn_with_short_membrane_and_two_readouts() -> None
     assert output.output_lif is not None
     assert not hasattr(hidden, "recurrent")
     assert exp522.TAU_MEM_MS == 22.54
+    assert exp522.THRESHOLD == 0.5
     assert exp522.HIDDEN_CAP == 1
     assert exp522.OUTPUT_CAP == 1
     assert exp522.parameter_counts(12) == {"W3": 16384, "Wo": 1536, "trainable_total": 17920}
@@ -113,6 +115,23 @@ def test_paired_initialization_matches_across_profiles_and_readouts() -> None:
         assert torch.equal(models[0].output_linear.weight, model.output_linear.weight)
 
 
+def test_fixed_threshold_operating_point_diagnostics_contract() -> None:
+    assert exp522.THRESHOLD == 0.5
+    assert exp522diag.THRESHOLD_METRICS == (
+        "firing_rate_hz",
+        "spike_probability",
+        "mean_abs_input_current",
+        "mean_abs_pre_reset_membrane",
+        "pre_reset_above_threshold_probability",
+    )
+    trajectory = {
+        "hidden_membranes": torch.tensor([[[0.10, -0.20], [0.05, 0.30]]]),
+        "hidden_spikes": torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]),
+    }
+    expected = trajectory["hidden_membranes"] + 0.5 * trajectory["hidden_spikes"]
+    assert torch.equal(exp522diag.pre_reset_membrane(trajectory), expected)
+
+
 def test_multi_cpu_afterok_and_one_core_contract() -> None:
     prepare = PREPARE.read_text(encoding="utf-8")
     runner = RUNNER.read_text(encoding="utf-8")
@@ -126,6 +145,8 @@ def test_multi_cpu_afterok_and_one_core_contract() -> None:
         assert "conda activate writingring-gpu" in text
         for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
             assert f"export {name}=1" in text
+    assert "experiment_5_2_2_threshold_diagnostics evaluate-one" in runner
+    assert "experiment_5_2_2_threshold_diagnostics finalize" in finalizer
     assert 'afterok:${LOCAL_JOB}' in submit
     assert 'afterok:${RUN_JOB}' in submit
     assert "60 runs" in submit
@@ -147,6 +168,7 @@ def test_notebook_is_analysis_only_and_contains_required_diagnostics() -> None:
         "ablation_runs.csv",
         "probes.csv",
         "activity.csv",
+        "threshold_activity.csv",
         "histories.csv",
         "local_reference.csv",
         "manifest.json",
@@ -163,6 +185,12 @@ def test_notebook_is_analysis_only_and_contains_required_diagnostics() -> None:
         "l3_fixed250_ordered",
         "l3_relative10_ordered",
         "event_rate_hz",
+        "firing_rate_hz",
+        "spike_probability",
+        "mean_abs_input_current",
+        "mean_abs_pre_reset_membrane",
+        "pre_reset_above_threshold_probability",
+        "long_operating_point",
         "plt.subplots",
     ):
         assert token in joined
@@ -198,6 +226,15 @@ def test_readme_documents_full_training_and_intervention_contract() -> None:
         "I_L3 = 0",
         "U_L3 = 0",
         "output-LIF state is never reset",
+        "threshold = 0.5",
+        "threshold_activity.csv",
+        "firing_rate_hz",
+        "spike_probability",
+        "mean_abs_input_current",
+        "mean_abs_pre_reset_membrane",
+        "pre_reset_above_threshold_probability",
+        "s6",
+        "s7",
         "0-59%50",
         "analysis-only",
     ):
