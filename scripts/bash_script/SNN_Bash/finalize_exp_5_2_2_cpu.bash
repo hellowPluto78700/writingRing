@@ -27,3 +27,4 @@ export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
 python -u -m scripts.experiment_5_2_2_frozen_local_multitau_syn finalize
+python -u -m scripts.experiment_5_2_2_threshold_diagnostics finalize
