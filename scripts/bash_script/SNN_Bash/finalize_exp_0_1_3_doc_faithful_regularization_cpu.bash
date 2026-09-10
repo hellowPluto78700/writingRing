@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp0_1_3_finalize
+#SBATCH --job-name=exp0_1_3_fin
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=01:00:00
-#SBATCH --output=outputs/exp0_1_3_finalize_%j.out
-#SBATCH --error=outputs/exp0_1_3_finalize_%j.err
+#SBATCH --output=exp0_1_3_finalize_%j.out
+#SBATCH --error=exp0_1_3_finalize_%j.err
 
 set -euo pipefail
 
-REPO_ROOT="${WRITINGRING_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$PWD}"
 cd "$REPO_ROOT"
-mkdir -p outputs
 
 module load conda/latest
 eval "$(conda shell.bash hook)"
@@ -25,5 +24,6 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
 
 python -u -m scripts.experiment_0_1_3_doc_faithful_regularization finalize
