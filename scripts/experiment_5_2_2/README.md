@@ -41,7 +41,9 @@ For frozen local spike vector `z_t`:
 
 ```text
 I_t = alpha_i * I_(t-1) + W3 z_t
-(S_t, U_t) = LIF(I_t, U_(t-1))
+U_t^- = beta * U_(t-1) + I_t
+S_t = threshold(U_t^-)
+U_t = U_t^- - S_t * theta
 ```
 
 L3 is feed-forward: there is no recurrent matrix.
@@ -55,7 +57,7 @@ reset = subtract
 hidden spike cap = 1
 ```
 
-Only `alpha_i`, hence `tau_syn`, changes across profiles. At 64 Hz, shifts 2..7 correspond approximately to 54, 117, 242, 492, 992, and 1992 ms.
+The threshold is fixed at `theta = 0.5` and is not a sweep variable. Only `alpha_i`, hence `tau_syn`, changes across profiles. At 64 Hz, shifts 2..7 correspond approximately to 54, 117, 242, 492, 992, and 1992 ms.
 
 ## Temporal profiles
 
@@ -157,7 +159,7 @@ Checkpoint selection is strictly per-run validation-only:
 1. maximum native validation balanced accuracy;
 2. exact tie-break by lower native validation CE.
 
-Test results, probes, or intervention results never select a checkpoint or temporal profile.
+Test results, probes, intervention results, or threshold diagnostics never select a checkpoint or temporal profile.
 
 ## Mandatory inference-time reset interventions
 
@@ -222,6 +224,34 @@ fresh Linear on L3 count
   -> native output-LIF spike count
 ```
 
+## Fixed-threshold operating-point diagnostics
+
+`theta = 0.5` remains fixed and is not swept. After each selected checkpoint is evaluated, the same task computes the L3 operating point overall and separately for every `tau_syn`/shift group under every reset condition.
+
+For each group, record:
+
+```text
+FR_s                                  = firing_rate_hz
+P(S_t = 1)                            = spike_probability
+E|I_t|                                = mean_abs_input_current
+E|U_t^-|                              = mean_abs_pre_reset_membrane
+P(U_t^- > theta)                      = pre_reset_above_threshold_probability
+```
+
+Here `U_t^-` is the exact membrane value before thresholding and subtractive reset:
+
+```text
+U_t^- = beta * U_(t-1) + I_t
+```
+
+`MacroMultiSpikeLIF` returns this quantity before reset, and the diagnostic also has the exact identity `U_t^- = U_t + S_t * theta` for the binary subtractive-reset L3 used here.
+
+Because hidden spike cap is one, `P(S_t = 1)` numerically matches the existing binary `nonzero_fraction`, while `FR_s = fs * P(S_t = 1)`. Both names are retained deliberately because they answer different analysis questions.
+
+The key groups are `s6` and `s7` (approximately 1 s and 2 s synaptic traces). Their firing, accumulated input-current magnitude, pre-reset membrane magnitude, and threshold-crossing probability are inspected under `normal`, `resetall250`, `reset67`, and `reset567` to determine whether the long paths are actually operating near a useful firing regime rather than being dead or saturated.
+
+These diagnostics are written to `threshold_activity.csv`; they are evaluation-only and do not affect training or checkpoint selection.
+
 ## Activity diagnostics
 
 For normal and every reset intervention, activity is reported overall and separately for every shift group present in the profile:
@@ -255,7 +285,7 @@ organization_gap = Delta BA(l3_whole_count) - Delta BA(l3_fixed250_ordered)
 
 A positive organization gap means the intervention damages count-accessible temporal organization more strongly than it damages information that can still be recovered with explicit Fixed250 ordering.
 
-The notebook also compares cumulative fast/mid resets (`234`, `2345`, `23456`) with long-state resets (`67`, `567`) and separates L3 representation quality, trained-`Wo` utilization, and output-LIF compression.
+The notebook also compares cumulative fast/mid resets (`234`, `2345`, `23456`) with long-state resets (`67`, `567`), separates L3 representation quality, trained-`Wo` utilization, and output-LIF compression, and reports the fixed-threshold operating-point metrics with special attention to shifts 6 and 7.
 
 ## Multi-CPU execution
 
@@ -271,15 +301,18 @@ prepare-local afterok
   -> Slurm array 0-59%50
   -> one CPU core per task
   -> train -> select checkpoint -> evaluate all deduplicated reset masks
-  -> fit intervention-specific probes -> write per-run artifacts
+  -> fit intervention-specific probes
+  -> evaluate fixed-threshold operating point per tau_syn group
+  -> write per-run artifacts
 
 all 60 decoder tasks succeed
   -> afterok finalizer
   -> concatenate existing artifacts only
+  -> merge threshold diagnostics with activity rows
   -> analysis-only notebook
 ```
 
-The reset/probe functions are separate from training inside the Python module, so evaluation can be rerun without retraining. A rerun of an existing run skips the checkpoint unless `--force` is supplied.
+The reset/probe/threshold-diagnostic functions are separate from training, so evaluation can be rerun without retraining. A rerun of an existing run skips the checkpoint unless `--force` is supplied.
 
 Every Slurm compute task initializes Conda locally and uses one CPU thread. Array concurrency never exceeds 50.
 
@@ -296,18 +329,20 @@ notebooks/artifacts/experiment_5_2_2_frozen_local_multitau_syn/
   frozen_exp51_l2_multitau_syn_wholecount_v1/
     checkpoints/
     evaluations/
+    threshold_diagnostics/
     histories/
     local_references/
     runs.csv
     ablation_runs.csv
     probes.csv
     activity.csv
+    threshold_activity.csv
     histories.csv
     local_reference.csv
     manifest.json
 ```
 
-The finalizer fails on missing run, history, or local-reference artifacts. It never retrains, reruns interventions, selects a profile, or computes the scientific conclusion.
+The finalizer fails on missing run, history, local-reference, or threshold-diagnostic artifacts. It never retrains, reruns interventions, selects a profile, or computes the scientific conclusion.
 
 ## Notebook aggregation policy
 
@@ -323,8 +358,9 @@ The finalizer fails on missing run, history, or local-reference artifacts. It ne
 8. compute the WholeCount-vs-Fixed250 organization-gap diagnostic;
 9. compare fresh L3-count probe, trained pre-LIF `Wo`, and native output-LIF performance;
 10. inspect per-shift firing/state statistics, especially shifts 6/7;
-11. plot validation learning curves for validation-selected configurations;
-12. never train, call Slurm, regenerate artifacts, or select on test BA.
+11. report `FR_s`, `P(S_t=1)`, `E|I_t|`, `E|U_t^-|`, and `P(U_t^- > theta)` by shift, emphasizing s6/s7;
+12. plot validation learning curves for validation-selected configurations;
+13. never train, call Slurm, regenerate artifacts, or select on test BA.
 
 ## Required checks
 
