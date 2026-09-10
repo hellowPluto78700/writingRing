@@ -4,14 +4,13 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=12G
 #SBATCH --time=12:00:00
-#SBATCH --output=outputs/exp0_1_3_docreg_%A_%a.out
-#SBATCH --error=outputs/exp0_1_3_docreg_%A_%a.err
+#SBATCH --output=exp0_1_3_docreg_%A_%a.out
+#SBATCH --error=exp0_1_3_docreg_%A_%a.err
 
 set -euo pipefail
 
-REPO_ROOT="${WRITINGRING_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$PWD}"
 cd "$REPO_ROOT"
-mkdir -p outputs
 
 module load conda/latest
 eval "$(conda shell.bash hook)"
@@ -26,9 +25,10 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
 
-python -u -m scripts.experiment_0_1_3_doc_faithful_regularization \
-    run-one \
-    --array-task-id "${SLURM_ARRAY_TASK_ID}" \
+TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
+python -u -m scripts.experiment_0_1_3_doc_faithful_regularization run-one \
+    --array-task-id "$TASK_ID" \
     --device cpu \
     --threads 1
