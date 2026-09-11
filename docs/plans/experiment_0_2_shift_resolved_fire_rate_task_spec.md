@@ -52,7 +52,7 @@ Finalizer must emit:
 
 ## Long-timescale grouping
 
-Do not invent shifts absent from a backbone. Report every configured shift independently. For pooled summaries, define the long group from the final hidden layer as shifts `>=5` where available; retain per-shift results as the primary scientific evidence.
+Do not invent shifts absent from a backbone. Report every configured shift independently. In this experiment's naming, s2-s5 span the short/mid range (~54-492 ms at 64 Hz), while s6/s7 introduce the ~1-2 s long-timescale population. Therefore pooled long-τ summaries use shifts `>=6`. `short_mid` has no pooled long-τ row, but its s2-s5 results remain in the per-shift outputs.
 
 ## Acceptance criteria
 
@@ -62,7 +62,7 @@ Do not invent shifts absent from a backbone. Report every configured shift indep
 - Firing-rate denominators are neuron-seconds; discrete stage lengths are recorded in the manifest.
 - `none` rows are reused as the paired baseline and never retrained.
 - Positive `tail_specific_suppression_pp` has the documented interpretation that tail firing fell more strongly than valid firing.
-- Pooled long-τ rates are weighted by final-hidden neuron counts.
+- Pooled long-τ rates use only s6/s7 and are weighted by final-hidden neuron counts.
 - Finalizer fails loudly on missing/duplicate task artifacts.
 - Slurm runner requests one CPU and sets BLAS/OpenMP thread counts to one.
 - Notebook does not train, spawn multiprocessing, or evaluate checkpoints.
