@@ -18,6 +18,15 @@ ANALYSIS_VERSION = "shift_fire_rate_v1"
 PROFILES = (exp02.FROZEN_PROFILE,) + exp02.PROFILES
 LONG_SHIFT_MIN = 5
 
+RATE_COLUMNS = (
+    "valid_firing_rate_hz",
+    "tail_stage1_firing_rate_hz",
+    "tail_stage2_firing_rate_hz",
+    "tail_stage3_firing_rate_hz",
+    "tail_firing_rate_hz",
+    "tail_to_valid_rate_ratio",
+)
+
 
 @dataclass(frozen=True)
 class EvalSpec:
@@ -57,20 +66,8 @@ def per_checkpoint_path(repo_root: Path, spec: EvalSpec) -> Path:
 
 
 def _shift_slices(shifts: tuple[int, ...], width: int) -> list[tuple[int, int, int]]:
-    # Preserve the same deterministic equal-width allocation used by Exp0.2 rasters.
-    if hasattr(exp02, "_shift_slices"):
-        return list(exp02._shift_slices(shifts, width))  # type: ignore[attr-defined]
-    base, remainder = divmod(width, len(shifts))
-    start = 0
-    result: list[tuple[int, int, int]] = []
-    for index, shift in enumerate(shifts):
-        count = base + (1 if index < remainder else 0)
-        stop = start + count
-        result.append((int(shift), start, stop))
-        start = stop
-    if start != width:
-        raise RuntimeError("Shift slices do not span the final hidden layer")
-    return result
+    """Use the exact final-hidden shift allocation already used by Exp0.2 diagnostics."""
+    return list(exp02._shift_slices(width, shifts))
 
 
 def _spike_stats(
@@ -80,6 +77,7 @@ def _spike_stats(
     stop: int,
     fs: float,
 ) -> tuple[float, float, int, int]:
+    """Return Hz/neuron, spikes/neuron, masked sample-steps and neuron count."""
     if spikes.ndim != 3 or mask.ndim != 2 or spikes.shape[:2] != mask.shape:
         raise ValueError("Expected spikes [B,T,N] and mask [B,T]")
     if not (0 <= start < stop <= spikes.shape[2]):
@@ -90,8 +88,8 @@ def _spike_stats(
     timestep_count = int(mask.sum().item())
     neuron_count = int(stop - start)
     neuron_steps = timestep_count * neuron_count
-    seconds_per_neuron = neuron_steps / float(fs)
-    firing_rate_hz = spike_count / seconds_per_neuron if seconds_per_neuron > 0 else float("nan")
+    neuron_seconds = neuron_steps / float(fs)
+    firing_rate_hz = spike_count / neuron_seconds if neuron_seconds > 0 else float("nan")
     spikes_per_neuron = spike_count / neuron_count if neuron_count > 0 else float("nan")
     return firing_rate_hz, spikes_per_neuron, timestep_count, neuron_count
 
@@ -100,20 +98,32 @@ def _load_checkpoint_model(
     repo_root: Path,
     data: object,
     spec: EvalSpec,
-    device: torch.device,
+    device_name: str,
+    batch_size: int,
+    threads: int,
 ) -> exp02.DiagnosticMultiTauHierarchySNN:
+    """Reuse Exp0.2 identity checks for both new and frozen Exp0.1 checkpoints."""
     run_spec = spec.exp02_spec()
-    model = exp02._new_model(run_spec, data).to(device)  # type: ignore[arg-type]
+    config = exp02.Config(
+        repo_root=repo_root,
+        results_dir=artifact_root(repo_root),
+        device=device_name,
+        batch_size=batch_size,
+        threads=threads,
+    )
     if spec.profile == exp02.FROZEN_PROFILE:
-        base_path = exp02.base_results_dir(repo_root) / "checkpoints" / f"{exp02.base_spec(run_spec).key}.pt"
-        checkpoint = torch.load(base_path, map_location=device)
+        model, _, _ = exp02._load_frozen_model(run_spec, data, config)  # type: ignore[arg-type]
     else:
-        path = exp02.checkpoint_path(artifact_root(repo_root), run_spec)
-        checkpoint = torch.load(path, map_location=device)
-    state = checkpoint.get("model_state_dict", checkpoint)
-    model.load_state_dict(state, strict=True)
-    model.eval()
+        model, _ = exp02._load_new_model(run_spec, data, config)  # type: ignore[arg-type]
     return model
+
+
+def _alpha_and_tau_ms(shift: int, fs: float) -> tuple[float, float]:
+    alpha = 1.0 - 2.0 ** (-int(shift))
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"Invalid alpha for shift {shift}: {alpha}")
+    tau_ms = -1000.0 / (float(fs) * math.log(alpha))
+    return alpha, tau_ms
 
 
 def evaluate_one(
@@ -127,8 +137,16 @@ def evaluate_one(
     torch.set_num_threads(max(1, int(threads)))
     device = torch.device(device_name)
     data = exp02.prepare_data(repo_root)
-    model = _load_checkpoint_model(repo_root, data, spec, device)
-    loaders = exp02.make_loaders(data, spec.exp02_spec(), batch_size or exp02.BATCH_SIZE, False)
+    effective_batch_size = batch_size or exp02.BATCH_SIZE
+    model = _load_checkpoint_model(
+        repo_root,
+        data,
+        spec,
+        device_name=device_name,
+        batch_size=effective_batch_size,
+        threads=threads,
+    )
+    loaders = exp02.make_loaders(data, spec.exp02_spec(), effective_batch_size, False)
     loader = loaders["test"]
 
     final_shifts = tuple(int(value) for value in exp02.DIRECT_ARCHITECTURES[spec.architecture][-1])
@@ -146,10 +164,10 @@ def evaluate_one(
         }
         for shift, _, _ in slices
     }
+    n_samples = 0
 
     with torch.no_grad():
-        for X, y, lengths in loader:
-            del y
+        for X, _, lengths in loader:
             X = X.to(device)
             lengths = lengths.to(device)
             rollout = exp02.endpoint_rollout_input(X, lengths, data.fs)
@@ -159,21 +177,24 @@ def evaluate_one(
                 raise TypeError("Expected hidden_spikes tuple")
             final_hidden = hidden[-1]
             n_steps = final_hidden.shape[1]
-            t = torch.arange(n_steps, device=device).unsqueeze(0)
-            valid_mask = t < lengths.unsqueeze(1)
+            valid_mask = exp02.exp01.exp50.valid_mask(lengths, n_steps)
             stage_masks = exp02.tail_stage_masks(lengths, n_steps, data.fs)
 
             for shift, start, stop in slices:
+                selected = final_hidden[:, :, start:stop]
                 for name, mask in (
                     ("valid", valid_mask),
                     ("stage1", stage_masks[0]),
                     ("stage2", stage_masks[1]),
                     ("stage3", stage_masks[2]),
                 ):
-                    selected = final_hidden[:, :, start:stop]
                     mask_f = mask.to(selected.dtype).unsqueeze(-1)
                     accum[shift][f"{name}_spikes"] += float((selected * mask_f).sum().item())
                     accum[shift][f"{name}_neuron_steps"] += float(mask.sum().item()) * float(stop - start)
+            n_samples += len(X)
+
+    if n_samples <= 0:
+        raise RuntimeError("Cannot evaluate an empty test loader")
 
     rows: list[dict[str, object]] = []
     b1, b2, b3 = exp02.tail_stage_boundaries(data.fs)
@@ -181,15 +202,18 @@ def evaluate_one(
         stats = accum[shift]
 
         def rate(name: str) -> float:
-            denom = stats[f"{name}_neuron_steps"] / float(data.fs)
-            return stats[f"{name}_spikes"] / denom if denom > 0 else float("nan")
+            neuron_seconds = stats[f"{name}_neuron_steps"] / float(data.fs)
+            return stats[f"{name}_spikes"] / neuron_seconds if neuron_seconds > 0 else float("nan")
 
         valid_rate = rate("valid")
         stage_rates = [rate(f"stage{index}") for index in (1, 2, 3)]
         tail_spikes = sum(stats[f"stage{index}_spikes"] for index in (1, 2, 3))
         tail_neuron_steps = sum(stats[f"stage{index}_neuron_steps"] for index in (1, 2, 3))
-        tail_rate = tail_spikes / (tail_neuron_steps / float(data.fs)) if tail_neuron_steps > 0 else float("nan")
+        tail_neuron_seconds = tail_neuron_steps / float(data.fs)
+        tail_rate = tail_spikes / tail_neuron_seconds if tail_neuron_seconds > 0 else float("nan")
         neuron_count = stop - start
+        alpha, tau_syn_ms = _alpha_and_tau_ms(shift, data.fs)
+
         rows.append(
             {
                 "architecture": spec.architecture,
@@ -197,10 +221,13 @@ def evaluate_one(
                 "profile": spec.profile,
                 "seed": spec.seed,
                 "shift": shift,
+                "alpha": alpha,
+                "tau_syn_ms": tau_syn_ms,
                 "tau_group": "long" if shift >= LONG_SHIFT_MIN else "short_mid",
                 "neuron_start": start,
                 "neuron_stop": stop,
                 "neuron_count": neuron_count,
+                "n_test_samples": n_samples,
                 "fs_hz": float(data.fs),
                 "tail_stage1_steps": b1,
                 "tail_stage2_steps": b2 - b1,
@@ -210,11 +237,11 @@ def evaluate_one(
                 "tail_stage2_firing_rate_hz": stage_rates[1],
                 "tail_stage3_firing_rate_hz": stage_rates[2],
                 "tail_firing_rate_hz": tail_rate,
-                "valid_spikes_per_neuron": stats["valid_spikes"] / neuron_count,
-                "tail_stage1_spikes_per_neuron": stats["stage1_spikes"] / neuron_count,
-                "tail_stage2_spikes_per_neuron": stats["stage2_spikes"] / neuron_count,
-                "tail_stage3_spikes_per_neuron": stats["stage3_spikes"] / neuron_count,
-                "tail_spikes_per_neuron": tail_spikes / neuron_count,
+                "valid_spikes_per_neuron_sample": stats["valid_spikes"] / (neuron_count * n_samples),
+                "tail_stage1_spikes_per_neuron_sample": stats["stage1_spikes"] / (neuron_count * n_samples),
+                "tail_stage2_spikes_per_neuron_sample": stats["stage2_spikes"] / (neuron_count * n_samples),
+                "tail_stage3_spikes_per_neuron_sample": stats["stage3_spikes"] / (neuron_count * n_samples),
+                "tail_spikes_per_neuron_sample": tail_spikes / (neuron_count * n_samples),
                 "tail_to_valid_rate_ratio": tail_rate / valid_rate if valid_rate > 0 else float("nan"),
             }
         )
@@ -236,18 +263,18 @@ def run_one(repo_root: Path, array_task_id: int, device: str, batch_size: int | 
 
 def _paired_vs_none(summary: pd.DataFrame) -> pd.DataFrame:
     baseline = summary[summary["profile"] == exp02.FROZEN_PROFILE].copy()
-    value_cols = [
-        "valid_firing_rate_hz",
-        "tail_stage1_firing_rate_hz",
-        "tail_stage2_firing_rate_hz",
-        "tail_stage3_firing_rate_hz",
-        "tail_firing_rate_hz",
-        "tail_to_valid_rate_ratio",
-    ]
-    base_cols = ["architecture", "objective", "seed", "shift"] + value_cols
-    baseline = baseline[base_cols].rename(columns={column: f"none_{column}" for column in value_cols})
-    merged = summary.merge(baseline, on=["architecture", "objective", "seed", "shift"], how="left", validate="many_to_one")
-    for column in value_cols:
+    base_cols = ["architecture", "objective", "seed", "shift"] + list(RATE_COLUMNS)
+    baseline = baseline[base_cols].rename(columns={column: f"none_{column}" for column in RATE_COLUMNS})
+    merged = summary.merge(
+        baseline,
+        on=["architecture", "objective", "seed", "shift"],
+        how="left",
+        validate="many_to_one",
+    )
+    if merged[[f"none_{column}" for column in RATE_COLUMNS]].isna().all(axis=1).any():
+        raise RuntimeError("Missing matched frozen Exp0.1 baseline for at least one per-shift row")
+
+    for column in RATE_COLUMNS:
         base = f"none_{column}"
         merged[f"delta_{column}_vs_none"] = merged[column] - merged[base]
         merged[f"pct_change_{column}_vs_none"] = np.where(
@@ -255,36 +282,78 @@ def _paired_vs_none(summary: pd.DataFrame) -> pd.DataFrame:
             100.0 * (merged[column] - merged[base]) / merged[base],
             np.nan,
         )
+
+    # Positive means tail firing was suppressed more strongly than valid-region firing.
+    valid_pct = merged["pct_change_valid_firing_rate_hz_vs_none"]
+    merged["tail_specific_suppression_pp"] = valid_pct - merged["pct_change_tail_firing_rate_hz_vs_none"]
+    for stage in (1, 2, 3):
+        merged[f"tail_stage{stage}_specific_suppression_pp"] = (
+            valid_pct - merged[f"pct_change_tail_stage{stage}_firing_rate_hz_vs_none"]
+        )
     return merged
+
+
+def _weighted_group_mean(frame: pd.DataFrame, columns: tuple[str, ...]) -> dict[str, float]:
+    weights = frame["neuron_count"].to_numpy(dtype=float)
+    result: dict[str, float] = {}
+    for column in columns:
+        values = frame[column].to_numpy(dtype=float)
+        finite = np.isfinite(values) & np.isfinite(weights) & (weights > 0)
+        result[column] = float(np.average(values[finite], weights=weights[finite])) if finite.any() else float("nan")
+    return result
 
 
 def _long_tau_summary(summary: pd.DataFrame) -> pd.DataFrame:
     long_rows = summary[summary["shift"] >= LONG_SHIFT_MIN].copy()
     if long_rows.empty:
         return pd.DataFrame()
+    rows: list[dict[str, object]] = []
     keys = ["architecture", "objective", "profile", "seed"]
-    numeric = [
-        "valid_firing_rate_hz",
-        "tail_stage1_firing_rate_hz",
-        "tail_stage2_firing_rate_hz",
-        "tail_stage3_firing_rate_hz",
-        "tail_firing_rate_hz",
-        "tail_to_valid_rate_ratio",
-    ]
-    pooled = long_rows.groupby(keys, as_index=False)[numeric].mean()
-    shifts = (
-        long_rows.groupby(keys)["shift"]
-        .apply(lambda values: ",".join(str(int(v)) for v in sorted(set(values))))
-        .reset_index(name="long_shifts")
+    for key, frame in long_rows.groupby(keys, sort=False):
+        row = dict(zip(keys, key, strict=True))
+        row["long_shifts"] = ",".join(str(int(v)) for v in sorted(frame["shift"].unique()))
+        row["long_neuron_count"] = int(frame["neuron_count"].sum())
+        row.update(_weighted_group_mean(frame, RATE_COLUMNS))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _paired_long_vs_none(long_summary: pd.DataFrame) -> pd.DataFrame:
+    baseline = long_summary[long_summary["profile"] == exp02.FROZEN_PROFILE].copy()
+    keys = ["architecture", "objective", "seed"]
+    baseline = baseline[keys + list(RATE_COLUMNS)].rename(
+        columns={column: f"none_{column}" for column in RATE_COLUMNS}
     )
-    pooled = pooled.merge(shifts, on=keys, how="left", validate="one_to_one")
-    return pooled
+    merged = long_summary.merge(baseline, on=keys, how="left", validate="many_to_one")
+    for column in RATE_COLUMNS:
+        base = f"none_{column}"
+        merged[f"delta_{column}_vs_none"] = merged[column] - merged[base]
+        merged[f"pct_change_{column}_vs_none"] = np.where(
+            merged[base].abs() > 0,
+            100.0 * (merged[column] - merged[base]) / merged[base],
+            np.nan,
+        )
+    merged["tail_specific_suppression_pp"] = (
+        merged["pct_change_valid_firing_rate_hz_vs_none"]
+        - merged["pct_change_tail_firing_rate_hz_vs_none"]
+    )
+    return merged
+
+
+def _comparison(summary: pd.DataFrame, group_cols: list[str]) -> pd.DataFrame:
+    comparison = summary.groupby(group_cols)[list(RATE_COLUMNS)].agg(["mean", "std"]).reset_index()
+    comparison.columns = [
+        "_".join(part for part in column if part) if isinstance(column, tuple) else column
+        for column in comparison.columns
+    ]
+    return comparison
 
 
 def finalize(repo_root: Path) -> None:
     specs = eval_specs()
+    root = analysis_root(repo_root)
     expected = {per_checkpoint_path(repo_root, spec) for spec in specs}
-    existing = set((analysis_root(repo_root) / "per_checkpoint").glob("*.csv"))
+    existing = set((root / "per_checkpoint").glob("*.csv"))
     missing = sorted(str(path) for path in expected - existing)
     extras = sorted(str(path) for path in existing - expected)
     if missing or extras:
@@ -296,30 +365,32 @@ def finalize(repo_root: Path) -> None:
     if summary.duplicated(key_cols).any():
         raise RuntimeError("Duplicate architecture/objective/profile/seed/shift rows detected")
 
-    out = analysis_root(repo_root)
-    out.mkdir(parents=True, exist_ok=True)
-    summary.to_csv(out / "shift_fire_rate_summary.csv", index=False)
-
-    metric_cols = [
-        "valid_firing_rate_hz",
-        "tail_stage1_firing_rate_hz",
-        "tail_stage2_firing_rate_hz",
-        "tail_stage3_firing_rate_hz",
-        "tail_firing_rate_hz",
-        "tail_to_valid_rate_ratio",
-    ]
-    group_cols = ["architecture", "objective", "profile", "shift"]
-    comparison = summary.groupby(group_cols)[metric_cols].agg(["mean", "std"]).reset_index()
-    comparison.columns = ["_".join(part for part in column if part) if isinstance(column, tuple) else column for column in comparison.columns]
-    comparison.to_csv(out / "shift_fire_rate_comparison.csv", index=False)
+    root.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(root / "shift_fire_rate_summary.csv", index=False)
+    _comparison(summary, ["architecture", "objective", "profile", "shift"]).to_csv(
+        root / "shift_fire_rate_comparison.csv", index=False
+    )
 
     paired = _paired_vs_none(summary)
-    paired.to_csv(out / "shift_fire_rate_vs_none.csv", index=False)
+    paired.to_csv(root / "shift_fire_rate_vs_none.csv", index=False)
 
     long_summary = _long_tau_summary(summary)
     if not long_summary.empty:
-        long_summary.to_csv(out / "shift_fire_rate_long_tau_summary.csv", index=False)
+        long_summary.to_csv(root / "shift_fire_rate_long_tau_summary.csv", index=False)
+        _comparison(long_summary, ["architecture", "objective", "profile"]).to_csv(
+            root / "shift_fire_rate_long_tau_comparison.csv", index=False
+        )
+        _paired_long_vs_none(long_summary).to_csv(root / "shift_fire_rate_long_tau_vs_none.csv", index=False)
 
+    fs_values = summary["fs_hz"].dropna().unique()
+    if len(fs_values) != 1:
+        raise RuntimeError(f"Expected one sampling rate, got {fs_values}")
+    fs = float(fs_values[0])
+    stage_steps = [
+        int(summary["tail_stage1_steps"].iloc[0]),
+        int(summary["tail_stage2_steps"].iloc[0]),
+        int(summary["tail_stage3_steps"].iloc[0]),
+    ]
     manifest = {
         "analysis_id": ANALYSIS_ID,
         "analysis_version": ANALYSIS_VERSION,
@@ -331,19 +402,25 @@ def finalize(repo_root: Path) -> None:
         "objectives": list(exp02.OBJECTIVES),
         "seeds": list(exp02.SEEDS),
         "long_shift_min": LONG_SHIFT_MIN,
-        "long_group_definition": "final-hidden configured shifts >= 5, while all per-shift rows remain available",
+        "long_group_definition": "configured final-hidden shifts >= 5; all per-shift rows remain primary",
         "firing_rate_denominator": "spike count / neuron-seconds",
-        "tail_stage_boundaries_steps": list(exp02.tail_stage_boundaries(exp02.exp01.exp3.SAMPLE_FREQ if hasattr(exp02.exp01.exp3, 'SAMPLE_FREQ') else 64.0)),
+        "fs_hz": fs,
+        "tail_stage_lengths_steps": stage_steps,
         "tail_stage_boundaries_ms_requested": list(exp02.TAIL_STAGE_MS),
         "post_endpoint_input": "explicit zero input via Exp0.2 endpoint_rollout_input",
         "training": "none; checkpoint-only post-evaluation",
+        "tail_specific_suppression_pp": "pct_change_valid_FR_vs_none - pct_change_tail_FR_vs_none; positive means preferential tail suppression",
     }
-    (out / "shift_fire_rate_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    print(f"[exp0.2-shift-fr] finalized {len(summary)} per-shift rows from {len(specs)} checkpoints -> {out}")
+    (root / "shift_fire_rate_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    print(f"[exp0.2-shift-fr] finalized {len(summary)} per-shift rows from {len(specs)} checkpoints -> {root}")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Exp0.2 shift-resolved final-hidden firing-rate post-evaluation")
+    parser = argparse.ArgumentParser(
+        description="Exp0.2 shift-resolved final-hidden firing-rate post-evaluation"
+    )
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--batch-size", type=int, default=None)
