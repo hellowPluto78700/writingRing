@@ -41,11 +41,14 @@ def test_spike_stats_uses_neuron_seconds() -> None:
 
 
 def test_shift_tau_mapping_matches_expected_order() -> None:
-    alpha4, tau4 = analysis._alpha_and_tau_ms(4, 64.0)
+    alpha5, tau5 = analysis._alpha_and_tau_ms(5, 64.0)
+    alpha6, tau6 = analysis._alpha_and_tau_ms(6, 64.0)
     alpha7, tau7 = analysis._alpha_and_tau_ms(7, 64.0)
-    assert 0 < alpha4 < alpha7 < 1
-    assert tau4 < tau7
-    assert np.isclose(alpha7, 1.0 - 2.0**-7)
+    assert 0 < alpha5 < alpha6 < alpha7 < 1
+    assert tau5 < tau6 < tau7
+    assert tau5 < 600.0
+    assert tau6 > 900.0
+    assert tau7 > 1900.0
 
 
 def test_paired_metric_positive_selectivity_means_tail_more_suppressed() -> None:
@@ -72,9 +75,9 @@ def test_paired_metric_positive_selectivity_means_tail_more_suppressed() -> None
     assert np.isclose(tail_row["tail_specific_suppression_pp"], 30.0)
 
 
-def test_long_tau_summary_only_uses_shift_ge_5_and_weights_neurons() -> None:
+def test_long_tau_summary_uses_s6_s7_only_and_weights_neurons() -> None:
     rows = []
-    for shift, value, neurons in [(4, 100.0, 10), (5, 5.0, 1), (6, 7.0, 3)]:
+    for shift, value, neurons in [(5, 100.0, 10), (6, 5.0, 1), (7, 7.0, 3)]:
         rows.append(
             {
                 "architecture": "x",
@@ -93,7 +96,7 @@ def test_long_tau_summary_only_uses_shift_ge_5_and_weights_neurons() -> None:
         )
     out = analysis._long_tau_summary(pd.DataFrame(rows))
     assert len(out) == 1
-    assert out.iloc[0]["long_shifts"] == "5,6"
+    assert out.iloc[0]["long_shifts"] == "6,7"
     assert out.iloc[0]["long_neuron_count"] == 4
     assert np.isclose(out.iloc[0]["tail_firing_rate_hz"], 6.5)
 
