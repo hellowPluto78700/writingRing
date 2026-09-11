@@ -1,0 +1,155 @@
+{
+  "aggregation_policy": "per-run tasks train then evaluate the selected checkpoint; finalizer concatenates only; notebook performs validation-only profile selection, paired effects, organization-gap diagnostics, bottleneck analysis, and plots",
+  "checkpoint_selection": "per-run max validation native BA; tie-break validation native CE",
+  "expected_logical_ablation_rows": 420,
+  "expected_training_runs": 60,
+  "experiment_id": "experiment_5_2_2_frozen_local_multitau_syn",
+  "files": {
+    "ablation_runs": "ablation_runs.csv",
+    "activity": "activity.csv",
+    "histories": "histories.csv",
+    "local_reference": "local_reference.csv",
+    "probes": "probes.csv",
+    "runs": "runs.csv",
+    "threshold_activity": "threshold_activity.csv"
+  },
+  "interventions": [
+    "normal",
+    "resetall250",
+    "reset234",
+    "reset2345",
+    "reset23456",
+    "reset67",
+    "reset567"
+  ],
+  "local_reference_probes": [
+    "local_whole_count",
+    "local_fixed250_ordered",
+    "local_relative10_ordered"
+  ],
+  "output_synaptic_state": false,
+  "probes": [
+    "l3_whole_count",
+    "l3_fixed250_ordered",
+    "l3_relative10_ordered"
+  ],
+  "profile_group_counts": {
+    "s2": [
+      128
+    ],
+    "s234567": [
+      22,
+      21,
+      21,
+      21,
+      21,
+      22
+    ],
+    "s3": [
+      128
+    ],
+    "s4": [
+      128
+    ],
+    "s4567": [
+      32,
+      32,
+      32,
+      32
+    ],
+    "s5": [
+      128
+    ],
+    "s567": [
+      43,
+      42,
+      43
+    ],
+    "s6": [
+      128
+    ],
+    "s67": [
+      64,
+      64
+    ],
+    "s7": [
+      128
+    ]
+  },
+  "profiles": {
+    "s2": [
+      2
+    ],
+    "s234567": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "s3": [
+      3
+    ],
+    "s4": [
+      4
+    ],
+    "s4567": [
+      4,
+      5,
+      6,
+      7
+    ],
+    "s5": [
+      5
+    ],
+    "s567": [
+      5,
+      6,
+      7
+    ],
+    "s6": [
+      6
+    ],
+    "s67": [
+      6,
+      7
+    ],
+    "s7": [
+      7
+    ]
+  },
+  "protocol_version": "frozen_exp51_l2_multitau_syn_wholecount_v1",
+  "readouts": [
+    "hidden_count_linear",
+    "output_lif"
+  ],
+  "reset_contract": "inference only; clear selected L3 synaptic I and membrane U before each 250 ms boundary; output LIF state is never reset",
+  "reset_period_ms": 250.0,
+  "seeds": [
+    11,
+    23,
+    101
+  ],
+  "source_cache_policy": "reuse/reproduce the exact Exp5.1 frozen Exp3 L2 caches; never retrain L1/L2 inside a decoder run",
+  "source_experiment_id": "experiment_5_1_boundary_free_temporal_decoder",
+  "source_protocol_version": "frozen_local_leaky_interface_rsnn_v1",
+  "tau_mem_l3_ms": 22.54,
+  "tau_mem_output_ms": 22.54,
+  "threshold_operating_point_diagnostics": {
+    "diagnostic_version": "threshold_operating_point_v1",
+    "file": "threshold_activity.csv",
+    "grouping": "overall and each tau_syn/shift group; emphasize shifts 6 and 7",
+    "metrics": [
+      "firing_rate_hz",
+      "spike_probability",
+      "mean_abs_input_current",
+      "mean_abs_pre_reset_membrane",
+      "pre_reset_above_threshold_probability"
+    ],
+    "strict_threshold_probability": "P(U^- > theta)",
+    "threshold_fixed_not_swept": 0.5,
+    "u_minus_definition": "MacroMultiSpikeLIF pre-reset membrane before threshold/subtractive reset"
+  },
+  "trainable_parameters": "W3 and Wo only"
+}
