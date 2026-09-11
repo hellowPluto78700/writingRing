@@ -24,4 +24,4 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
-python -u -m scripts.experiment_0_2_endpoint_tail_regularization run-one --array-task-id "$TASK_ID" --device cpu --threads 1
+python -u -m scripts.experiment_0_2_endpoint_tail_regularization --device cpu --threads 1 run-one --array-task-id "$TASK_ID"
