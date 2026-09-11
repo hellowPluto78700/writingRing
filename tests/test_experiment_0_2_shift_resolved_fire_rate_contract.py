@@ -15,10 +15,11 @@ def test_eval_specs_cover_all_90_checkpoints_once() -> None:
     assert {spec.profile for spec in specs} == {"none", "a1", "a1_p2", "tail", "a1_tail"}
 
 
-def test_shift_slices_span_width_and_match_configured_groups() -> None:
+def test_shift_slices_span_width_and_match_exp02_helper() -> None:
     for architecture, layers in exp02.DIRECT_ARCHITECTURES.items():
         shifts = tuple(layers[-1])
         slices = analysis._shift_slices(shifts, exp02.HIDDEN_WIDTH)
+        assert slices == exp02._shift_slices(exp02.HIDDEN_WIDTH, shifts)
         assert [shift for shift, _, _ in slices] == list(shifts)
         assert slices[0][1] == 0
         assert slices[-1][2] == exp02.HIDDEN_WIDTH
@@ -32,16 +33,48 @@ def test_spike_stats_uses_neuron_seconds() -> None:
     rate, spikes_per_neuron, timestep_count, neuron_count = analysis._spike_stats(
         spikes, mask, 2, 4, fs=2.0
     )
-    # 8 spikes / ((4 valid sample-steps * 2 neurons) / 2 Hz) = 2 Hz.
+    # 8 spikes / ((4 masked sample-steps * 2 neurons) / 2 Hz) = 2 Hz.
     assert rate == 2.0
     assert spikes_per_neuron == 4.0
     assert timestep_count == 4
     assert neuron_count == 2
 
 
-def test_long_tau_summary_only_uses_shift_ge_5() -> None:
+def test_shift_tau_mapping_matches_expected_order() -> None:
+    alpha4, tau4 = analysis._alpha_and_tau_ms(4, 64.0)
+    alpha7, tau7 = analysis._alpha_and_tau_ms(7, 64.0)
+    assert 0 < alpha4 < alpha7 < 1
+    assert tau4 < tau7
+    assert np.isclose(alpha7, 1.0 - 2.0**-7)
+
+
+def test_paired_metric_positive_selectivity_means_tail_more_suppressed() -> None:
     rows = []
-    for shift, value in [(4, 100.0), (5, 5.0), (6, 7.0)]:
+    for profile, valid_rate, tail_rate in [("none", 10.0, 20.0), ("tail", 8.0, 10.0)]:
+        rows.append(
+            {
+                "architecture": "x",
+                "objective": "whole_count_ce",
+                "profile": profile,
+                "seed": 11,
+                "shift": 7,
+                "valid_firing_rate_hz": valid_rate,
+                "tail_stage1_firing_rate_hz": tail_rate,
+                "tail_stage2_firing_rate_hz": tail_rate,
+                "tail_stage3_firing_rate_hz": tail_rate,
+                "tail_firing_rate_hz": tail_rate,
+                "tail_to_valid_rate_ratio": tail_rate / valid_rate,
+            }
+        )
+    paired = analysis._paired_vs_none(pd.DataFrame(rows))
+    tail_row = paired[paired["profile"] == "tail"].iloc[0]
+    # valid -20%, tail -50% => +30 percentage points preferential tail suppression.
+    assert np.isclose(tail_row["tail_specific_suppression_pp"], 30.0)
+
+
+def test_long_tau_summary_only_uses_shift_ge_5_and_weights_neurons() -> None:
+    rows = []
+    for shift, value, neurons in [(4, 100.0, 10), (5, 5.0, 1), (6, 7.0, 3)]:
         rows.append(
             {
                 "architecture": "x",
@@ -49,6 +82,7 @@ def test_long_tau_summary_only_uses_shift_ge_5() -> None:
                 "profile": "tail",
                 "seed": 11,
                 "shift": shift,
+                "neuron_count": neurons,
                 "valid_firing_rate_hz": value,
                 "tail_stage1_firing_rate_hz": value,
                 "tail_stage2_firing_rate_hz": value,
@@ -60,7 +94,8 @@ def test_long_tau_summary_only_uses_shift_ge_5() -> None:
     out = analysis._long_tau_summary(pd.DataFrame(rows))
     assert len(out) == 1
     assert out.iloc[0]["long_shifts"] == "5,6"
-    assert np.isclose(out.iloc[0]["tail_firing_rate_hz"], 6.0)
+    assert out.iloc[0]["long_neuron_count"] == 4
+    assert np.isclose(out.iloc[0]["tail_firing_rate_hz"], 6.5)
 
 
 def test_notebook_is_analysis_only() -> None:
@@ -77,6 +112,7 @@ def test_slurm_array_is_one_core_and_90_tasks() -> None:
     assert "OMP_NUM_THREADS=1" in text
     assert "MKL_NUM_THREADS=1" in text
     assert "OPENBLAS_NUM_THREADS=1" in text
+    assert "NUMEXPR_NUM_THREADS=1" in text
 
 
 def test_finalizer_is_dependency_only_aggregation() -> None:
