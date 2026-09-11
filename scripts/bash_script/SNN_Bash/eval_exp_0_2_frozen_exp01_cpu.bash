@@ -22,4 +22,4 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
-python -u -m scripts.experiment_0_2_endpoint_tail_regularization eval-frozen --device cpu --threads 1
+python -u -m scripts.experiment_0_2_endpoint_tail_regularization --device cpu --threads 1 eval-frozen
