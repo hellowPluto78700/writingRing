@@ -18,6 +18,7 @@ FINALIZER = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash" / "finalize_exp_5
 SUBMIT = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash" / "submit_exp_5_2_2_cpu.bash"
 README = REPO_ROOT / "scripts" / "experiment_5_2_2" / "README.md"
 NOTEBOOK = REPO_ROOT / "notebooks" / "experiment_5_2_2_frozen_local_multitau_syn.ipynb"
+SINGLE_SEGMENT_NOTEBOOK = REPO_ROOT / "notebooks" / "experiment_5_2_2_single_segment_dynamics.ipynb"
 
 
 def _fake_data() -> SimpleNamespace:
@@ -203,6 +204,23 @@ def test_notebook_is_analysis_only_and_contains_required_diagnostics() -> None:
         "prepare-local",
     ):
         assert forbidden not in joined
+
+
+def test_single_segment_notebook_detaches_sanity_forward_before_numpy() -> None:
+    notebook = json.loads(SINGLE_SEGMENT_NOTEBOOK.read_text(encoding="utf-8"))
+    assert notebook["nbformat"] == 4
+    sources: list[str] = []
+    for index, cell in enumerate(notebook["cells"]):
+        source = "".join(cell.get("source", []))
+        sources.append(source)
+        if cell.get("cell_type") == "code":
+            compile(source, f"exp522-single-segment-cell-{index}", "exec")
+    joined = "\n".join(sources)
+    assert "expected = model.forward_trajectory" in joined
+    assert "with torch.no_grad():" in joined
+    for key in ("hidden_spikes", "hidden_synaptic", "hidden_membranes"):
+        assert f"expected['{key}'].squeeze(0).detach().cpu().numpy()" in joined
+    assert "expected['hidden_spikes'].squeeze(0).cpu().numpy()" not in joined
 
 
 def test_readme_documents_full_training_and_intervention_contract() -> None:
