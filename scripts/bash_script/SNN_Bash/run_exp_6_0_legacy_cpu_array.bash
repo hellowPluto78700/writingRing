@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp6_0_finalize
+#SBATCH --job-name=exp6_0_legacy
+#SBATCH --array=0-26%27
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=6G
-#SBATCH --time=00:45:00
-#SBATCH --output=exp6_0_finalize_%j.out
-#SBATCH --error=exp6_0_finalize_%j.err
+#SBATCH --mem=12G
+#SBATCH --time=48:00:00
+#SBATCH --output=exp6_0_legacy_%A_%a.out
+#SBATCH --error=exp6_0_legacy_%A_%a.err
 
 set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$PWD}"
@@ -22,4 +23,10 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
-python -u -m scripts.experiment_6_0_synapse_update_comparison finalize
+TASK_ID="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
+python -u -m scripts.experiment_6_0_legacy_synapse \
+  --device cpu \
+  --threads 1 \
+  --epochs 100 \
+  run-one \
+  --array-task-id "$TASK_ID"

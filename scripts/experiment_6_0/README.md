@@ -4,7 +4,17 @@
 
 Exp6.0 tests whether a causal single-hidden-layer SNN can turn raw local spike evidence into useful history-conditioned / phase-aware class evidence, without giving the network an explicit phase index.
 
-The reference is the existing raw-spike `Fixed250 + Linear` solution, where ordered 250-ms bins make temporal position directly accessible to a linear classifier.
+The experiment now includes a paired synaptic-update ablation. For every objective, hidden membrane shift, and training seed, two models are trained with identical data, initialization stream, loader order, architecture, and output dynamics. The only changed equation is the hidden synaptic input injection:
+
+```text
+normalized/unit-DC:
+I_t = alpha * I_{t-1} + (1 - alpha) * W x_t
+
+legacy/unnormalized:
+I_t = alpha * I_{t-1} + W x_t
+```
+
+The external reference remains raw-spike `Fixed250 + Linear`, where ordered 250-ms bins make temporal position directly accessible to a linear classifier.
 
 ## Data and split contract
 
@@ -38,14 +48,25 @@ shift_tau_syn = 5 : 43 neurons
 shift_tau_syn = 6 : 42 neurons
 ```
 
-The hidden synaptic current uses the normalized low-pass update
+For both synaptic-update modes,
 
 ```text
-I_t = alpha * I_{t-1} + (1 - alpha) * W x_t
 alpha = 1 - 2^(-shift_tau_syn)
 ```
 
-so long synaptic time constants change temporal horizon without the `1/(1-alpha)` DC amplification of the previous unnormalized update.
+The normalized condition uses
+
+```text
+I_t = alpha * I_{t-1} + (1 - alpha) * W x_t
+```
+
+so the low-pass filter has unit DC gain. The paired legacy control uses
+
+```text
+I_t = alpha * I_{t-1} + W x_t
+```
+
+which preserves the older `1/(1-alpha)` steady-state amplification. No other model component is changed between the two modes.
 
 All 128 hidden neurons in one run share one membrane shift. Exp6.0 sweeps
 
@@ -53,7 +74,34 @@ All 128 hidden neurons in one run share one membrane shift. Exp6.0 sweeps
 shift_tau_mem in {1, 2, 3}
 ```
 
-The output-neuron dynamics are fixed across the sweep. Hidden and output communication are strictly binary (`cap=1`).
+The output-neuron dynamics are fixed across the sweep and across synaptic-update modes. Hidden and output communication are strictly binary (`cap=1`).
+
+## Strict pairing contract
+
+For a matched tuple
+
+```text
+(objective, hidden_mem_shift, seed)
+```
+
+normalized and legacy runs reuse the same:
+
+- user split;
+- raw input tensors and valid lengths;
+- model initialization random stream;
+- training-loader order;
+- optimizer and learning rate;
+- hidden/output widths and thresholds;
+- `shift_tau_syn={4,5,6}` partition;
+- hidden `shift_tau_mem`;
+- fixed output-neuron dynamics;
+- binary spike cap;
+- objective definition and auxiliary-loss weight;
+- epoch budget (100);
+- checkpoint-selection rule;
+- 256-timestep visualization sample.
+
+The hidden synaptic-current update is the only intended difference.
 
 ## Main readout and task loss
 
@@ -71,7 +119,7 @@ The best checkpoint is chosen by validation Balanced Accuracy, with lower valida
 L = L_WC
 ```
 
-This is the clean baseline asking whether sequence-level supervision alone makes the heterogeneous hidden dynamics discover useful temporal context.
+This asks whether sequence-level supervision alone makes the heterogeneous hidden dynamics discover useful temporal context.
 
 ## Objective 2 — WholeCount + order-HCE
 
@@ -94,7 +142,7 @@ with these invariants:
 - padding is unchanged;
 - the reversed branch receives no classification CE.
 
-For original and reversed order, sum/average the hidden-to-output pre-output class evidence over the valid region and compute the correct-class margin
+For original and reversed order, aggregate hidden-to-output pre-output class evidence over the valid region and compute
 
 ```text
 m(E,y) = E_y - logsumexp(E_not_y)
@@ -133,18 +181,37 @@ L_CG = softplus(-mean(G5)) + softplus(-mean(G6))
 L = L_WC + L_CG
 ```
 
-Both auxiliary weights are fixed to 1.0 in this first protocol; they are not swept.
+Both auxiliary weights remain fixed to 1.0.
 
 ## Experiment matrix
 
 ```text
-3 objectives
+2 synaptic-current update modes
+x 3 objectives
 x 3 hidden membrane shifts
 x 3 training seeds
-= 27 independent SNN runs
+= 54 independent SNN runs
 ```
 
 Every run trains for exactly 100 epochs.
+
+The normalized 27-run grid is implemented by
+
+```text
+scripts/experiment_6_0_multiscale_phase_evidence.py
+```
+
+The paired legacy 27-run grid is implemented by
+
+```text
+scripts/experiment_6_0_legacy_synapse.py
+```
+
+The combined artifact-only finalizer is
+
+```text
+scripts/experiment_6_0_synapse_update_comparison.py
+```
 
 ## Fixed250 + Linear reference
 
@@ -157,8 +224,6 @@ Raw64
 -> train-only StandardScaler
 -> validation-selected LogisticRegression C
 ```
-
-This is the explicit-temporal-position reference for the causal SNN comparison.
 
 ## Per-epoch artifacts
 
@@ -180,7 +245,7 @@ Each run also writes:
 
 ## 256-timestep spike-activity diagnostic
 
-All 27 runs use the same deterministic validation segment: the first validation sample whose valid length is closest to the validation median. The sample is selected without inspecting model results.
+All 54 runs use the same deterministic validation segment: the first validation sample whose valid length is closest to the validation median. The sample is selected without inspecting model results.
 
 Using the best-validation checkpoint, every run performs a 256-timestep inference with zero raw input after the valid endpoint and saves:
 
@@ -200,11 +265,18 @@ Exp6.0 avoids shared-worker writes:
 
 ```text
 1 one-core Fixed250 baseline job
-27 independent one-core SNN array tasks
-1 one-core artifact-only finalizer
+27 independent one-core normalized-synapse SNN tasks
+27 independent one-core legacy-synapse SNN tasks
+1 one-core artifact-only comparison finalizer
 ```
 
-Every SNN array task owns its checkpoint/history/evaluation/activity paths. No worker appends to a shared CSV. The finalizer runs only after the baseline and all 27 SNN tasks succeed; it reads existing artifacts and produces finalized tables/plots.
+The normalized and legacy arrays may run in parallel. Every SNN task owns its checkpoint/history/evaluation/activity paths. Legacy artifacts are isolated under
+
+```text
+legacy_unnormalized_synapse/
+```
+
+so the two arrays never write the same worker artifact. The finalizer runs only after the baseline and both 27-task arrays succeed.
 
 CPU math-library thread counts are fixed to one to avoid hidden oversubscription.
 
@@ -214,17 +286,26 @@ CPU math-library thread counts are fixed to one to avoid hidden oversubscription
 notebooks/artifacts/
   experiment_6_0_multiscale_phase_evidence/
     single_hidden_multiscale_phase_evidence_v1/
-      checkpoints/
+      checkpoints/                       # normalized
       histories/
       evaluations/
       learning_curves/
       loss_components/
       activities/
       rasters/
+      legacy_unnormalized_synapse/
+        checkpoints/
+        histories/
+        evaluations/
+        learning_curves/
+        loss_components/
+        activities/
+        rasters/
       summary_plots/
       baseline_fixed250_linear.json
-      runs.csv
-      summary.csv
+      runs.csv                            # all 54 runs
+      summary.csv                         # grouped by synapse mode/objective/mem shift
+      paired_synapse_update_deltas.csv   # matched legacy - normalized deltas
       history_index.csv
       visualization_sample.json
       manifest.json
@@ -232,9 +313,10 @@ notebooks/artifacts/
 
 Summary plots include:
 
-- test BA vs hidden membrane shift, mean +/- SD over the three seeds, with the Fixed250+Linear reference;
-- validation BA vs hidden membrane shift;
-- `s4/s5/s6` valid-region firing-rate summaries.
+- normalized and legacy test BA vs hidden membrane shift, mean +/- SD over three seeds, with the Fixed250+Linear reference;
+- normalized and legacy validation BA vs hidden membrane shift;
+- `s4/s5/s6` valid-region firing-rate summaries for both update rules;
+- paired test-BA delta (`legacy - normalized`) vs hidden membrane shift.
 
 ## Analysis notebook
 
@@ -242,7 +324,7 @@ Summary plots include:
 notebooks/experiment_6_0_multiscale_phase_evidence.ipynb
 ```
 
-The notebook is analysis-only. It reads finalized artifacts and never trains models or mutates run outputs.
+The notebook is analysis-only. It reads finalized combined artifacts and never trains models or mutates worker outputs.
 
 ## Submit on Unity
 
@@ -252,10 +334,11 @@ From the repository root:
 bash scripts/bash_script/SNN_Bash/submit_exp_6_0_cpu.bash
 ```
 
-To inspect the 27 array identities without training:
+To inspect the paired run identities without training:
 
 ```bash
 python -m scripts.experiment_6_0_multiscale_phase_evidence list-runs
+python -m scripts.experiment_6_0_legacy_synapse list-runs
 ```
 
 ## Validation
