@@ -287,6 +287,112 @@ A positive organization gap means the intervention damages count-accessible temp
 
 The notebook also compares cumulative fast/mid resets (`234`, `2345`, `23456`) with long-state resets (`67`, `567`), separates L3 representation quality, trained-`Wo` utilization, and output-LIF compression, and reports the fixed-threshold operating-point metrics with special attention to shifts 6 and 7.
 
+## Single-segment dynamics diagnostic
+
+A checkpoint-only single-segment dynamics diagnostic is provided by:
+
+```text
+scripts/experiment_5_2_2_single_segment_dynamics.py
+```
+
+It never retrains the model, never updates `W3`/`Wo`, and never extends the segment beyond its original valid endpoint. It loads one already-selected Exp5.2.2 checkpoint, runs the same test segment under `normal` and one reset intervention, and records the exact timestep-level L3 dynamics.
+
+The default diagnostic targets the most informative current comparison:
+
+```text
+profile:       s234567
+readout:       hidden_count_linear
+seed:          11
+split:         test
+intervention:  reset567
+selection:     auto
+```
+
+`--selection auto` searches the requested split with this priority:
+
+```text
+normal wrong -> reset correct
+prediction changed
+both wrong
+both correct
+first sample
+```
+
+An exact segment can instead be selected with `--sample-index N`.
+
+Run from the repository root after the Exp5.2.2 checkpoints and frozen Exp5.1 L2 cache exist:
+
+```bash
+python -u -m scripts.experiment_5_2_2_single_segment_dynamics \
+  --profile s234567 \
+  --readout hidden_count_linear \
+  --seed 11 \
+  --split test \
+  --intervention reset567 \
+  --selection auto \
+  --device cpu \
+  --threads 1
+```
+
+For a known sample:
+
+```bash
+python -u -m scripts.experiment_5_2_2_single_segment_dynamics \
+  --profile s234567 \
+  --readout hidden_count_linear \
+  --seed 11 \
+  --split test \
+  --intervention reset567 \
+  --sample-index 0
+```
+
+For `output_lif`, change only `--readout output_lif`; the readout figure then switches from cumulative shared-Linear class evidence to native output-neuron spike raster, output membrane traces, and cumulative output spike counts.
+
+Artifacts are written under:
+
+```text
+notebooks/artifacts/experiment_5_2_2_frozen_local_multitau_syn/
+  frozen_exp51_l2_multitau_syn_wholecount_v1/
+    single_segment_dynamics/
+      <profile>__<readout>__seed<seed>/
+        <split>_sampleXXXX__normal_vs_<intervention>/
+```
+
+Each diagnostic directory contains:
+
+```text
+01_l3_spike_raster.png
+02_l3_synaptic_state_heatmap.png
+03_l3_pre_reset_membrane_heatmap.png
+04_l3_post_reset_membrane_heatmap.png
+05_l3_group_firing.png
+06_readout_activity.png
+trace_normal.npz
+trace_<intervention>.npz
+neuron_metrics.csv
+group_metrics.csv
+summary.json
+```
+
+The L3 raster uses one row per neuron with black points for emitted spikes. Neurons are ordered by the profile's fixed shift-group allocation, so the `s234567` plot is visually partitioned into `s2|s3|s4|s5|s6|s7`.
+
+The state heatmaps retain the signed synaptic current and membrane values; they do not replace the states with absolute magnitudes. This is required to distinguish large positive backlog from large negative state.
+
+`neuron_metrics.csv` and `group_metrics.csv` summarize firing-run structure and backlog-related diagnostics, including:
+
+```text
+first_spike_timestep
+mean_run_length
+max_run_length
+fraction_spikes_in_runs_ge4
+fraction_spikes_in_runs_ge8
+post_reset_above_threshold_given_spike
+endpoint_synaptic
+endpoint_post_reset_membrane
+```
+
+These are descriptive mechanism diagnostics. BA remains the main dataset-level Exp5.2.2 evaluation and is not recomputed as the primary output of this single-segment visualization.
+
 ## Multi-CPU execution
 
 Exp5.2.2 follows `AGENTS.md` task-level multi-CPU rules:
