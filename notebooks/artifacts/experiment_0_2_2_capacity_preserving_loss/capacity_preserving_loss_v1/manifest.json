@@ -1,0 +1,73 @@
+{
+  "architectures": [
+    "mid_long",
+    "short_mid_long"
+  ],
+  "calibration_batches": 5,
+  "capacity_eta": 0.7,
+  "conditions": [
+    "wc_only",
+    "sat",
+    "relative_tail",
+    "sat_relative_tail",
+    "sat_relative_tail_capacity"
+  ],
+  "epochs": 50,
+  "execution": "6 one-core warmup tasks; 30 one-core main tasks; aggregation-only finalizer",
+  "experiment_id": "experiment_0_2_2_capacity_preserving_loss",
+  "healthy_reference": {
+    "fs_hz": 64.0,
+    "gamma": [
+      2.4154731035232544,
+      1.4434405326843267,
+      0.845742279291153
+    ],
+    "healthy_shifts": [
+      4,
+      5
+    ],
+    "relative_tail_quantile": 0.9,
+    "rho_max": 1.0,
+    "saturation_quantile": 0.95,
+    "saturation_window_ms": 250.0,
+    "saturation_window_steps": 16,
+    "source_architecture": "short_mid",
+    "source_experiment": "experiment_0_1_general_comparison",
+    "source_objective": "whole_count_ce",
+    "source_profile": "none",
+    "source_seeds": [
+      11,
+      23,
+      37
+    ],
+    "source_split": "train",
+    "tail_stage_ms": [
+      200.0,
+      400.0,
+      600.0
+    ],
+    "tail_stage_weights": [
+      1.0,
+      2.0,
+      4.0
+    ],
+    "test_data_used": false
+  },
+  "history_rows_per_run": 50,
+  "inactive_regularizer_kappa": 1.0,
+  "long_shifts": [
+    6,
+    7
+  ],
+  "objective": "whole_count_ce",
+  "protocol_version": "capacity_preserving_loss_v1",
+  "regularizer_ramp_end_epoch": 15,
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "shared_warmup_epochs": 5,
+  "target_grad_ratio": 0.05,
+  "test_policy": "test evaluated once per run after validation-selected checkpoint is fixed"
+}

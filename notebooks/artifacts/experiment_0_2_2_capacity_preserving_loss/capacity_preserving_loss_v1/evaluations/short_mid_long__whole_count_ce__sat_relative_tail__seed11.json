@@ -1,0 +1,89 @@
+{
+  "best_epoch": 23,
+  "best_val_balanced_accuracy": 0.14583333333333334,
+  "best_val_task_ce": 2.4145336151123047,
+  "experiment_id": "experiment_0_2_2_capacity_preserving_loss",
+  "kappa": 1.95126985239272e-12,
+  "protocol_version": "capacity_preserving_loss_v1",
+  "reference": {
+    "fs_hz": 64.0,
+    "gamma": [
+      2.4154731035232544,
+      1.4434405326843267,
+      0.845742279291153
+    ],
+    "healthy_shifts": [
+      4,
+      5
+    ],
+    "relative_tail_quantile": 0.9,
+    "rho_max": 1.0,
+    "saturation_quantile": 0.95,
+    "saturation_window_ms": 250.0,
+    "saturation_window_steps": 16,
+    "source_architecture": "short_mid",
+    "source_experiment": "experiment_0_1_general_comparison",
+    "source_objective": "whole_count_ce",
+    "source_profile": "none",
+    "source_seeds": [
+      11,
+      23,
+      37
+    ],
+    "source_split": "train",
+    "tail_stage_ms": [
+      200.0,
+      400.0,
+      600.0
+    ],
+    "tail_stage_weights": [
+      1.0,
+      2.0,
+      4.0
+    ],
+    "test_data_used": false
+  },
+  "spec": {
+    "architecture": "short_mid_long",
+    "condition": "sat_relative_tail",
+    "seed": 11
+  },
+  "test": {
+    "accuracy": 0.11643835616438356,
+    "balanced_accuracy": 0.11255411255411256,
+    "long_tail_fr_hz": 8.661104816836612,
+    "long_tail_valid_ratio": 2.322876117511895,
+    "long_valid_fr_hz": 3.7286124522705038,
+    "macro_f1": 0.06667369012501756,
+    "output_weight_energy_long_fraction": 0.32968079152351837,
+    "output_weight_norm_s2": 0.2082265466451645,
+    "output_weight_norm_s3": 0.19661472737789154,
+    "output_weight_norm_s4": 0.20243683457374573,
+    "output_weight_norm_s5": 0.19903317093849182,
+    "output_weight_norm_s6": 0.19266808032989502,
+    "output_weight_norm_s7": 0.2096942514181137,
+    "task_ce": 2.4139442215227103
+  },
+  "test_shift": [
+    {
+      "shift": 6,
+      "split": "test",
+      "tail_firing_rate_hz": 8.6056236481615,
+      "tail_stage1_firing_rate_hz": 9.089869035074514,
+      "tail_stage2_firing_rate_hz": 8.646695769983442,
+      "tail_stage3_firing_rate_hz": 8.036529680365296,
+      "tail_valid_ratio": 2.2637767946157337,
+      "valid_firing_rate_hz": 3.8014452964751175
+    },
+    {
+      "shift": 7,
+      "split": "test",
+      "tail_firing_rate_hz": 8.716585985511724,
+      "tail_stage1_firing_rate_hz": 8.796025891916303,
+      "tail_stage2_firing_rate_hz": 8.770334688142908,
+      "tail_stage3_firing_rate_hz": 8.572298325722983,
+      "tail_valid_ratio": 2.38433027151855,
+      "valid_firing_rate_hz": 3.6557796080658904
+    }
+  ]
+}
