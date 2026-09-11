@@ -246,6 +246,11 @@ def test_single_segment_dynamics_is_notebook_only_and_marks_valid_length() -> No
         "x = x[:, :valid_length]",
     ):
         assert forbidden not in joined
+    assert "with torch.no_grad():" in joined
+    assert "expected_spikes = expected['hidden_spikes'].squeeze(0).detach().cpu().numpy()" in joined
+    assert "expected_synaptic = expected['hidden_synaptic'].squeeze(0).detach().cpu().numpy()" in joined
+    assert "expected_membrane = expected['hidden_membranes'].squeeze(0).detach().cpu().numpy()" in joined
+    assert "expected['hidden_spikes'].squeeze(0).cpu().numpy()" not in joined
 
 
 def test_readme_documents_full_training_and_intervention_contract() -> None:
