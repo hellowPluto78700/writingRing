@@ -16,7 +16,9 @@ from scripts import experiment_0_2_endpoint_tail_regularization as exp02
 ANALYSIS_ID = "experiment_0_2_shift_resolved_fire_rate"
 ANALYSIS_VERSION = "shift_fire_rate_v1"
 PROFILES = (exp02.FROZEN_PROFILE,) + exp02.PROFILES
-LONG_SHIFT_MIN = 5
+# Exp0.1/0.2 naming treats s2-s5 (~54-492 ms at 64 Hz) as short/mid and
+# introduces s6/s7 (~1-2 s) in the long-timescale final hidden layer.
+LONG_SHIFT_MIN = 6
 
 RATE_COLUMNS = (
     "valid_firing_rate_hz",
@@ -402,7 +404,7 @@ def finalize(repo_root: Path) -> None:
         "objectives": list(exp02.OBJECTIVES),
         "seeds": list(exp02.SEEDS),
         "long_shift_min": LONG_SHIFT_MIN,
-        "long_group_definition": "configured final-hidden shifts >= 5; all per-shift rows remain primary",
+        "long_group_definition": "configured final-hidden shifts s6/s7 (shift >= 6); all per-shift rows remain primary",
         "firing_rate_denominator": "spike count / neuron-seconds",
         "fs_hz": fs,
         "tail_stage_lengths_steps": stage_steps,
