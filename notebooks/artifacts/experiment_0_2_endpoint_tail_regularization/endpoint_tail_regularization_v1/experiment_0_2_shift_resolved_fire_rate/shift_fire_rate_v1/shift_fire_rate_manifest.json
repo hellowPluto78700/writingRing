@@ -1,0 +1,45 @@
+{
+  "analysis_id": "experiment_0_2_shift_resolved_fire_rate",
+  "analysis_version": "shift_fire_rate_v1",
+  "architectures": [
+    "short_mid_long",
+    "short_mid",
+    "mid_long"
+  ],
+  "checkpoint_count": 90,
+  "firing_rate_denominator": "spike count / neuron-seconds",
+  "fs_hz": 64.0,
+  "long_group_definition": "configured final-hidden shifts s6/s7 (shift >= 6); all per-shift rows remain primary",
+  "long_shift_min": 6,
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce"
+  ],
+  "post_endpoint_input": "explicit zero input via Exp0.2 endpoint_rollout_input",
+  "profiles": [
+    "none",
+    "a1",
+    "a1_p2",
+    "tail",
+    "a1_tail"
+  ],
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "source_experiment": "experiment_0_2_endpoint_tail_regularization",
+  "source_protocol": "endpoint_tail_regularization_v1",
+  "tail_specific_suppression_pp": "pct_change_valid_FR_vs_none - pct_change_tail_FR_vs_none; positive means preferential tail suppression",
+  "tail_stage_boundaries_ms_requested": [
+    200.0,
+    400.0,
+    600.0
+  ],
+  "tail_stage_lengths_steps": [
+    13,
+    13,
+    12
+  ],
+  "training": "none; checkpoint-only post-evaluation"
+}
