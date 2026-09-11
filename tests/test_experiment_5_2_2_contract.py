@@ -4,12 +4,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
 import torch
 
 from scripts import experiment_5_1_boundary_free_temporal_decoder as exp51
 from scripts import experiment_5_2_2_frozen_local_multitau_syn as exp522
-from scripts import experiment_5_2_2_single_segment_dynamics as exp522viz
 from scripts import experiment_5_2_2_threshold_diagnostics as exp522diag
 
 
@@ -20,6 +18,7 @@ FINALIZER = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash" / "finalize_exp_5
 SUBMIT = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash" / "submit_exp_5_2_2_cpu.bash"
 README = REPO_ROOT / "scripts" / "experiment_5_2_2" / "README.md"
 NOTEBOOK = REPO_ROOT / "notebooks" / "experiment_5_2_2_frozen_local_multitau_syn.ipynb"
+DYNAMICS_NOTEBOOK = REPO_ROOT / "notebooks" / "experiment_5_2_2_single_segment_dynamics.ipynb"
 
 
 def _fake_data() -> SimpleNamespace:
@@ -134,47 +133,6 @@ def test_fixed_threshold_operating_point_diagnostics_contract() -> None:
     assert torch.equal(exp522diag.pre_reset_membrane(trajectory), expected)
 
 
-def test_single_segment_trace_matches_exp522_forward_for_normal_and_reset() -> None:
-    model = exp522.SynapticPhaseDecoder("s234567", "output_lif", 12, 64.0, 16)
-    torch.manual_seed(7)
-    x = torch.randn(1, 37, 128)
-    length = 31
-    for reset_shifts in ((), (5, 6, 7)):
-        expected = model.forward_trajectory(x[:, :length], reset_shifts=reset_shifts)
-        traced = exp522viz.trace_segment(
-            model,
-            x.squeeze(0),
-            valid_length=length,
-            reset_shifts=reset_shifts,
-        )
-        assert np.allclose(traced["hidden_spikes"], expected["hidden_spikes"].squeeze(0).detach().numpy())
-        assert np.allclose(traced["hidden_synaptic"], expected["hidden_synaptic"].squeeze(0).detach().numpy())
-        assert np.allclose(traced["hidden_post_reset_membrane"], expected["hidden_membranes"].squeeze(0).detach().numpy())
-        assert np.allclose(traced["pre_lif_logits"], expected["pre_lif_logits"].squeeze(0).detach().numpy())
-        assert np.allclose(traced["output_spikes"], expected["output_spikes"].squeeze(0).detach().numpy())
-        reconstructed_pre = traced["hidden_post_reset_membrane"] + exp522.THRESHOLD * traced["hidden_spikes"]
-        assert np.allclose(traced["hidden_pre_reset_membrane"], reconstructed_pre)
-
-
-def test_single_segment_selection_prefers_normal_wrong_reset_correct() -> None:
-    y = np.array([0, 1, 2, 3])
-    normal = np.array([0, 0, 2, 1])
-    reset = np.array([0, 1, 0, 2])
-    selected = exp522viz.select_segment(
-        y,
-        normal,
-        reset,
-        split="test",
-        selection="auto",
-        sample_index=None,
-    )
-    assert selected.index == 1
-    assert selected.selection_reason == "normal_wrong_reset_correct"
-    assert selected.true_class == 1
-    assert selected.normal_prediction == 0
-    assert selected.intervention_prediction == 1
-
-
 def test_multi_cpu_afterok_and_one_core_contract() -> None:
     prepare = PREPARE.read_text(encoding="utf-8")
     runner = RUNNER.read_text(encoding="utf-8")
@@ -248,6 +206,48 @@ def test_notebook_is_analysis_only_and_contains_required_diagnostics() -> None:
         assert forbidden not in joined
 
 
+def test_single_segment_dynamics_is_notebook_only_and_marks_valid_length() -> None:
+    assert DYNAMICS_NOTEBOOK.exists()
+    notebook = json.loads(DYNAMICS_NOTEBOOK.read_text(encoding="utf-8"))
+    assert notebook["nbformat"] == 4
+    sources: list[str] = []
+    for index, cell in enumerate(notebook["cells"]):
+        source = "".join(cell.get("source", []))
+        sources.append(source)
+        if cell.get("cell_type") == "code":
+            compile(source, f"exp522-dynamics-notebook-cell-{index}", "exec")
+    joined = "\n".join(sources)
+    for token in (
+        "FULL PADDED WINDOW",
+        "valid_length",
+        "Valid end",
+        "normal",
+        "reset567",
+        "hidden_spikes",
+        "hidden_synaptic",
+        "hidden_pre_reset_membrane",
+        "hidden_post_reset_membrane",
+        "L3 spike raster",
+        "L3 signed synaptic state",
+        "L3 pre-reset membrane",
+        "L3 post-reset membrane",
+        "L3 group firing fraction",
+        "Cumulative class evidence",
+        "normal_wrong_reset_correct",
+        "padding_firing_rate_hz",
+        "padding_spike_fraction_of_full_window",
+    ):
+        assert token in joined
+    for forbidden in (
+        "optimizer.step(",
+        ".backward()",
+        "sbatch",
+        "subprocess",
+        "x = x[:, :valid_length]",
+    ):
+        assert forbidden not in joined
+
+
 def test_readme_documents_full_training_and_intervention_contract() -> None:
     text = README.read_text(encoding="utf-8")
     for token in (
@@ -280,8 +280,8 @@ def test_readme_documents_full_training_and_intervention_contract() -> None:
         "s7",
         "0-59%50",
         "analysis-only",
-        "single-segment dynamics diagnostic",
-        "01_l3_spike_raster.png",
-        "06_readout_activity.png",
+        "experiment_5_2_2_single_segment_dynamics.ipynb",
+        "full padded window",
+        "Valid end",
     ):
         assert token in text
