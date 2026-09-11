@@ -47,6 +47,7 @@ HEALTHY_REFERENCE_SHIFTS = (4, 5)
 TAIL_STAGE_WEIGHTS = (1.0, 2.0, 4.0)
 EPS = 1e-8
 GRAD_EPS = 1e-12
+INACTIVE_REGULARIZER_KAPPA = 1.0
 BATCH_SIZE = exp02.BATCH_SIZE
 LR = exp02.LR
 WEIGHT_DECAY = exp02.WEIGHT_DECAY
@@ -866,7 +867,15 @@ def calibrate_regularizer(
     warmup_reference_hz: dict[int, torch.Tensor],
 ) -> dict[str, object]:
     if spec.condition == "wc_only":
-        return {"kappa": 0.0, "target_grad_ratio": TARGET_GRAD_RATIO, "ratios": [], "calibration_batches": 0}
+        return {
+            "kappa": 0.0,
+            "target_grad_ratio": TARGET_GRAD_RATIO,
+            "ratios": [],
+            "calibration_batches": 0,
+            "active_calibration_batches": 0,
+            "inactive_calibration_batches": 0,
+            "calibration_status": "baseline_no_regularizer",
+        }
     model.train()
     parameter, slices = _long_incoming_weight(model, spec.architecture)
     loader = _loader(
@@ -880,9 +889,10 @@ def calibrate_regularizer(
     ratios: list[float] = []
     task_norms: list[float] = []
     reg_norms: list[float] = []
-    for batch_index, (X, y, lengths, indices) in enumerate(loader):
-        if batch_index >= CALIBRATION_BATCHES:
-            break
+    inactive_batches = 0
+    scanned_batches = 0
+    for X, y, lengths, indices in loader:
+        scanned_batches += 1
         X = X.to(config.device)
         y = y.to(config.device)
         lengths = lengths.to(config.device)
@@ -894,14 +904,36 @@ def calibrate_regularizer(
         reg_norm = _sliced_grad_norm(reg_grad, slices)
         task_norms.append(task_norm)
         reg_norms.append(reg_norm)
-        if task_norm > GRAD_EPS:
-            ratios.append(reg_norm / task_norm)
-    if not ratios:
-        raise RuntimeError(f"No valid task gradients during calibration for {spec.key}")
-    median_ratio = float(np.median(ratios))
-    if not math.isfinite(median_ratio) or median_ratio <= GRAD_EPS:
-        raise RuntimeError(f"Regularizer gradient is effectively zero for {spec.key}: median_ratio={median_ratio}")
-    kappa = TARGET_GRAD_RATIO / median_ratio
+        if task_norm <= GRAD_EPS:
+            continue
+        if reg_norm <= GRAD_EPS:
+            inactive_batches += 1
+            continue
+        ratios.append(reg_norm / task_norm)
+        if len(ratios) >= CALIBRATION_BATCHES:
+            break
+
+    if ratios:
+        median_ratio = float(np.median(ratios))
+        if not math.isfinite(median_ratio) or median_ratio <= GRAD_EPS:
+            raise RuntimeError(f"Invalid active regularizer gradient ratio for {spec.key}: {median_ratio}")
+        kappa = TARGET_GRAD_RATIO / median_ratio
+        status = "calibrated_active_batches"
+    else:
+        # Hinge-style regularizers can be exactly inactive at the epoch-5 fork point.
+        # In that case no finite coefficient can create a 5% gradient ratio because
+        # grad(L_reg) == 0.  Treat inactivity as a valid state instead of aborting the
+        # experiment.  Unit scale is neutral; the epoch 6-15 ramp still limits the
+        # contribution, and once the hinge activates the raw/weighted losses are
+        # recorded so this fallback remains auditable.
+        median_ratio = 0.0
+        kappa = INACTIVE_REGULARIZER_KAPPA
+        status = "inactive_regularizer_unit_scale"
+        print(
+            f"[exp0.2.2] calibration warning {spec.key}: regularizer inactive "
+            f"on all {scanned_batches} scanned train batches; using kappa={kappa:.6g}"
+        )
+
     return {
         "kappa": kappa,
         "target_grad_ratio": TARGET_GRAD_RATIO,
@@ -909,7 +941,10 @@ def calibrate_regularizer(
         "ratios": ratios,
         "task_grad_norms": task_norms,
         "reg_grad_norms": reg_norms,
-        "calibration_batches": len(ratios),
+        "calibration_batches": scanned_batches,
+        "active_calibration_batches": len(ratios),
+        "inactive_calibration_batches": inactive_batches,
+        "calibration_status": status,
         "parameter_scope": "final-hidden incoming-weight rows assigned to s6/s7",
     }
 
@@ -1212,6 +1247,9 @@ def finalize(repo_root: Path) -> None:
                 "kappa": calibration["kappa"],
                 "median_raw_grad_ratio": calibration.get("median_raw_grad_ratio", 0.0),
                 "calibration_batches": calibration["calibration_batches"],
+                "active_calibration_batches": calibration.get("active_calibration_batches", 0),
+                "inactive_calibration_batches": calibration.get("inactive_calibration_batches", 0),
+                "calibration_status": calibration.get("calibration_status", "legacy"),
             }
         )
         histories.append(pd.read_csv(history_path(root, spec)))
@@ -1256,6 +1294,7 @@ def finalize(repo_root: Path) -> None:
         "regularizer_ramp_end_epoch": REG_RAMP_END_EPOCH,
         "target_grad_ratio": TARGET_GRAD_RATIO,
         "calibration_batches": CALIBRATION_BATCHES,
+        "inactive_regularizer_kappa": INACTIVE_REGULARIZER_KAPPA,
         "capacity_eta": CAPACITY_ETA,
         "long_shifts": list(LONG_SHIFTS),
         "healthy_reference": reference,
