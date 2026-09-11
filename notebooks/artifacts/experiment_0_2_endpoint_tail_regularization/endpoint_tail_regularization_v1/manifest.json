@@ -1,0 +1,68 @@
+{
+  "architectures": [
+    "short_mid_long",
+    "short_mid",
+    "mid_long"
+  ],
+  "epochs_new_runs": 50,
+  "experiment_id": "experiment_0_2_endpoint_tail_regularization",
+  "frozen_evaluation_count": 18,
+  "frozen_source": "experiment_0_1_general_comparison/general_comparison_v1",
+  "gradient_calibration": {
+    "batches": 5,
+    "scope": "hidden linear weights only",
+    "target_ratio": 0.05,
+    "warmup_epochs": 10
+  },
+  "new_run_count": 72,
+  "objectives": [
+    "whole_count_ce",
+    "timestep_ce"
+  ],
+  "profiles": [
+    "none",
+    "a1",
+    "a1_p2",
+    "tail",
+    "a1_tail"
+  ],
+  "protocol_version": "endpoint_tail_regularization_v1",
+  "raster": {
+    "final_hidden_order": "native neuron order grouped by configured synaptic shift",
+    "panels": [
+      "final_hidden_spikes",
+      "output_spikes"
+    ],
+    "test_sample_index": 4,
+    "x_axis": "valid segment plus 600-ms zero-input rollout"
+  },
+  "regularization": {
+    "a1": "0.1 * Exp0.1.5 all-fixes valid hidden activity",
+    "a1_p2": "0.1*A1 + 0.01*Exp0.1.5 all-fixes P2",
+    "a1_tail": "0.1*A1 + 0.1*tail",
+    "tail": "0.1 * normalized endpoint-relative hidden spike tail"
+  },
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "tail": {
+    "classification_region": "t < valid_length only",
+    "horizon_ms": 600.0,
+    "normalization": "divide weighted stage activity by sum(weights); mean neuron-step within layer, then mean layers",
+    "output_layer_regularized": false,
+    "post_endpoint_input": "explicit zero input",
+    "stage_boundaries_ms": [
+      200.0,
+      400.0,
+      600.0
+    ],
+    "tail_region": "valid_length <= t < valid_length + horizon",
+    "weights": [
+      1.0,
+      2.0,
+      4.0
+    ]
+  }
+}
