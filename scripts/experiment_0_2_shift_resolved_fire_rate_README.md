@@ -17,7 +17,7 @@ For each configured final-hidden synaptic shift, the analysis records:
 
 Firing rates are normalized by neuron-seconds, so shift groups with slightly different neuron counts remain comparable.
 
-The pooled `long` diagnostic is defined as configured final-hidden shifts `>=5` where available. This corresponds to the longer final-hidden time constants, while the per-shift CSV remains the primary evidence and should be used for scientific claims.
+For pooled summaries, `long-τ` means s6/s7 (`shift >= 6`, approximately 1–2 s at 64 Hz). s5 remains visible in the per-shift outputs as the upper mid-timescale group. Consequently `short_mid` has no pooled long-τ row, while `mid_long` and `short_mid_long` do.
 
 ## Unity / Slurm
 
@@ -55,9 +55,9 @@ Finalized files:
 - `shift_fire_rate_summary.csv` — per architecture/objective/profile/seed/shift
 - `shift_fire_rate_comparison.csv` — mean/std across seeds for each shift
 - `shift_fire_rate_vs_none.csv` — paired per-shift delta, percentage change, and endpoint-selectivity metrics
-- `shift_fire_rate_long_tau_summary.csv` — neuron-count-weighted pooled long-τ rows per seed
-- `shift_fire_rate_long_tau_comparison.csv` — long-τ mean/std across seeds
-- `shift_fire_rate_long_tau_vs_none.csv` — direct pooled long-τ paired comparison versus frozen `none`
+- `shift_fire_rate_long_tau_summary.csv` — neuron-count-weighted pooled s6/s7 rows per seed
+- `shift_fire_rate_long_tau_comparison.csv` — pooled s6/s7 mean/std across seeds
+- `shift_fire_rate_long_tau_vs_none.csv` — direct pooled s6/s7 paired comparison versus frozen `none`
 - `shift_fire_rate_manifest.json`
 
 The notebook `notebooks/experiment_0_2_shift_resolved_fire_rate.ipynb` is analysis-only and reads these finalized artifacts.
@@ -85,4 +85,4 @@ tail_specific_suppression_pp < 0
     -> valid firing is suppressed more strongly than the tail
 ```
 
-Then inspect the metric as a function of `shift` / `tau_syn_ms`. If s6/s7 show substantially stronger positive endpoint selectivity than s2/s3, that supports a long-τ-specific improvement. If all shifts move together, the regularizer is acting more like global activity suppression than a fix for long-timescale persistent firing.
+Then inspect the metric as a function of `shift` / `tau_syn_ms`. If s6/s7 show substantially stronger positive endpoint selectivity than s2-s5, that supports a long-τ-specific improvement. If all shifts move together, the regularizer is acting more like global activity suppression than a fix for long-timescale persistent firing.
