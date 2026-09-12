@@ -1,0 +1,156 @@
+{
+  "activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/activities/whole_count__mem3__seed11.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.0,
+      "hidden_s4_fr_valid": 0.006201550364494324,
+      "hidden_s5_fr_tail": 0.0,
+      "hidden_s5_fr_valid": 0.004651162773370743,
+      "hidden_s6_fr_tail": 0.0,
+      "hidden_s6_fr_valid": 0.00026455026818439364,
+      "output_fr_tail": 0.0,
+      "output_fr_valid": 0.024074073880910873
+    },
+    "pred_label": "H",
+    "pred_label_index": 6,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/rasters/whole_count__mem3__seed11.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "architecture": {
+    "fixed250_steps": 16,
+    "hidden": {
+      "binary_spike": true,
+      "group_neurons": [
+        43,
+        43,
+        42
+      ],
+      "mem_shift": 3,
+      "syn_shift_groups": [
+        4,
+        5,
+        6
+      ],
+      "synaptic_update": "I_t = alpha*I_{t-1} + (1-alpha)*W*x_t",
+      "tau_mem_ms": 117.0136826471659,
+      "tau_syn_ms": [
+        242.10347130039656,
+        492.1461612435418,
+        992.1669944116244
+      ],
+      "threshold": 0.5,
+      "width": 128
+    },
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 event spike train; no pre-SNN pooling/scaling",
+      "sampling_rate_hz": 64.0
+    },
+    "objective": "whole_count",
+    "output": {
+      "binary_spike": true,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54
+    }
+  },
+  "best_epoch": 97,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.2671232876712329,
+      "balanced_accuracy": 0.2461802086802087,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.16951481058623918,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.2191107795663076,
+      "wholecount_ce": 2.2191107795663076
+    },
+    "train": {
+      "accuracy": 0.306368330464716,
+      "balanced_accuracy": 0.28974694809924184,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.21767598994778317,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.227826204644628,
+      "wholecount_ce": 2.227826204644628
+    },
+    "val": {
+      "accuracy": 0.3412698412698413,
+      "balanced_accuracy": 0.32936507936507936,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.25074514991181657,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.264256238937378,
+      "wholecount_ce": 2.264256238937378
+    }
+  },
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "provenance": {
+    "binary_spike_contract": "hidden cap=1; output cap=1",
+    "checkpoint_selection": "highest validation balanced accuracy; tie-break lower validation whole-count CE",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "split_seed": 12345,
+    "test_policy": "test metrics evaluated only after loading the validation-selected checkpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "reversed_activity": null,
+  "spec": {
+    "mem_shift": 3,
+    "objective": "whole_count",
+    "seed": 11
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/activities/whole_count_hce__mem3__seed11.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.0,
+      "hidden_s4_fr_valid": 0.0010335916886106133,
+      "hidden_s5_fr_tail": 0.0,
+      "hidden_s5_fr_valid": 0.001291989698074758,
+      "hidden_s6_fr_tail": 0.0,
+      "hidden_s6_fr_valid": 0.0,
+      "output_fr_tail": 0.0,
+      "output_fr_valid": 0.0018518518190830946
+    },
+    "pred_label": "H",
+    "pred_label_index": 6,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/rasters/whole_count_hce__mem3__seed11.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "architecture": {
+    "fixed250_steps": 16,
+    "hidden": {
+      "binary_spike": true,
+      "group_neurons": [
+        43,
+        43,
+        42
+      ],
+      "mem_shift": 3,
+      "syn_shift_groups": [
+        4,
+        5,
+        6
+      ],
+      "synaptic_update": "I_t = alpha*I_{t-1} + (1-alpha)*W*x_t",
+      "tau_mem_ms": 117.0136826471659,
+      "tau_syn_ms": [
+        242.10347130039656,
+        492.1461612435418,
+        992.1669944116244
+      ],
+      "threshold": 0.5,
+      "width": 128
+    },
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 event spike train; no pre-SNN pooling/scaling",
+      "sampling_rate_hz": 64.0
+    },
+    "objective": "whole_count_hce",
+    "output": {
+      "binary_spike": true,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54
+    }
+  },
+  "best_epoch": 98,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.21232876712328766,
+      "balanced_accuracy": 0.1988844488844489,
+      "cg_loss": 0.0,
+      "hce_loss": 0.6907501579963997,
+      "long_gain": NaN,
+      "macro_f1": 0.11527358806770571,
+      "mid_gain": NaN,
+      "orig_margin": -2.379445433616638,
+      "rev_margin": -2.3839683532714844,
+      "total_loss": 3.096699110449177,
+      "wholecount_ce": 2.405949004708904
+    },
+    "train": {
+      "accuracy": 0.18588640275387264,
+      "balanced_accuracy": 0.18089880216452545,
+      "cg_loss": 0.0,
+      "hce_loss": 0.6886387793619744,
+      "long_gain": NaN,
+      "macro_f1": 0.12619448482289292,
+      "mid_gain": NaN,
+      "orig_margin": -2.368832540512085,
+      "rev_margin": -2.3781831741333006,
+      "total_loss": 3.0922579904841885,
+      "wholecount_ce": 2.4036192303064974
+    },
+    "val": {
+      "accuracy": 0.1746031746031746,
+      "balanced_accuracy": 0.1786375661375661,
+      "cg_loss": 0.0,
+      "hce_loss": 0.6913336515426636,
+      "long_gain": NaN,
+      "macro_f1": 0.1399005814446991,
+      "mid_gain": NaN,
+      "orig_margin": -2.387650966644287,
+      "rev_margin": -2.391338586807251,
+      "total_loss": 3.1466808319091797,
+      "wholecount_ce": 2.4553472995758057
+    }
+  },
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "provenance": {
+    "binary_spike_contract": "hidden cap=1; output cap=1",
+    "checkpoint_selection": "highest validation balanced accuracy; tie-break lower validation whole-count CE",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "split_seed": 12345,
+    "test_policy": "test metrics evaluated only after loading the validation-selected checkpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "reversed_activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/activities/whole_count_hce__mem3__seed11__reversed.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.0,
+      "hidden_s4_fr_valid": 0.0010335916886106133,
+      "hidden_s5_fr_tail": 0.0,
+      "hidden_s5_fr_valid": 0.001291989698074758,
+      "hidden_s6_fr_tail": 0.0,
+      "hidden_s6_fr_valid": 0.0,
+      "output_fr_tail": 0.0,
+      "output_fr_valid": 0.0009259259095415473
+    },
+    "pred_label": "H",
+    "pred_label_index": 6,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/rasters/whole_count_hce__mem3__seed11__reversed.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "spec": {
+    "mem_shift": 3,
+    "objective": "whole_count_hce",
+    "seed": 11
+  }
+}

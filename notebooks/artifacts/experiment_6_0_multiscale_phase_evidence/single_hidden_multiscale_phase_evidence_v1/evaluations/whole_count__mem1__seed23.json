@@ -1,0 +1,156 @@
+{
+  "activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/activities/whole_count__mem1__seed23.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.0,
+      "hidden_s4_fr_valid": 0.0,
+      "hidden_s5_fr_tail": 0.0,
+      "hidden_s5_fr_valid": 0.0,
+      "hidden_s6_fr_tail": 0.0,
+      "hidden_s6_fr_valid": 0.0,
+      "output_fr_tail": 0.0,
+      "output_fr_valid": 0.0
+    },
+    "pred_label": "A",
+    "pred_label_index": 0,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/rasters/whole_count__mem1__seed23.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "architecture": {
+    "fixed250_steps": 16,
+    "hidden": {
+      "binary_spike": true,
+      "group_neurons": [
+        43,
+        43,
+        42
+      ],
+      "mem_shift": 1,
+      "syn_shift_groups": [
+        4,
+        5,
+        6
+      ],
+      "synaptic_update": "I_t = alpha*I_{t-1} + (1-alpha)*W*x_t",
+      "tau_mem_ms": 22.542110013890053,
+      "tau_syn_ms": [
+        242.10347130039656,
+        492.1461612435418,
+        992.1669944116244
+      ],
+      "threshold": 0.5,
+      "width": 128
+    },
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 event spike train; no pre-SNN pooling/scaling",
+      "sampling_rate_hz": 64.0
+    },
+    "objective": "whole_count",
+    "output": {
+      "binary_spike": true,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54
+    }
+  },
+  "best_epoch": 1,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.07534246575342465,
+      "balanced_accuracy": 0.08333333333333333,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.01167728237791932,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.4849066440373253,
+      "wholecount_ce": 2.4849066440373253
+    },
+    "train": {
+      "accuracy": 0.08261617900172118,
+      "balanced_accuracy": 0.08333333333333333,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.01271860095389507,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.4849066734313965,
+      "wholecount_ce": 2.4849066734313965
+    },
+    "val": {
+      "accuracy": 0.05555555555555555,
+      "balanced_accuracy": 0.08333333333333333,
+      "cg_loss": 0.0,
+      "hce_loss": 0.0,
+      "long_gain": NaN,
+      "macro_f1": 0.008771929824561403,
+      "mid_gain": NaN,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 2.4849069118499756,
+      "wholecount_ce": 2.4849069118499756
+    }
+  },
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "provenance": {
+    "binary_spike_contract": "hidden cap=1; output cap=1",
+    "checkpoint_selection": "highest validation balanced accuracy; tie-break lower validation whole-count CE",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "split_seed": 12345,
+    "test_policy": "test metrics evaluated only after loading the validation-selected checkpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "reversed_activity": null,
+  "spec": {
+    "mem_shift": 1,
+    "objective": "whole_count",
+    "seed": 23
+  }
+}

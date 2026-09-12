@@ -1,0 +1,179 @@
+{
+  "activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/activities/whole_count_hce__mem3__seed23.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.011908097192645073,
+      "hidden_s4_fr_valid": 0.1167958676815033,
+      "hidden_s5_fr_tail": 0.03642476722598076,
+      "hidden_s5_fr_valid": 0.13462531566619873,
+      "hidden_s6_fr_tail": 0.16508892178535461,
+      "hidden_s6_fr_valid": 0.27142858505249023,
+      "output_fr_tail": 0.06877510249614716,
+      "output_fr_valid": 0.09259258955717087
+    },
+    "pred_label": "H",
+    "pred_label_index": 6,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/rasters/whole_count_hce__mem3__seed23.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "architecture": {
+    "fixed250_steps": 16,
+    "hidden": {
+      "binary_spike": true,
+      "group_neurons": [
+        43,
+        43,
+        42
+      ],
+      "mem_shift": 3,
+      "syn_shift_groups": [
+        4,
+        5,
+        6
+      ],
+      "synapse_mode": "legacy_unnormalized",
+      "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t",
+      "tau_mem_ms": 117.0136826471659,
+      "tau_syn_ms": [
+        242.10347130039656,
+        492.1461612435418,
+        992.1669944116244
+      ],
+      "threshold": 0.5,
+      "width": 128
+    },
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 event spike train; no pre-SNN pooling/scaling",
+      "sampling_rate_hz": 64.0
+    },
+    "objective": "whole_count_hce",
+    "output": {
+      "binary_spike": true,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54
+    }
+  },
+  "best_epoch": 47,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.2945205479452055,
+      "balanced_accuracy": 0.2715617715617716,
+      "cg_loss": 0.0,
+      "hce_loss": 0.5104145056580844,
+      "long_gain": NaN,
+      "macro_f1": 0.20300544358663006,
+      "mid_gain": NaN,
+      "orig_margin": -2.6264796257019043,
+      "rev_margin": -3.114471197128296,
+      "total_loss": 2.6004443821841723,
+      "wholecount_ce": 2.090029824269961
+    },
+    "train": {
+      "accuracy": 0.4079173838209983,
+      "balanced_accuracy": 0.40096399563426943,
+      "cg_loss": 0.0,
+      "hce_loss": 0.4751609548439052,
+      "long_gain": NaN,
+      "macro_f1": 0.34165926190920776,
+      "mid_gain": NaN,
+      "orig_margin": -2.7751725196838377,
+      "rev_margin": -3.5570796966552733,
+      "total_loss": 2.488419513489006,
+      "wholecount_ce": 2.013258499040456
+    },
+    "val": {
+      "accuracy": 0.3253968253968254,
+      "balanced_accuracy": 0.31984126984126987,
+      "cg_loss": 0.0,
+      "hce_loss": 0.5262262225151062,
+      "long_gain": NaN,
+      "macro_f1": 0.2425161552320061,
+      "mid_gain": NaN,
+      "orig_margin": -2.6681969165802,
+      "rev_margin": -3.201525926589966,
+      "total_loss": 2.650322914123535,
+      "wholecount_ce": 2.124096632003784
+    }
+  },
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "provenance": {
+    "binary_spike_contract": "hidden cap=1; output cap=1",
+    "checkpoint_selection": "highest validation balanced accuracy; tie-break lower validation whole-count CE",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "paired_control": "all Exp6.0 settings and random streams match the normalized condition; only the hidden synaptic input coefficient differs",
+    "split_seed": 12345,
+    "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t",
+    "test_policy": "test metrics evaluated only after loading the validation-selected checkpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "reversed_activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/activities/whole_count_hce__mem3__seed23__reversed.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.011207621544599533,
+      "hidden_s4_fr_valid": 0.11757105588912964,
+      "hidden_s5_fr_tail": 0.03418324515223503,
+      "hidden_s5_fr_valid": 0.13746769726276398,
+      "hidden_s6_fr_tail": 0.16308090090751648,
+      "hidden_s6_fr_valid": 0.2785714268684387,
+      "output_fr_tail": 0.07530120760202408,
+      "output_fr_valid": 0.08148147910833359
+    },
+    "pred_label": "A",
+    "pred_label_index": 0,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/rasters/whole_count_hce__mem3__seed23__reversed.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "spec": {
+    "mem_shift": 3,
+    "objective": "whole_count_hce",
+    "seed": 23
+  },
+  "synapse_mode": "legacy_unnormalized"
+}

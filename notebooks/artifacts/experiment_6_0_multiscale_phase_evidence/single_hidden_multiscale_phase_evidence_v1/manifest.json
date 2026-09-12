@@ -1,0 +1,42 @@
+{
+  "baseline_test_ba": 0.548475135975136,
+  "binary_spikes": true,
+  "epochs": 100,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "hidden_group_counts": [
+    43,
+    43,
+    42
+  ],
+  "hidden_mem_shifts": [
+    1,
+    2,
+    3
+  ],
+  "hidden_syn_shifts": [
+    4,
+    5,
+    6
+  ],
+  "multi_cpu_policy": "27 one-core normalized SNN tasks + 27 one-core legacy SNN tasks + one one-core Fixed250 baseline; one artifact-only comparison finalizer",
+  "notebook_policy": "analysis-only; notebook reads finalized CSV/JSON/PNG artifacts and never trains",
+  "objectives": [
+    "whole_count",
+    "whole_count_hce",
+    "whole_count_contextual_gain"
+  ],
+  "paired_randomness": "model initialization and loader random streams are identical across synapse-update modes for matched objective/mem_shift/seed",
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "runs": 54,
+  "runs_per_synapse_mode": 27,
+  "synapse_modes": {
+    "legacy_unnormalized": "I_t = alpha*I_{t-1} + W*x_t",
+    "normalized_unit_dc": "I_t = alpha*I_{t-1} + (1-alpha)*W*x_t"
+  },
+  "training_seeds": [
+    11,
+    23,
+    37
+  ],
+  "user_split_seed": 12345
+}

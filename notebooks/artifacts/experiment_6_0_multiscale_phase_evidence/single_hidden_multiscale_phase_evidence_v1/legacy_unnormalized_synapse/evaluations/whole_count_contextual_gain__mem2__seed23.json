@@ -1,0 +1,160 @@
+{
+  "activity": {
+    "activity_npz": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/activities/whole_count_contextual_gain__mem2__seed23.npz",
+    "firing_rates": {
+      "hidden_s4_fr_tail": 0.011768002063035965,
+      "hidden_s4_fr_valid": 0.16770026087760925,
+      "hidden_s5_fr_tail": 0.00840571615844965,
+      "hidden_s5_fr_valid": 0.08940568566322327,
+      "hidden_s6_fr_tail": 0.06526104360818863,
+      "hidden_s6_fr_valid": 0.17910052835941315,
+      "output_fr_tail": 0.06124497950077057,
+      "output_fr_valid": 0.21574074029922485
+    },
+    "pred_label": "J",
+    "pred_label_index": 8,
+    "raster_png": "notebooks/artifacts/experiment_6_0_multiscale_phase_evidence/single_hidden_multiscale_phase_evidence_v1/legacy_unnormalized_synapse/rasters/whole_count_contextual_gain__mem2__seed23.png",
+    "true_label": "X",
+    "true_label_index": 11,
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "architecture": {
+    "fixed250_steps": 16,
+    "hidden": {
+      "binary_spike": true,
+      "group_neurons": [
+        43,
+        43,
+        42
+      ],
+      "mem_shift": 2,
+      "syn_shift_groups": [
+        4,
+        5,
+        6
+      ],
+      "synapse_mode": "legacy_unnormalized",
+      "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t",
+      "tau_mem_ms": 54.31342963722199,
+      "tau_syn_ms": [
+        242.10347130039656,
+        492.1461612435418,
+        992.1669944116244
+      ],
+      "threshold": 0.5,
+      "width": 128
+    },
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 event spike train; no pre-SNN pooling/scaling",
+      "sampling_rate_hz": 64.0
+    },
+    "objective": "whole_count_contextual_gain",
+    "output": {
+      "binary_spike": true,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54
+    }
+  },
+  "best_epoch": 92,
+  "experiment_id": "experiment_6_0_multiscale_phase_evidence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.3698630136986301,
+      "balanced_accuracy": 0.3716193528693528,
+      "cg_loss": 0.0003023799046338217,
+      "hce_loss": 0.0,
+      "long_gain": 8.258880615234375,
+      "macro_f1": 0.35431480447360664,
+      "mid_gain": 8.707831144332886,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 1.898458232618358,
+      "wholecount_ce": 1.8981558933649978
+    },
+    "train": {
+      "accuracy": 0.5593803786574871,
+      "balanced_accuracy": 0.550361002789808,
+      "cg_loss": 0.00054457693151559,
+      "hce_loss": 0.0,
+      "long_gain": 8.681738758087159,
+      "macro_f1": 0.5501486586004375,
+      "mid_gain": 9.20567684173584,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 1.6355573435453457,
+      "wholecount_ce": 1.6350127360086228
+    },
+    "val": {
+      "accuracy": 0.4126984126984127,
+      "balanced_accuracy": 0.42347883597883595,
+      "cg_loss": 0.0005871808971278369,
+      "hce_loss": 0.0,
+      "long_gain": 8.790534019470215,
+      "macro_f1": 0.3899594098869461,
+      "mid_gain": 7.739887714385986,
+      "orig_margin": NaN,
+      "rev_margin": NaN,
+      "total_loss": 1.7927906513214111,
+      "wholecount_ce": 1.792203426361084
+    }
+  },
+  "protocol_version": "single_hidden_multiscale_phase_evidence_v1",
+  "provenance": {
+    "binary_spike_contract": "hidden cap=1; output cap=1",
+    "checkpoint_selection": "highest validation balanced accuracy; tie-break lower validation whole-count CE",
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "paired_control": "all Exp6.0 settings and random streams match the normalized condition; only the hidden synaptic input coefficient differs",
+    "split_seed": 12345,
+    "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t",
+    "test_policy": "test metrics evaluated only after loading the validation-selected checkpoint",
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "reversed_activity": null,
+  "spec": {
+    "mem_shift": 2,
+    "objective": "whole_count_contextual_gain",
+    "seed": 23
+  },
+  "synapse_mode": "legacy_unnormalized"
+}
