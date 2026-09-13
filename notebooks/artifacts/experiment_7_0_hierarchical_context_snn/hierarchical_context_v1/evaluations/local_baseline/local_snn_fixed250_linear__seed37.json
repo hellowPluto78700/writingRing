@@ -1,0 +1,121 @@
+{
+  "activity_summary": {
+    "L1": {
+      "valid_firing_fraction": 0.012760416604578495,
+      "valid_spikes_per_neuron_second": 0.8166666626930237,
+      "zero_tail_firing_fraction": 0.00032944275881163776
+    },
+    "L2": {
+      "valid_firing_fraction": 0.11727430671453476,
+      "valid_spikes_per_neuron_second": 7.505555629730225,
+      "zero_tail_firing_fraction": 0.015625
+    }
+  },
+  "architecture": {
+    "deployment_readout": "L2 ordered Fixed250 counts + validation-selected LogisticRegression",
+    "hidden_cap": 1,
+    "hidden_layers": [
+      {
+        "layer": 1,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      },
+      {
+        "layer": 2,
+        "shifts": [
+          2,
+          3,
+          4
+        ],
+        "tau_syn_ms": [
+          54.31342963722199,
+          117.0136826471659,
+          242.10347130039656
+        ],
+        "width": 128
+      }
+    ],
+    "tau_mem_ms": 22.54,
+    "training_head": "temporary analog timestep classifier"
+  },
+  "best_epoch": 97,
+  "best_val_native_ba": 0.49525012025012033,
+  "best_val_native_loss": 1.6330606937408447,
+  "experiment_id": "experiment_7_0_hierarchical_context_snn",
+  "family": "local_snn_fixed250_linear",
+  "fixed250_probe": {
+    "feature_dim": 2048,
+    "probe_C": 0.01,
+    "test": {
+      "accuracy": 0.6232876712328768,
+      "balanced_accuracy": 0.6116563991563991,
+      "macro_f1": 0.6081295645788679
+    },
+    "train": {
+      "accuracy": 0.9655765920826161,
+      "balanced_accuracy": 0.9653223302528212,
+      "macro_f1": 0.9682070423333357
+    },
+    "val": {
+      "accuracy": 0.5634920634920635,
+      "balanced_accuracy": 0.5555976430976431,
+      "macro_f1": 0.5610242399233739
+    }
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.6232876712328768,
+      "balanced_accuracy": 0.6116563991563991,
+      "macro_f1": 0.6081295645788679
+    },
+    "train": {
+      "accuracy": 0.9655765920826161,
+      "balanced_accuracy": 0.9653223302528212,
+      "macro_f1": 0.9682070423333357
+    },
+    "val": {
+      "accuracy": 0.5634920634920635,
+      "balanced_accuracy": 0.5555976430976431,
+      "macro_f1": 0.5610242399233739
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5547945205479452,
+      "balanced_accuracy": 0.5303557553557554,
+      "loss": 1.7077894014854953,
+      "macro_f1": 0.4997010514758373
+    },
+    "train": {
+      "accuracy": 0.8623063683304647,
+      "balanced_accuracy": 0.8534085525693267,
+      "loss": 1.028408380670925,
+      "macro_f1": 0.8562522642524385
+    },
+    "val": {
+      "accuracy": 0.5,
+      "balanced_accuracy": 0.49525012025012033,
+      "loss": 1.6330606937408447,
+      "macro_f1": 0.45090842812092474
+    }
+  },
+  "protocol_version": "hierarchical_context_v1",
+  "provenance": {
+    "checkpoint_selection": "validation native analog-head BA; lower native CE tie-break",
+    "source_architecture": "Exp0.1 local_234x2 binary baseline",
+    "split_seed": 12345
+  },
+  "spec": {
+    "seed": 37
+  },
+  "stopped_epoch": 100
+}

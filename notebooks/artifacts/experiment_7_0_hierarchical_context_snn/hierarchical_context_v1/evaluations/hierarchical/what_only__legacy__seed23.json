@@ -1,0 +1,126 @@
+{
+  "activity_summary": {
+    "middle": {
+      "valid_firing_fraction": 0.07543402910232544,
+      "valid_spikes_per_neuron_second": 4.827777862548828,
+      "zero_tail_firing_fraction": 0.019625376909971237
+    },
+    "output": {
+      "valid_firing_fraction": 0.06851851940155029,
+      "valid_spikes_per_neuron_second": 4.385185241699219,
+      "zero_tail_firing_fraction": 0.01004016026854515
+    },
+    "short": {
+      "valid_firing_fraction": 0.003559027798473835,
+      "valid_spikes_per_neuron_second": 0.22777777910232544,
+      "zero_tail_firing_fraction": 0.0
+    }
+  },
+  "architecture": {
+    "hidden_layers": [
+      {
+        "binary_spike": true,
+        "cap": 1,
+        "name": "short",
+        "shift_syn": 4,
+        "tau_mem_ms": 22.54,
+        "tau_syn_ms": 242.10347130039656,
+        "width": 128
+      },
+      {
+        "binary_spike": true,
+        "cap": 1,
+        "name": "middle",
+        "shift_syn": 5,
+        "tau_mem_ms": 22.54,
+        "tau_syn_ms": 492.1461612435418,
+        "width": 128
+      }
+    ],
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 30-channel event spike train",
+      "sampling_rate_hz": 64.0,
+      "timesteps": 256
+    },
+    "method": "what_only",
+    "output": {
+      "cap": 1,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54,
+      "threshold": 0.5,
+      "type": "short-tau binary LIF"
+    },
+    "synapse_mode": "legacy",
+    "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t",
+    "training": {
+      "max_epochs": 100,
+      "min_epochs": 20,
+      "objective": "whole_count_ce",
+      "patience": 30
+    }
+  },
+  "best_epoch": 62,
+  "best_val_ba": 0.4314574314574315,
+  "best_val_loss": 1.8800486326217651,
+  "experiment_id": "experiment_7_0_hierarchical_context_snn",
+  "family": "hierarchical_snn",
+  "metrics": {
+    "test": {
+      "accuracy": 0.4383561643835616,
+      "balanced_accuracy": 0.4282363469863469,
+      "loss": 1.8902181109336957,
+      "macro_f1": 0.4089187468694868
+    },
+    "train": {
+      "accuracy": 0.8537005163511188,
+      "balanced_accuracy": 0.8470296136681007,
+      "loss": 0.8776613711900432,
+      "macro_f1": 0.8519525727046374
+    },
+    "val": {
+      "accuracy": 0.4365079365079365,
+      "balanced_accuracy": 0.4314574314574315,
+      "loss": 1.8800486326217651,
+      "macro_f1": 0.4183093723417118
+    }
+  },
+  "protocol_version": "hierarchical_context_v1",
+  "provenance": {
+    "checkpoint_selection": "validation balanced accuracy; lower validation whole-count CE tie-break",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "method": "what_only",
+    "seed": 23,
+    "synapse_mode": "legacy"
+  },
+  "stopped_epoch": 92
+}
