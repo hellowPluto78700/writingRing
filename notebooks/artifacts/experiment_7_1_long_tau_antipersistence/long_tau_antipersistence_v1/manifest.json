@@ -1,0 +1,42 @@
+{
+  "backbone": "Raw30 -> S(s4) -> M(s5) -> L(s6) -> short-tau output LIF -> valid WholeCount",
+  "conditions": [
+    "no_reg",
+    "all_loss_masked",
+    "wholecount_only_masked"
+  ],
+  "experiment_id": "experiment_7_1_long_tau_antipersistence",
+  "fixed_visualization_sample": {
+    "valid_length": 90,
+    "validation_index": 39
+  },
+  "gradient_calibration": {
+    "batches": 5,
+    "calibrated_separately_per regularized condition and seed": true,
+    "parameter_scope": "long_linear.weight only",
+    "persistence_target": 0.05,
+    "rate_target": 0.025
+  },
+  "mask_policy": {
+    "all_loss_masked": "WholeCount, rate and persistence all use valid region; persistence windows must lie completely within valid length",
+    "no_reg": "WholeCount valid; no regularizer",
+    "wholecount_only_masked": "WholeCount uses valid region; rate and persistence use the full 256-step trajectory including valid/padding boundary windows"
+  },
+  "notebook_policy": "aggregate-only: notebook consumes summary.csv, dynamics_summary.csv, paired_condition_deltas.csv and calibration_summary.csv; no per-run histories/evaluations/rasters",
+  "objective": "L_WC + warmup * [lambda_r L_rate^L + lambda_p (L_3,2^L + 0.5 L_8,4^L)]",
+  "protocol_version": "long_tau_antipersistence_v1",
+  "question": "Can long-layer-specific rate and anti-persistence regularization suppress pathological sustained firing in a serial s4/s5/s6 end-to-end SNN without killing useful long activity?",
+  "run_count": 9,
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "training": {
+    "earliest_early_stop_epoch": 50,
+    "max_epochs": 100,
+    "minimum_gate_epochs": 20,
+    "patience_after_gate": 30,
+    "regularizer_warmup_epochs": 10
+  }
+}

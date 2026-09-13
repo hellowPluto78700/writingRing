@@ -1,0 +1,242 @@
+{
+  "architecture": {
+    "fusion": "strict serial: output reads long spikes only; no short/middle bypass",
+    "hidden_binary_cap": 1,
+    "hidden_layers": [
+      {
+        "name": "short",
+        "shift_syn": 4,
+        "tau_syn_ms": 242.10347130039656,
+        "width": 128
+      },
+      {
+        "name": "middle",
+        "shift_syn": 5,
+        "tau_syn_ms": 492.1461612435418,
+        "width": 128
+      },
+      {
+        "name": "long",
+        "shift_syn": 6,
+        "tau_syn_ms": 992.1669944116244,
+        "width": 128
+      }
+    ],
+    "hidden_tau_mem_ms": 22.54,
+    "input": {
+      "channels": 30,
+      "representation": "Raw64 30-channel event spike train",
+      "sampling_rate_hz": 64.0,
+      "timesteps": 256
+    },
+    "output": {
+      "cap": 1,
+      "neurons": 12,
+      "readout": "valid-length whole count",
+      "tau_mem_ms": 22.54,
+      "threshold": 0.5,
+      "type": "short-tau binary LIF"
+    },
+    "synaptic_update": "I_t = alpha*I_{t-1} + W*x_t"
+  },
+  "best_epoch": 22,
+  "best_val_ba": 0.2153439153439154,
+  "best_val_loss": 2.360834836959839,
+  "calibration": {
+    "achieved_persist_grad_ratio": 0.049999999999999996,
+    "achieved_rate_grad_ratio": 0.024999999999999998,
+    "batches": [
+      {
+        "batch_index": 0,
+        "p32_loss": 0.32215508818626404,
+        "p84_loss": 5.153005123138428,
+        "persist_long_grad_norm": 0.6506365520173647,
+        "persist_loss": 2.8986575603485107,
+        "persist_to_task_grad_ratio": 6.489812547273345,
+        "rate_long_grad_norm": 0.07570546357210817,
+        "rate_loss": 0.33743834495544434,
+        "rate_to_task_grad_ratio": 0.755128598084511,
+        "task_long_grad_norm": 0.10025506087856509,
+        "task_loss": 3.0466370582580566
+      },
+      {
+        "batch_index": 1,
+        "p32_loss": 0.3171038329601288,
+        "p84_loss": 5.069526672363281,
+        "persist_long_grad_norm": 0.6511450164143742,
+        "persist_loss": 2.851867198944092,
+        "persist_to_task_grad_ratio": 6.349361983109321,
+        "rate_long_grad_norm": 0.07088999553474105,
+        "rate_loss": 0.33032965660095215,
+        "rate_to_task_grad_ratio": 0.6912534555046596,
+        "task_long_grad_norm": 0.10255282627554721,
+        "task_loss": 3.035715341567993
+      },
+      {
+        "batch_index": 2,
+        "p32_loss": 0.28523939847946167,
+        "p84_loss": 4.561515808105469,
+        "persist_long_grad_norm": 0.5316798770941479,
+        "persist_loss": 2.565997362136841,
+        "persist_to_task_grad_ratio": 6.132711110376533,
+        "rate_long_grad_norm": 0.05937195020296735,
+        "rate_loss": 0.30094051361083984,
+        "rate_to_task_grad_ratio": 0.6848312948093477,
+        "task_long_grad_norm": 0.0866957317122841,
+        "task_loss": 2.953951835632324
+      },
+      {
+        "batch_index": 3,
+        "p32_loss": 0.28675973415374756,
+        "p84_loss": 4.58377742767334,
+        "persist_long_grad_norm": 0.5417968948023214,
+        "persist_loss": 2.578648567199707,
+        "persist_to_task_grad_ratio": 6.568693486277183,
+        "rate_long_grad_norm": 0.0616401896684985,
+        "rate_loss": 0.2988889217376709,
+        "rate_to_task_grad_ratio": 0.747319735961361,
+        "task_long_grad_norm": 0.08248168314356615,
+        "task_loss": 2.831289052963257
+      },
+      {
+        "batch_index": 4,
+        "p32_loss": 0.31163567304611206,
+        "p84_loss": 4.979262828826904,
+        "persist_long_grad_norm": 0.6343099043948353,
+        "persist_loss": 2.801267147064209,
+        "persist_to_task_grad_ratio": 4.371897780524096,
+        "rate_long_grad_norm": 0.069318500529081,
+        "rate_loss": 0.32550182938575745,
+        "rate_to_task_grad_ratio": 0.4777686687731549,
+        "task_long_grad_norm": 0.1450879998202509,
+        "task_loss": 2.8773391246795654
+      }
+    ],
+    "calibrated": true,
+    "calibration_batches": 5,
+    "calibration_loader_seed": 3526466939,
+    "condition": "wholecount_only_masked",
+    "lambda_persist": 0.007874806970056335,
+    "lambda_rate": 0.03616618448836308,
+    "median_persist_to_task_grad_ratio": 6.349361983109321,
+    "median_rate_to_task_grad_ratio": 0.6912534555046596,
+    "parameter_scope": "long_linear.weight only",
+    "target_persist_grad_ratio": 0.05,
+    "target_rate_grad_ratio": 0.025
+  },
+  "dynamics": {
+    "test": {
+      "long_current_rms_full": 5.954461764083786,
+      "long_current_rms_padding": 6.469021523425181,
+      "long_current_rms_valid": 4.696391440506611,
+      "long_full_firing_fraction": 0.24913254829302225,
+      "long_global_max_run_full": 253.0,
+      "long_global_max_run_valid": 106.0,
+      "long_mean_max_run_per_neuron_full": 59.83641909246575,
+      "long_mean_max_run_per_neuron_valid": 14.928991866438356,
+      "long_mean_run_length_full": 19.924806499607147,
+      "long_mean_run_length_valid": 17.3239010500089,
+      "long_p95_max_run_per_neuron_full": 228.0,
+      "long_p95_max_run_per_neuron_valid": 65.0,
+      "long_padding_firing_fraction": 0.2778257019641163,
+      "long_valid_firing_fraction": 0.18898911220178927
+    },
+    "train": {
+      "long_current_rms_full": 6.370159710719691,
+      "long_current_rms_padding": 6.936674411971219,
+      "long_current_rms_valid": 5.416481026724315,
+      "long_full_firing_fraction": 0.2273651490728539,
+      "long_global_max_run_full": 253.0,
+      "long_global_max_run_valid": 160.0,
+      "long_mean_max_run_per_neuron_full": 54.74877635542169,
+      "long_mean_max_run_per_neuron_valid": 18.422991071428573,
+      "long_mean_run_length_full": 22.177605287426992,
+      "long_mean_run_length_valid": 18.953489289518323,
+      "long_p95_max_run_per_neuron_full": 230.0,
+      "long_p95_max_run_per_neuron_valid": 84.0,
+      "long_padding_firing_fraction": 0.25336451114243674,
+      "long_valid_firing_fraction": 0.18859754718877184
+    },
+    "val": {
+      "long_current_rms_full": 4.575600763761012,
+      "long_current_rms_padding": 5.00385994071122,
+      "long_current_rms_valid": 3.66354372857973,
+      "long_full_firing_fraction": 0.17497980026971727,
+      "long_global_max_run_full": 246.0,
+      "long_global_max_run_valid": 124.0,
+      "long_mean_max_run_per_neuron_full": 41.73914930555556,
+      "long_mean_max_run_per_neuron_valid": 10.875248015873016,
+      "long_mean_run_length_full": 17.714513400191255,
+      "long_mean_run_length_valid": 15.256133706570065,
+      "long_p95_max_run_per_neuron_full": 215.0,
+      "long_p95_max_run_per_neuron_valid": 61.0,
+      "long_padding_firing_fraction": 0.20112553918044573,
+      "long_valid_firing_fraction": 0.12708840861206216
+    }
+  },
+  "experiment_id": "experiment_7_1_long_tau_antipersistence",
+  "metrics": {
+    "test": {
+      "accuracy": 0.1506849315068493,
+      "balanced_accuracy": 0.14954906204906207,
+      "loss": 2.38830196694152,
+      "macro_f1": 0.1097896052439521
+    },
+    "train": {
+      "accuracy": 0.47676419965576594,
+      "balanced_accuracy": 0.4777888085984376,
+      "loss": 1.6988330316215292,
+      "macro_f1": 0.44857543659820703
+    },
+    "val": {
+      "accuracy": 0.20634920634920634,
+      "balanced_accuracy": 0.2153439153439154,
+      "loss": 2.360834836959839,
+      "macro_f1": 0.19094716199979356
+    }
+  },
+  "protocol_version": "long_tau_antipersistence_v1",
+  "provenance": {
+    "checkpoint_selection": "highest validation BA; lower validation WholeCount CE tie-break",
+    "regularizer_target": "long hidden spikes only; gradients remain end-to-end",
+    "split_seed": 12345,
+    "test_users": [
+      "user_10",
+      "user_3",
+      "user_6"
+    ],
+    "train_users": [
+      "user_0",
+      "user_1",
+      "user_11",
+      "user_12",
+      "user_13",
+      "user_14",
+      "user_15",
+      "user_18",
+      "user_19",
+      "user_2",
+      "user_20",
+      "user_5",
+      "user_7",
+      "user_8"
+    ],
+    "val_users": [
+      "user_16",
+      "user_4",
+      "user_9"
+    ]
+  },
+  "spec": {
+    "condition": "wholecount_only_masked",
+    "seed": 11
+  },
+  "stop_reason": "patience_30_after_min20_gate",
+  "stopped_epoch": 52,
+  "weight_stats": {
+    "long_weight_fro": 6.68134880065918,
+    "long_weight_mean_abs": 0.044735386967659,
+    "long_weight_negative_abs_mean": 0.04569428786635399,
+    "long_weight_positive_mean": 0.04375157877802849
+  }
+}
