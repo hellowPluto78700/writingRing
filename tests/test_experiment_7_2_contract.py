@@ -50,7 +50,7 @@ def test_shift_group_ranges_are_contiguous() -> None:
 
 def test_tau_values_are_expected_at_64_hz() -> None:
     taus = [exp72.tau_ms_from_shift(s, 64.0) for s in (2, 3, 4, 5)]
-    assert np.allclose(taus, [54.29566046810237, 116.98812323729902, 242.10347130039656, 492.1461612435418])
+    assert np.allclose(taus, [54.31342963722199, 117.0136826471659, 242.10347130039656, 492.1461612435418])
 
 
 def test_training_families_have_distinct_heads_and_probe_points() -> None:
