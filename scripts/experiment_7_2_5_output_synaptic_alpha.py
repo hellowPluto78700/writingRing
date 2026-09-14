@@ -690,25 +690,39 @@ def _e2e_regularizer(
 
 def _calibrate_e2e(spec: E2ESpec, model: PairedE2ESNN, data: exp3.Data, config: Config) -> dict[str, Any]:
     if spec.regularization == exp72.TASK_ONLY:
-        return {"calibrated": False, "lambda_rate": 0.0, "lambda_persist": 0.0}
+        return {
+            "calibrated": False,
+            "lambda_rate": 0.0,
+            "lambda_persist": 0.0,
+            "calibration_reference_output_alpha": 0.0,
+        }
     loader = _e2e_loaders(data, spec, config.batch_size, True)["train"]
     params = tuple(layer.weight for layer in model.hidden_linears)
     rate_ratios: list[float] = []
     persist_ratios: list[float] = []
     device = torch.device(config.device)
-    for index, (X, y, lengths) in enumerate(loader):
-        if index >= exp72.CALIBRATION_BATCHES:
-            break
-        X, y, lengths = X.to(device), y.to(device), lengths.to(device)
-        tr = model.forward_trajectory(X)
-        task = _output_objective(tr["output_spikes"], lengths, y, spec.objective, data.fs)
-        rate, _, _, persist = exp72.regularization_terms(tr["hidden_spikes"], lengths)
-        task_grad = exp72._grad_norm(task, params, True)
-        rate_grad = exp72._grad_norm(rate, params, True)
-        persist_grad = exp72._grad_norm(persist, params, False)
-        if task_grad > 1e-12:
-            rate_ratios.append(rate_grad / task_grad)
-            persist_ratios.append(persist_grad / task_grad)
+
+    # Pair regularizer coefficients too: both alpha conditions calibrate against
+    # the alpha=0 reference dynamics with identical initialized weights/order.
+    requested_alpha = model.output_alpha
+    model.output_alpha = 0.0
+    try:
+        for index, (X, y, lengths) in enumerate(loader):
+            if index >= exp72.CALIBRATION_BATCHES:
+                break
+            X, y, lengths = X.to(device), y.to(device), lengths.to(device)
+            tr = model.forward_trajectory(X)
+            task = _output_objective(tr["output_spikes"], lengths, y, spec.objective, data.fs)
+            rate, _, _, persist = exp72.regularization_terms(tr["hidden_spikes"], lengths)
+            task_grad = exp72._grad_norm(task, params, True)
+            rate_grad = exp72._grad_norm(rate, params, True)
+            persist_grad = exp72._grad_norm(persist, params, False)
+            if task_grad > 1e-12:
+                rate_ratios.append(rate_grad / task_grad)
+                persist_ratios.append(persist_grad / task_grad)
+    finally:
+        model.output_alpha = requested_alpha
+
     if not rate_ratios:
         raise RuntimeError(f"No calibration batches for {spec.key}")
     rr = float(np.median(rate_ratios))
@@ -721,6 +735,7 @@ def _calibrate_e2e(spec: E2ESpec, model: PairedE2ESNN, data: exp3.Data, config: 
         "raw_persist_to_task": pr,
         "parameter_scope": "both hidden input matrices only",
         "output_regularized": False,
+        "calibration_reference_output_alpha": 0.0,
     }
 
 

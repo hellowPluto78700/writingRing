@@ -66,6 +66,7 @@ def test_e2e_regularizer_is_hidden_only_and_both_l2_probes_run() -> None:
     source = (REPO_ROOT / "scripts/experiment_7_2_5_output_synaptic_alpha.py").read_text(encoding="utf-8")
     assert 'params = tuple(layer.weight for layer in model.hidden_linears)' in source
     assert '"output_regularized": False' in source
+    assert '"calibration_reference_output_alpha": 0.0' in source
     assert 'VALID_WC_PROBE = "l2_wholecount_linear"' in source
     assert 'VALID_F250_PROBE = "l2_fixed250_linear"' in source
     assert "for source in PROBE_SOURCES" in source
