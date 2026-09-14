@@ -1,0 +1,105 @@
+{
+  "checkpoint": "notebooks/artifacts/experiment_7_2_two_layer_tau_training/two_layer_tau_training_v1/checkpoints/local_tsce/5x5__local_tsce__task_plus_reg__seed11.pt",
+  "checkpoint_best_epoch": 67,
+  "experiment_id": "experiment_7_2_1_phase_weight_probe",
+  "probes": {
+    "l2_fixed250_ordered": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.4246575342465753,
+          "balanced_accuracy": 0.41255619380619374,
+          "macro_f1": 0.41129578521311744
+        },
+        "train": {
+          "accuracy": 0.9879518072289156,
+          "balanced_accuracy": 0.9874447840583139,
+          "macro_f1": 0.9883640026802466
+        },
+        "val": {
+          "accuracy": 0.47619047619047616,
+          "balanced_accuracy": 0.4761002886002886,
+          "macro_f1": 0.4803064475084599
+        }
+      },
+      "probe_C": 0.1,
+      "reused_from": "notebooks/artifacts/experiment_7_2_two_layer_tau_training/two_layer_tau_training_v1/probes/l2_fixed250/5x5__local_tsce__task_plus_reg__seed11.json",
+      "source": "l2_fixed250_ordered"
+    },
+    "l2_fixed250_phase_shuffled": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.38127853881278534,
+          "balanced_accuracy": 0.37593031968031965,
+          "macro_f1": 0.3542377206046708
+        },
+        "train": {
+          "accuracy": 0.9713138267355136,
+          "balanced_accuracy": 0.9691951545772097,
+          "macro_f1": 0.972232854288246
+        },
+        "val": {
+          "accuracy": 0.35714285714285715,
+          "balanced_accuracy": 0.34740660573993903,
+          "macro_f1": 0.34819685431754827
+        }
+      },
+      "probe_C_values": [
+        1.0,
+        0.001,
+        0.01
+      ],
+      "repeat_std": {
+        "test": {
+          "accuracy": 0.04185000634662867,
+          "balanced_accuracy": 0.041439511959444814,
+          "macro_f1": 0.04854408754571391
+        },
+        "train": {
+          "accuracy": 0.027663943663204116,
+          "balanced_accuracy": 0.03054546561931157,
+          "macro_f1": 0.02694931507185123
+        },
+        "val": {
+          "accuracy": 0.015873015873015872,
+          "balanced_accuracy": 0.013234106665623427,
+          "macro_f1": 0.003315633530142474
+        }
+      },
+      "shuffle_repeats": 3,
+      "source": "l2_fixed250_phase_shuffled"
+    },
+    "l2_wholecount_shared": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.4383561643835616,
+          "balanced_accuracy": 0.43112581862581867,
+          "macro_f1": 0.4139952549992596
+        },
+        "train": {
+          "accuracy": 0.9242685025817556,
+          "balanced_accuracy": 0.9234592688652469,
+          "macro_f1": 0.9287174277883169
+        },
+        "val": {
+          "accuracy": 0.3968253968253968,
+          "balanced_accuracy": 0.3884379509379509,
+          "macro_f1": 0.3770987064465326
+        }
+      },
+      "probe_C": 0.01,
+      "source": "l2_wholecount_shared"
+    }
+  },
+  "protocol_version": "phase_weight_probe_v1",
+  "reuses_exp7_2_checkpoint": true,
+  "snn_retrained": false,
+  "spec": {
+    "architecture": "5x5",
+    "regularization": "task_plus_reg",
+    "seed": 11,
+    "training_family": "local_tsce"
+  }
+}
