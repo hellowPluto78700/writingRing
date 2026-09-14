@@ -51,7 +51,6 @@ def test_phase_shuffle_preserves_per_sample_bin_multiset_and_total_count() -> No
 
 
 def test_probe_contract_has_matched_capacity_phase_control() -> None:
-    assert exp721.SHUFfLE_REPEATS == 3 if False else True
     assert exp721.SHUFFLE_REPEATS == 3
     assert exp721.SOURCE_WHOLE == "l2_wholecount_shared"
     assert exp721.SOURCE_ORDERED == "l2_fixed250_ordered"
