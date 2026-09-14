@@ -1,0 +1,79 @@
+{
+  "best_epoch": 94,
+  "experiment_id": "experiment_7_2_3_objective_temporal_dynamics",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5753424657534246,
+      "balanced_accuracy": 0.5582244144744144,
+      "loss": 1.2642824372200117,
+      "macro_f1": 0.5450896017039196
+    },
+    "train": {
+      "accuracy": 0.9328743545611016,
+      "balanced_accuracy": 0.9318163268037436,
+      "loss": 0.520122201327818,
+      "macro_f1": 0.9337355625849838
+    },
+    "val": {
+      "accuracy": 0.5952380952380952,
+      "balanced_accuracy": 0.5833453583453584,
+      "loss": 1.1769107580184937,
+      "macro_f1": 0.5816048791663925
+    }
+  },
+  "output_dynamics": {},
+  "probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6232876712328768,
+          "balanced_accuracy": 0.6115301365301364,
+          "macro_f1": 0.6100182929565113
+        },
+        "train": {
+          "accuracy": 0.9948364888123924,
+          "balanced_accuracy": 0.9949430199430199,
+          "macro_f1": 0.9950641589019406
+        },
+        "val": {
+          "accuracy": 0.6349206349206349,
+          "balanced_accuracy": 0.6263407888407889,
+          "macro_f1": 0.6367263651154601
+        }
+      },
+      "probe_C": 0.1,
+      "source": "l2_fixed250_linear"
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6438356164383562,
+          "balanced_accuracy": 0.6266074203574203,
+          "macro_f1": 0.6300630271958028
+        },
+        "train": {
+          "accuracy": 0.9328743545611016,
+          "balanced_accuracy": 0.9308678284429243,
+          "macro_f1": 0.9346210265304432
+        },
+        "val": {
+          "accuracy": 0.626984126984127,
+          "balanced_accuracy": 0.6067881192881193,
+          "macro_f1": 0.6067170577518963
+        }
+      },
+      "probe_C": 0.01,
+      "source": "l2_wholecount_linear"
+    }
+  },
+  "protocol_version": "objective_temporal_dynamics_v1",
+  "reuses_exp7_2_checkpoint": false,
+  "spec": {
+    "architecture": "234x234",
+    "family": "a2_shared_wholecount",
+    "regularization": "task_plus_reg",
+    "seed": 37
+  }
+}

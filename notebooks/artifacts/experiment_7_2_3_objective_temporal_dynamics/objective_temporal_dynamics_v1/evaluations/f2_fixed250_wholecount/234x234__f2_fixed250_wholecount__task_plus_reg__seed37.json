@@ -1,0 +1,79 @@
+{
+  "best_epoch": 100,
+  "experiment_id": "experiment_7_2_3_objective_temporal_dynamics",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5821917808219178,
+      "balanced_accuracy": 0.5689255189255189,
+      "loss": 1.2830591250772345,
+      "macro_f1": 0.5791846960706609
+    },
+    "train": {
+      "accuracy": 0.9621342512908778,
+      "balanced_accuracy": 0.9611770476190088,
+      "loss": 0.30436125043747553,
+      "macro_f1": 0.9629951677412166
+    },
+    "val": {
+      "accuracy": 0.6587301587301587,
+      "balanced_accuracy": 0.6440235690235689,
+      "loss": 1.1192693710327148,
+      "macro_f1": 0.6496133282698882
+    }
+  },
+  "output_dynamics": {},
+  "probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5821917808219178,
+          "balanced_accuracy": 0.56752553002553,
+          "macro_f1": 0.5853239294068371
+        },
+        "train": {
+          "accuracy": 1.0,
+          "balanced_accuracy": 1.0,
+          "macro_f1": 1.0
+        },
+        "val": {
+          "accuracy": 0.6825396825396826,
+          "balanced_accuracy": 0.6644360269360269,
+          "macro_f1": 0.674896408786569
+        }
+      },
+      "probe_C": 1.0,
+      "source": "l2_fixed250_linear"
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5342465753424658,
+          "balanced_accuracy": 0.5220258907758908,
+          "macro_f1": 0.5315794877113497
+        },
+        "train": {
+          "accuracy": 1.0,
+          "balanced_accuracy": 1.0,
+          "macro_f1": 1.0
+        },
+        "val": {
+          "accuracy": 0.5873015873015873,
+          "balanced_accuracy": 0.5902657527657528,
+          "macro_f1": 0.6045792717774142
+        }
+      },
+      "probe_C": 10.0,
+      "source": "l2_wholecount_linear"
+    }
+  },
+  "protocol_version": "objective_temporal_dynamics_v1",
+  "reuses_exp7_2_checkpoint": false,
+  "spec": {
+    "architecture": "234x234",
+    "family": "f2_fixed250_wholecount",
+    "regularization": "task_plus_reg",
+    "seed": 37
+  }
+}

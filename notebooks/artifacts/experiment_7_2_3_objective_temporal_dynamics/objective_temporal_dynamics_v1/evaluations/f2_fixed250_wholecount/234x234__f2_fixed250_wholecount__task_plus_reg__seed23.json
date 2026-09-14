@@ -1,0 +1,79 @@
+{
+  "best_epoch": 97,
+  "experiment_id": "experiment_7_2_3_objective_temporal_dynamics",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.6027397260273972,
+      "balanced_accuracy": 0.5891636141636141,
+      "loss": 1.3601987590528515,
+      "macro_f1": 0.5903525824578455
+    },
+    "train": {
+      "accuracy": 0.963855421686747,
+      "balanced_accuracy": 0.9628680831150757,
+      "loss": 0.31643308727343195,
+      "macro_f1": 0.9644876257777591
+    },
+    "val": {
+      "accuracy": 0.626984126984127,
+      "balanced_accuracy": 0.6102332852332852,
+      "loss": 1.1462781429290771,
+      "macro_f1": 0.617878907012034
+    }
+  },
+  "output_dynamics": {},
+  "probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5753424657534246,
+          "balanced_accuracy": 0.567511655011655,
+          "macro_f1": 0.5768345837879086
+        },
+        "train": {
+          "accuracy": 0.9965576592082617,
+          "balanced_accuracy": 0.995768618080446,
+          "macro_f1": 0.9962974311832901
+        },
+        "val": {
+          "accuracy": 0.626984126984127,
+          "balanced_accuracy": 0.6201539201539202,
+          "macro_f1": 0.6221342540614986
+        }
+      },
+      "probe_C": 0.01,
+      "source": "l2_fixed250_linear"
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.547945205479452,
+          "balanced_accuracy": 0.5406607281607281,
+          "macro_f1": 0.5506321244139836
+        },
+        "train": {
+          "accuracy": 1.0,
+          "balanced_accuracy": 1.0,
+          "macro_f1": 1.0
+        },
+        "val": {
+          "accuracy": 0.5476190476190477,
+          "balanced_accuracy": 0.5327982202982203,
+          "macro_f1": 0.5306212959745569
+        }
+      },
+      "probe_C": 10.0,
+      "source": "l2_wholecount_linear"
+    }
+  },
+  "protocol_version": "objective_temporal_dynamics_v1",
+  "reuses_exp7_2_checkpoint": false,
+  "spec": {
+    "architecture": "234x234",
+    "family": "f2_fixed250_wholecount",
+    "regularization": "task_plus_reg",
+    "seed": 23
+  }
+}
