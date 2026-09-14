@@ -1,0 +1,122 @@
+{
+  "best_epoch": 96,
+  "calibration": {
+    "achieved_persist_grad_ratio": 0.05,
+    "achieved_rate_grad_ratio": 0.024999999999999998,
+    "batches": [
+      {
+        "batch": 0,
+        "persist_grad": 0.048550936586831434,
+        "rate_grad": 0.009062349291164399,
+        "task_grad": 0.02095786936385116
+      },
+      {
+        "batch": 1,
+        "persist_grad": 0.0647164100536404,
+        "rate_grad": 0.011280957658090831,
+        "task_grad": 0.025697507721589415
+      },
+      {
+        "batch": 2,
+        "persist_grad": 0.06481983230422321,
+        "rate_grad": 0.01080801059273787,
+        "task_grad": 0.03167240418139052
+      },
+      {
+        "batch": 3,
+        "persist_grad": 0.0791568809186275,
+        "rate_grad": 0.01229376985616723,
+        "task_grad": 0.032662814337876336
+      },
+      {
+        "batch": 4,
+        "persist_grad": 0.069515722612458,
+        "rate_grad": 0.01290438238630785,
+        "task_grad": 0.04223127910738793
+      }
+    ],
+    "calibrated": true,
+    "lambda_persist": 0.021583383181876255,
+    "lambda_rate": 0.06642147754517072,
+    "parameter_scope": "both hidden input matrices",
+    "raw_persist_to_task": 2.316596966224712,
+    "raw_rate_to_task": 0.37638427996423973
+  },
+  "deployment_metrics": {
+    "test": {
+      "accuracy": 0.6164383561643836,
+      "balanced_accuracy": 0.6048201798201799,
+      "macro_f1": 0.6025371559747562
+    },
+    "train": {
+      "accuracy": 0.9586919104991394,
+      "balanced_accuracy": 0.958161904936643,
+      "macro_f1": 0.9613937463809722
+    },
+    "val": {
+      "accuracy": 0.5873015873015873,
+      "balanced_accuracy": 0.5691558441558441,
+      "macro_f1": 0.5739500205676676
+    }
+  },
+  "deployment_source": "l2_fixed250",
+  "experiment_id": "experiment_7_2_two_layer_tau_training",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5,
+      "balanced_accuracy": 0.47275086025086016,
+      "loss": 1.7124023143559286,
+      "macro_f1": 0.4396507666033909
+    },
+    "train": {
+      "accuracy": 0.8657487091222031,
+      "balanced_accuracy": 0.8570460220483641,
+      "loss": 1.0701955052127936,
+      "macro_f1": 0.8608513152254341
+    },
+    "val": {
+      "accuracy": 0.4523809523809524,
+      "balanced_accuracy": 0.44597162097162096,
+      "loss": 1.757759928703308,
+      "macro_f1": 0.40940420514150094
+    }
+  },
+  "probes": {
+    "l2_fixed250": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6164383561643836,
+          "balanced_accuracy": 0.6048201798201799,
+          "macro_f1": 0.6025371559747562
+        },
+        "train": {
+          "accuracy": 0.9586919104991394,
+          "balanced_accuracy": 0.958161904936643,
+          "macro_f1": 0.9613937463809722
+        },
+        "val": {
+          "accuracy": 0.5873015873015873,
+          "balanced_accuracy": 0.5691558441558441,
+          "macro_f1": 0.5739500205676676
+        }
+      },
+      "probe_C": 0.01,
+      "source": "l2_fixed250"
+    }
+  },
+  "protocol_version": "two_layer_tau_training_v1",
+  "raster_sample": {
+    "label": "X",
+    "sample_index": 39,
+    "split": "val",
+    "valid_length": 90
+  },
+  "spec": {
+    "architecture": "234x234",
+    "regularization": "task_plus_reg",
+    "seed": 37,
+    "training_family": "local_tsce"
+  },
+  "stopped_epoch": 100
+}
