@@ -115,7 +115,7 @@ def test_slurm_topology_is_84_cpu_workers_plus_dependency_finalizer() -> None:
     worker = (REPO_ROOT / "scripts/bash_script/SNN_Bash/run_exp_7_2_cpu_array.bash").read_text(encoding="utf-8")
     finalizer = (REPO_ROOT / "scripts/bash_script/SNN_Bash/finalize_exp_7_2_cpu.bash").read_text(encoding="utf-8")
     submit = (REPO_ROOT / "scripts/bash_script/SNN_Bash/submit_exp_7_2_cpu.bash").read_text(encoding="utf-8")
-    assert "#SBATCH --array=0-83%24" in worker
+    assert "#SBATCH --array=0-83%50" in worker
     for text in (worker, finalizer):
         assert "#SBATCH --cpus-per-task=1" in text
         for token in ("OMP_NUM_THREADS=1", "MKL_NUM_THREADS=1", "OPENBLAS_NUM_THREADS=1", "NUMEXPR_NUM_THREADS=1"):
