@@ -35,7 +35,7 @@ This block measures the readout-dynamics effect with L1/L2 fixed.
 
 ### Block B — Paired end-to-end training
 
-Train a new two-hidden-layer SNN end-to-end with the same two Exp7.2.3 architectures:
+Train a new two-hidden-layer SNN end-to-end with an explicit two-backbone whitelist (independent of any future expansion of Exp7.2.3):
 
 - `234x234`: L1 `(2,3,4)`, L2 `(2,3,4)`
 - `34x345`: L1 `(3,4)`, L2 `(3,4,5)`
