@@ -15,11 +15,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def test_exact_run_counts_and_source_families() -> None:
     assert exp725.SOURCE_FAMILIES == (exp723.S1, exp723.S2, exp723.S3, exp723.S4)
     assert exp725.ARCHITECTURE_ORDER == ("234x234", "34x345")
+    assert exp725.E2E_ARCHITECTURE_ORDER == ("234x234", "34x345")
     assert exp725.OUTPUT_ALPHAS == (0.0, 0.5)
     assert exp725.OUTPUT_BETA == 0.5
     assert len(exp725.source_specs()) == 48
     assert len(exp725.frozen_head_specs()) == 192
     assert len(exp725.e2e_specs()) == 48
+    assert {spec.architecture for spec in exp725.e2e_specs()} == {"234x234", "34x345"}
 
 
 def test_alpha_pairing_seeds_exclude_alpha() -> None:

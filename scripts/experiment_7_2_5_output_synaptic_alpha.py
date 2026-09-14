@@ -28,6 +28,7 @@ PROTOCOL_VERSION = "output_synaptic_alpha_v1"
 SOURCE_FAMILIES = (exp723.S1, exp723.S2, exp723.S3, exp723.S4)
 ARCHITECTURES = {name: exp723.ARCHITECTURES[name] for name in exp723.ARCHITECTURE_ORDER}
 ARCHITECTURE_ORDER = tuple(ARCHITECTURES)
+E2E_ARCHITECTURE_ORDER = ("234x234", "34x345")
 REGULARIZATIONS = exp723.REGULARIZATIONS
 SEEDS = exp723.SEEDS
 OBJECTIVES = ("whole_count_ce", "timestep_ce")
@@ -145,7 +146,7 @@ def frozen_head_specs() -> list[FrozenHeadSpec]:
 def e2e_specs() -> list[E2ESpec]:
     return [
         E2ESpec(a, r, s, objective, alpha)
-        for a in ARCHITECTURE_ORDER
+        for a in E2E_ARCHITECTURE_ORDER
         for r in REGULARIZATIONS
         for s in SEEDS
         for objective in OBJECTIVES
@@ -173,7 +174,7 @@ def validate_frozen_spec(spec: FrozenHeadSpec) -> None:
 
 
 def validate_e2e_spec(spec: E2ESpec) -> None:
-    if spec.architecture not in ARCHITECTURES:
+    if spec.architecture not in E2E_ARCHITECTURE_ORDER:
         raise ValueError(spec.architecture)
     if spec.regularization not in REGULARIZATIONS:
         raise ValueError(spec.regularization)
