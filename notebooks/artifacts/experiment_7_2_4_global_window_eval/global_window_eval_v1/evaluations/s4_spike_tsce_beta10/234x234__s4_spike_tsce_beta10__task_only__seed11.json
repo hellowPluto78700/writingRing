@@ -1,0 +1,221 @@
+{
+  "experiment_id": "experiment_7_2_4_global_window_eval",
+  "global_probes": {
+    "l2_global_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.4383561643835616,
+          "balanced_accuracy": 0.4210581085581086,
+          "macro_f1": 0.41867497749850685
+        },
+        "train": {
+          "accuracy": 0.6660929432013769,
+          "balanced_accuracy": 0.6469208141693835,
+          "macro_f1": 0.6706768898939388
+        },
+        "val": {
+          "accuracy": 0.3968253968253968,
+          "balanced_accuracy": 0.3693121693121693,
+          "macro_f1": 0.36369481501296014
+        }
+      },
+      "paired_valid_source": "l2_fixed250_linear",
+      "probe_C": 0.001,
+      "source": "l2_global_fixed250_linear"
+    },
+    "l2_global_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.3835616438356164,
+          "balanced_accuracy": 0.3692044067044067,
+          "macro_f1": 0.3582272011446241
+        },
+        "train": {
+          "accuracy": 0.8158347676419966,
+          "balanced_accuracy": 0.8130645980489568,
+          "macro_f1": 0.830256801102514
+        },
+        "val": {
+          "accuracy": 0.38095238095238093,
+          "balanced_accuracy": 0.37388167388167387,
+          "macro_f1": 0.3806096910199077
+        }
+      },
+      "paired_valid_source": "l2_wholecount_linear",
+      "probe_C": 1.0,
+      "source": "l2_global_wholecount_linear"
+    }
+  },
+  "protocol_version": "global_window_eval_v1",
+  "reuses_exp7_2_checkpoint": false,
+  "source_best_epoch": 86,
+  "source_experiment_id": "experiment_7_2_3_objective_temporal_dynamics",
+  "spec": {
+    "architecture": "234x234",
+    "family": "s4_spike_tsce_beta10",
+    "regularization": "task_only",
+    "seed": 11
+  },
+  "tail_activity": {
+    "test": {
+      "n_samples": 146.0,
+      "tail_fraction": 0.14095368122977348,
+      "tail_spikes": 22300.0,
+      "tail_spikes_per_neuron_second": 0.44064179576351564,
+      "tail_steps": 25304.0,
+      "valid_spikes": 135908.0,
+      "valid_spikes_per_neuron_second": 5.629058979456594,
+      "valid_steps": 12072.0
+    },
+    "train": {
+      "n_samples": 581.0,
+      "tail_fraction": 0.14324652111952518,
+      "tail_spikes": 101221.0,
+      "tail_spikes_per_neuron_second": 0.5684720708982466,
+      "tail_steps": 89029.0,
+      "valid_spikes": 605400.0,
+      "valid_spikes_per_neuron_second": 5.069757314887702,
+      "valid_steps": 59707.0
+    },
+    "val": {
+      "n_samples": 126.0,
+      "tail_fraction": 0.10623976279575806,
+      "tail_spikes": 8886.0,
+      "tail_spikes_per_neuron_second": 0.21294033069734003,
+      "tail_steps": 20865.0,
+      "valid_spikes": 74755.0,
+      "valid_spikes_per_neuron_second": 3.281318584847687,
+      "valid_steps": 11391.0
+    }
+  },
+  "tail_offset_activity": {
+    "test": [
+      {
+        "available_steps": 2336,
+        "offset": "0_250ms",
+        "offset_start_steps": 0,
+        "offset_stop_steps": 16,
+        "spike_count": 18914.0,
+        "spikes_per_neuron_second": 4.048373287671233
+      },
+      {
+        "available_steps": 2336,
+        "offset": "250_500ms",
+        "offset_start_steps": 16,
+        "offset_stop_steps": 32,
+        "spike_count": 3121.0,
+        "spikes_per_neuron_second": 0.6680222602739726
+      },
+      {
+        "available_steps": 2336,
+        "offset": "500_750ms",
+        "offset_start_steps": 32,
+        "offset_stop_steps": 48,
+        "spike_count": 265.0,
+        "spikes_per_neuron_second": 0.0567208904109589
+      },
+      {
+        "available_steps": 2336,
+        "offset": "750_1000ms",
+        "offset_start_steps": 48,
+        "offset_stop_steps": 64,
+        "spike_count": 0.0,
+        "spikes_per_neuron_second": 0.0
+      },
+      {
+        "available_steps": 15960,
+        "offset": "ge_1000ms",
+        "offset_start_steps": 64,
+        "offset_stop_steps": null,
+        "spike_count": 0.0,
+        "spikes_per_neuron_second": 0.0
+      }
+    ],
+    "train": [
+      {
+        "available_steps": 9289,
+        "offset": "0_250ms",
+        "offset_start_steps": 0,
+        "offset_stop_steps": 16,
+        "spike_count": 85627.0,
+        "spikes_per_neuron_second": 4.609053719453117
+      },
+      {
+        "available_steps": 9267,
+        "offset": "250_500ms",
+        "offset_start_steps": 16,
+        "offset_stop_steps": 32,
+        "spike_count": 14135.0,
+        "spikes_per_neuron_second": 0.7626524225747275
+      },
+      {
+        "available_steps": 9264,
+        "offset": "500_750ms",
+        "offset_start_steps": 32,
+        "offset_stop_steps": 48,
+        "spike_count": 1393.0,
+        "spikes_per_neuron_second": 0.07518350604490501
+      },
+      {
+        "available_steps": 9261,
+        "offset": "750_1000ms",
+        "offset_start_steps": 48,
+        "offset_stop_steps": 64,
+        "spike_count": 66.0,
+        "spikes_per_neuron_second": 0.0035633300939423387
+      },
+      {
+        "available_steps": 51948,
+        "offset": "ge_1000ms",
+        "offset_start_steps": 64,
+        "offset_stop_steps": null,
+        "spike_count": 0.0,
+        "spikes_per_neuron_second": 0.0
+      }
+    ],
+    "val": [
+      {
+        "available_steps": 2016,
+        "offset": "0_250ms",
+        "offset_start_steps": 0,
+        "offset_stop_steps": 16,
+        "spike_count": 7859.0,
+        "spikes_per_neuron_second": 1.949156746031746
+      },
+      {
+        "available_steps": 2016,
+        "offset": "250_500ms",
+        "offset_start_steps": 16,
+        "offset_stop_steps": 32,
+        "spike_count": 1007.0,
+        "spikes_per_neuron_second": 0.24975198412698413
+      },
+      {
+        "available_steps": 2016,
+        "offset": "500_750ms",
+        "offset_start_steps": 32,
+        "offset_stop_steps": 48,
+        "spike_count": 20.0,
+        "spikes_per_neuron_second": 0.00496031746031746
+      },
+      {
+        "available_steps": 2016,
+        "offset": "750_1000ms",
+        "offset_start_steps": 48,
+        "offset_stop_steps": 64,
+        "spike_count": 0.0,
+        "spikes_per_neuron_second": 0.0
+      },
+      {
+        "available_steps": 12801,
+        "offset": "ge_1000ms",
+        "offset_start_steps": 64,
+        "offset_stop_steps": null,
+        "spike_count": 0.0,
+        "spikes_per_neuron_second": 0.0
+      }
+    ]
+  }
+}
