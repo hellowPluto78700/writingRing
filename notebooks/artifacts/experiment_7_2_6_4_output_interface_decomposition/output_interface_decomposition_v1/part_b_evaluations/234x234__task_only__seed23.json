@@ -1,0 +1,154 @@
+{
+  "contract": {
+    "frozen_l1_l2": true,
+    "frozen_source_w": true,
+    "no_training": true,
+    "softmax_temperatures": [
+      0.25,
+      0.5,
+      1.0,
+      2.0
+    ]
+  },
+  "evidence_diagnostics": {
+    "test": {
+      "mean_abs_evidence": 2.262464003964591,
+      "mean_negative_evidence": -3.176956668080077,
+      "mean_positive_evidence": 1.7621147872251657,
+      "negative_evidence_fraction": 0.5693685111552905,
+      "positive_evidence_fraction": 0.2574207532582284
+    },
+    "val": {
+      "mean_abs_evidence": 2.0365049014484087,
+      "mean_negative_evidence": -3.0941214349948356,
+      "mean_positive_evidence": 1.6165378645123418,
+      "negative_evidence_fraction": 0.5179015597108828,
+      "positive_evidence_fraction": 0.2685087642290697
+    }
+  },
+  "experiment_id": "experiment_7_2_6_4_output_interface_decomposition",
+  "protocol_version": "output_interface_decomposition_v1",
+  "rows": [
+    {
+      "accuracy": 0.5238095238095238,
+      "balanced_accuracy": 0.5114177489177488,
+      "condition": "raw_signed",
+      "macro_f1": 0.5054930406650344,
+      "split": "val",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.4523809523809524,
+      "balanced_accuracy": 0.4275553150553151,
+      "condition": "positive_only",
+      "macro_f1": 0.41212769962870915,
+      "split": "val",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.4444444444444444,
+      "balanced_accuracy": 0.4370129870129871,
+      "condition": "lif_beta05",
+      "macro_f1": 0.4265266930322444,
+      "split": "val",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.4126984126984127,
+      "balanced_accuracy": 0.3832431457431458,
+      "condition": "softmax_vote",
+      "macro_f1": 0.34152982326223497,
+      "split": "val",
+      "temperature": 0.25
+    },
+    {
+      "accuracy": 0.40476190476190477,
+      "balanced_accuracy": 0.3762987012987013,
+      "condition": "softmax_vote",
+      "macro_f1": 0.33737010358527386,
+      "split": "val",
+      "temperature": 0.5
+    },
+    {
+      "accuracy": 0.4126984126984127,
+      "balanced_accuracy": 0.3832431457431458,
+      "condition": "softmax_vote",
+      "macro_f1": 0.3404028088238615,
+      "split": "val",
+      "temperature": 1.0
+    },
+    {
+      "accuracy": 0.4365079365079365,
+      "balanced_accuracy": 0.4100949975949976,
+      "condition": "softmax_vote",
+      "macro_f1": 0.38514105719988073,
+      "split": "val",
+      "temperature": 2.0
+    },
+    {
+      "accuracy": 0.547945205479452,
+      "balanced_accuracy": 0.5303994616494616,
+      "condition": "raw_signed",
+      "macro_f1": 0.506042309543297,
+      "split": "test",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.5273972602739726,
+      "balanced_accuracy": 0.5075459262959262,
+      "condition": "positive_only",
+      "macro_f1": 0.48845101564599197,
+      "split": "test",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.5205479452054794,
+      "balanced_accuracy": 0.5102355977355977,
+      "condition": "lif_beta05",
+      "macro_f1": 0.4875195817491214,
+      "split": "test",
+      "temperature": null
+    },
+    {
+      "accuracy": 0.4589041095890411,
+      "balanced_accuracy": 0.4275405150405151,
+      "condition": "softmax_vote",
+      "macro_f1": 0.39093879750972177,
+      "split": "test",
+      "temperature": 0.25
+    },
+    {
+      "accuracy": 0.4794520547945205,
+      "balanced_accuracy": 0.45310869685869687,
+      "condition": "softmax_vote",
+      "macro_f1": 0.42634676186505455,
+      "split": "test",
+      "temperature": 0.5
+    },
+    {
+      "accuracy": 0.4726027397260274,
+      "balanced_accuracy": 0.4471563159063159,
+      "condition": "softmax_vote",
+      "macro_f1": 0.42034202569916856,
+      "split": "test",
+      "temperature": 1.0
+    },
+    {
+      "accuracy": 0.5136986301369864,
+      "balanced_accuracy": 0.48949037074037066,
+      "condition": "softmax_vote",
+      "macro_f1": 0.46710133583292995,
+      "split": "test",
+      "temperature": 2.0
+    }
+  ],
+  "spec": {
+    "seed": 23
+  },
+  "validation_selected_softmax_test_metrics": {
+    "accuracy": 0.5136986301369864,
+    "balanced_accuracy": 0.48949037074037066,
+    "macro_f1": 0.46710133583292995
+  },
+  "validation_selected_temperature": 2.0
+}
