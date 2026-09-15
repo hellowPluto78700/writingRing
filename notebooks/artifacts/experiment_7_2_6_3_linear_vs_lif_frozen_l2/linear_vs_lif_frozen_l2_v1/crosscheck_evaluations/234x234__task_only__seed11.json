@@ -1,0 +1,67 @@
+{
+  "crosscheck": {
+    "X1_wlin_analog": {
+      "accuracy": 0.5684931506849316,
+      "balanced_accuracy": 0.5505723443223443,
+      "macro_f1": 0.5452973954880896
+    },
+    "X2_wlin_lif_beta05": {
+      "accuracy": 0.5342465753424658,
+      "balanced_accuracy": 0.512580475080475,
+      "macro_f1": 0.5070692101129858
+    },
+    "X3_wlif_analog": {
+      "accuracy": 0.5,
+      "balanced_accuracy": 0.47719294594294587,
+      "macro_f1": 0.4588435228336705
+    },
+    "X4_wlif_lif_beta05": {
+      "accuracy": 0.5,
+      "balanced_accuracy": 0.46971639471639465,
+      "macro_f1": 0.4469469217464315
+    }
+  },
+  "decomposition_pp": {
+    "native_head_gap_x1_minus_x4_pp": 8.08559496059496,
+    "projection_quality_gap_x1_minus_x3_pp": 7.337939837939839,
+    "wlif_dynamics_gap_x3_minus_x4_pp": 0.747655122655122,
+    "wlin_dynamics_gap_x1_minus_x2_pp": 3.799186924186926
+  },
+  "experiment_id": "experiment_7_2_6_3_linear_vs_lif_frozen_l2",
+  "firing_diagnostics": {
+    "X2_wlin_lif_beta05": {
+      "max_abs_charge_identity_error": 2.2737367544323206e-13,
+      "mean_abs_final_membrane": 6.098169758840112,
+      "mean_spikes_per_output_neuron_sample": 21.57933789954338,
+      "mean_total_output_spikes_per_sample": 258.95205479452056,
+      "negative_evidence_fraction": 0.5378423901038215,
+      "output_spikes_per_neuron_second": 16.702893748619395,
+      "potential_multi_crossing_fraction": 0.234737408880053,
+      "silent_output_neuron_fraction": 0.158675799086758,
+      "silent_sample_fraction": 0.0
+    },
+    "X4_wlif_lif_beta05": {
+      "max_abs_charge_identity_error": 5.684341886080802e-14,
+      "mean_abs_final_membrane": 0.8338117552679679,
+      "mean_spikes_per_output_neuron_sample": 15.091324200913242,
+      "mean_total_output_spikes_per_sample": 181.0958904109589,
+      "negative_evidence_fraction": 0.46363485752153744,
+      "output_spikes_per_neuron_second": 11.681024961343052,
+      "potential_multi_crossing_fraction": 0.06988623812679479,
+      "silent_output_neuron_fraction": 0.2505707762557078,
+      "silent_sample_fraction": 0.0
+    }
+  },
+  "paired_head_training": {
+    "bias": false,
+    "ce_logit_gain": 1.0,
+    "lif_loss": "CE(valid_mean(S), y)",
+    "linear_loss": "CE(valid_mean(Wz), y)",
+    "same_initial_w": true,
+    "same_loader_order": true
+  },
+  "protocol_version": "linear_vs_lif_frozen_l2_v1",
+  "spec": {
+    "seed": 11
+  }
+}
