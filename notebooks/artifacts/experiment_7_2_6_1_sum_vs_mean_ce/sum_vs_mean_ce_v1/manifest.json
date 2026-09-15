@@ -1,0 +1,29 @@
+{
+  "architecture": "234x234",
+  "checkpoint_selection": "highest validation BA under the condition's training objective; validation objective loss tie-break",
+  "conditions": {
+    "mean_ce": "Exact paired rerun with the sole training change: valid mean logits before CE",
+    "sum_ce_reuse_c0": "Exact existing Exp7.2.6 C0: bias-free analog output, valid sum logits before CE"
+  },
+  "experiment_id": "experiment_7_2_6_1_sum_vs_mean_ce",
+  "new_training_runs": 3,
+  "notebook_inputs": [
+    "native_performance_summary.csv",
+    "l2_probe_summary.csv",
+    "paired_delta_summary.csv",
+    "readout_equivalence_summary.csv",
+    "scaling_diagnostics_summary.csv",
+    "training_history_summary.csv"
+  ],
+  "pairing": "same model class, bias=False, model-init seed stream, loader seed stream, Adam/LR/weight decay, max/min epochs and patience",
+  "protocol_version": "sum_vs_mean_ce_v1",
+  "readout_sanity": "For a fixed bias-free model, sum logits = valid_length * mean logits, so argmax predictions must match exactly",
+  "regularization": "task_only",
+  "reused_sum_runs": 3,
+  "scientific_question": "Does valid-length normalization before CE explain the Exp7.2.4 A2 vs Exp7.2.6 C0 gap?",
+  "seeds": [
+    11,
+    23,
+    37
+  ]
+}
