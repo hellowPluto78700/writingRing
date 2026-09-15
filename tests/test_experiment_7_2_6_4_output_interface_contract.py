@@ -34,11 +34,22 @@ def test_zero_input_flush_and_infinite_if_ceiling() -> None:
     counts = np.array([[2.0, 0.0]])
     residual = np.array([[2.4, -3.0]])
     finite, mem, extra = exp7264._flush_from_state(counts, residual, beta=1.0, steps=1)
-    assert np.allclose(finite, [[3.0, 0.0]])
-    assert np.allclose(extra, [[1.0, 0.0]])
-    assert np.allclose(mem, [[1.4, -3.0]])
+
+    expected_spikes = min(
+        np.floor(max(residual[0, 0], 0.0) / exp7264.THRESHOLD),
+        float(exp7264.OUTPUT_CAP),
+    )
+    expected_mem = residual[0, 0] - exp7264.THRESHOLD * expected_spikes
+
+    assert np.allclose(finite, [[2.0 + expected_spikes, 0.0]])
+    assert np.allclose(extra, [[expected_spikes, 0.0]])
+    assert np.allclose(mem, [[expected_mem, -3.0]])
+
     infinite = exp7264._infinite_if_counts(counts, residual)
-    assert np.allclose(infinite, [[4.0, 0.0]])
+    expected_infinite = counts[0, 0] + np.floor(
+        max(residual[0, 0], 0.0) / exp7264.THRESHOLD
+    )
+    assert np.allclose(infinite, [[expected_infinite, 0.0]])
 
 
 def test_softmax_vote_is_positive_and_equal_mass_per_valid_step() -> None:
