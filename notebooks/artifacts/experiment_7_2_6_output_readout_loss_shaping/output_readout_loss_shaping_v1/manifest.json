@@ -1,0 +1,54 @@
+{
+  "architecture": "234x234",
+  "checkpoint_selection": "validation valid-length WholeCount BA; validation loss tie-break",
+  "e2e_pairing": "C0/C1 reuse exact Exp7.2.5 C2 model-init and loader seed stream",
+  "experiment_id": "experiment_7_2_6_output_readout_loss_shaping",
+  "frozen_head_training_runs": 12,
+  "gain_calibration": "validation-only beta=1 cap=1 IF; fixed thereafter",
+  "mechanism_tasks": 6,
+  "new_e2e_training_runs": 12,
+  "notebook_inputs": [
+    "crosscheck_2x2_summary.csv",
+    "mechanism_ladder_summary.csv",
+    "beta_sweep_summary.csv",
+    "cap_polarity_controls.csv",
+    "e2e_performance_summary.csv",
+    "e2e_l2_probe_summary.csv",
+    "representation_shaping_delta_summary.csv",
+    "report_task_only_crosscheck.csv",
+    "report_task_only_mechanism.csv",
+    "report_task_only_e2e.csv",
+    "report_task_plus_reg_crosscheck.csv",
+    "report_task_plus_reg_mechanism.csv",
+    "report_task_plus_reg_e2e.csv"
+  ],
+  "objective": "whole_count_ce",
+  "probe_tasks_including_reused_c2": 18,
+  "protocol_version": "output_readout_loss_shaping_v1",
+  "regularizations": [
+    "task_only",
+    "task_plus_reg"
+  ],
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "shift_profile": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "source_cache_tasks": 6,
+  "source_condition": {
+    "output_alpha": 0.0,
+    "output_beta": 0.5
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "checkpoint_best_epoch": 97,
+  "experiment_id": "experiment_7_2_6_output_readout_loss_shaping",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5273972602739726,
+      "balanced_accuracy": 0.5105984293484294,
+      "macro_f1": 0.48791794907957864
+    },
+    "train": {
+      "accuracy": 0.8881239242685026,
+      "balanced_accuracy": 0.8889100738063882,
+      "macro_f1": 0.8868665606715965
+    },
+    "val": {
+      "accuracy": 0.46825396825396826,
+      "balanced_accuracy": 0.45229076479076474,
+      "macro_f1": 0.443742074846951
+    }
+  },
+  "probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.541095890410959,
+          "balanced_accuracy": 0.5290175102675101,
+          "macro_f1": 0.5422283734783735
+        },
+        "train": {
+          "accuracy": 0.9793459552495697,
+          "balanced_accuracy": 0.9794272152074116,
+          "macro_f1": 0.9809190888716657
+        },
+        "val": {
+          "accuracy": 0.5079365079365079,
+          "balanced_accuracy": 0.49428210678210677,
+          "macro_f1": 0.5109366851472115
+        }
+      },
+      "probe_C": 0.1,
+      "source": "l2_fixed250_linear"
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5684931506849316,
+          "balanced_accuracy": 0.5562611000111001,
+          "macro_f1": 0.5590124608506961
+        },
+        "train": {
+          "accuracy": 0.9294320137693631,
+          "balanced_accuracy": 0.9289694965433913,
+          "macro_f1": 0.933536202805152
+        },
+        "val": {
+          "accuracy": 0.47619047619047616,
+          "balanced_accuracy": 0.4565836940836941,
+          "macro_f1": 0.451975395568073
+        }
+      },
+      "probe_C": 0.1,
+      "source": "l2_wholecount_linear"
+    },
+    "l2_wholecount_matched_biasfree": {
+      "best_epoch": 77,
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.4726027397260274,
+          "balanced_accuracy": 0.4600142912642913,
+          "macro_f1": 0.4568576376419513
+        },
+        "train": {
+          "accuracy": 0.9173838209982789,
+          "balanced_accuracy": 0.9202793778619697,
+          "macro_f1": 0.9155103917499249
+        },
+        "val": {
+          "accuracy": 0.5,
+          "balanced_accuracy": 0.4831770081770082,
+          "macro_f1": 0.48125688754642854
+        }
+      },
+      "source": "l2_wholecount_matched_biasfree"
+    }
+  },
+  "protocol_version": "output_readout_loss_shaping_v1",
+  "spec": {
+    "condition": "c2_lif_beta05_reuse",
+    "regularization": "task_plus_reg",
+    "seed": 37
+  }
+}

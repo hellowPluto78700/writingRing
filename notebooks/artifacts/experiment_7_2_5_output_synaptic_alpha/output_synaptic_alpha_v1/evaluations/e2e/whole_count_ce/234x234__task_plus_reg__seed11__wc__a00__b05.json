@@ -1,0 +1,138 @@
+{
+  "best_epoch": 94,
+  "block": "e2e",
+  "calibration": {
+    "calibrated": true,
+    "calibration_reference_output_alpha": 0.0,
+    "lambda_persist": 0.02878729398721998,
+    "lambda_rate": 0.09887911937054733,
+    "output_regularized": false,
+    "parameter_scope": "both hidden input matrices only",
+    "raw_persist_to_task": 1.7368773884130035,
+    "raw_rate_to_task": 0.25283396696033517
+  },
+  "experiment_id": "experiment_7_2_5_output_synaptic_alpha",
+  "metrics": {
+    "test": {
+      "full": {
+        "accuracy": 0.4794520547945205,
+        "balanced_accuracy": 0.4591866466866467,
+        "macro_f1": 0.44171736645992943
+      },
+      "objective_loss": 1.6956066530044764,
+      "tail": {
+        "tail_fraction": 0.2569585473659061,
+        "tail_spikes": 6453.0,
+        "tail_spikes_per_neuron_second": 1.3601011697755296,
+        "tail_steps": 25304.0,
+        "valid_spikes": 18660.0,
+        "valid_spikes_per_neuron_second": 8.243870112657389,
+        "valid_steps": 12072.0
+      },
+      "valid": {
+        "accuracy": 0.5,
+        "balanced_accuracy": 0.4777861027861028,
+        "macro_f1": 0.4567977136150287
+      }
+    },
+    "train": {
+      "full": {
+        "accuracy": 0.7986230636833046,
+        "balanced_accuracy": 0.7941800739726506,
+        "macro_f1": 0.789930956399049
+      },
+      "objective_loss": 1.0291509361562547,
+      "tail": {
+        "tail_fraction": 0.22062365731397696,
+        "tail_spikes": 23723.0,
+        "tail_spikes_per_neuron_second": 1.4211399281881933,
+        "tail_steps": 89029.0,
+        "valid_spikes": 83804.0,
+        "valid_spikes_per_neuron_second": 7.4858001016072935,
+        "valid_steps": 59707.0
+      },
+      "valid": {
+        "accuracy": 0.8399311531841652,
+        "balanced_accuracy": 0.8364653132084108,
+        "macro_f1": 0.8356851713223133
+      }
+    },
+    "val": {
+      "full": {
+        "accuracy": 0.42063492063492064,
+        "balanced_accuracy": 0.4046115921115921,
+        "macro_f1": 0.3836004211587376
+      },
+      "objective_loss": 1.8566995859146118,
+      "tail": {
+        "tail_fraction": 0.20763163504583246,
+        "tail_spikes": 3896.0,
+        "tail_spikes_per_neuron_second": 0.9958622893202332,
+        "tail_steps": 20865.0,
+        "valid_spikes": 14868.0,
+        "valid_spikes_per_neuron_second": 6.961285225177772,
+        "valid_steps": 11391.0
+      },
+      "valid": {
+        "accuracy": 0.42857142857142855,
+        "balanced_accuracy": 0.41387085137085133,
+        "macro_f1": 0.39322645381569865
+      }
+    }
+  },
+  "probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.636986301369863,
+          "balanced_accuracy": 0.6227362914862914,
+          "macro_f1": 0.6208943261426493
+        },
+        "train": {
+          "accuracy": 0.9173838209982789,
+          "balanced_accuracy": 0.9163484824332911,
+          "macro_f1": 0.9243776589572147
+        },
+        "val": {
+          "accuracy": 0.47619047619047616,
+          "balanced_accuracy": 0.46558441558441555,
+          "macro_f1": 0.4724352324661923
+        }
+      },
+      "probe_C": 0.01,
+      "source": "l2_fixed250_linear"
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.589041095890411,
+          "balanced_accuracy": 0.5731261793761793,
+          "macro_f1": 0.5693966928075088
+        },
+        "train": {
+          "accuracy": 0.891566265060241,
+          "balanced_accuracy": 0.8872773357161893,
+          "macro_f1": 0.896951050830005
+        },
+        "val": {
+          "accuracy": 0.4603174603174603,
+          "balanced_accuracy": 0.44951298701298703,
+          "macro_f1": 0.4450243054122904
+        }
+      },
+      "probe_C": 0.1,
+      "source": "l2_wholecount_linear"
+    }
+  },
+  "protocol_version": "output_synaptic_alpha_v1",
+  "spec": {
+    "architecture": "234x234",
+    "objective": "whole_count_ce",
+    "output_alpha": 0.0,
+    "regularization": "task_plus_reg",
+    "seed": 11
+  },
+  "stopped_epoch": 100
+}
