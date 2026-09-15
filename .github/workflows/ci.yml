@@ -86,6 +86,19 @@ jobs:
             bash -n "$script"
           done
 
+      - name: Validate Exp7.2.6.1 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/submit_exp_7_2_6_1_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_7_2_6_1_mean_ce_cpu_array.bash
+            scripts/bash_script/SNN_Bash/run_exp_7_2_6_1_probe_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_7_2_6_1_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
       - name: Run CI contract checks
         run: |
           python -m pytest -q --durations=10 \
@@ -138,4 +151,5 @@ jobs:
             tests/test_experiment_5_5_4_contract.py \
             tests/test_experiment_7_2_4_global_window_eval_contract.py \
             tests/test_experiment_7_2_5_output_synaptic_alpha_contract.py \
-            tests/test_experiment_7_2_6_output_readout_loss_shaping_contract.py
+            tests/test_experiment_7_2_6_output_readout_loss_shaping_contract.py \
+            tests/test_experiment_7_2_6_1_sum_vs_mean_ce_contract.py
