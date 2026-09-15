@@ -1,0 +1,25 @@
+{
+  "architecture": "234x234",
+  "baseline": "Exp7.2.6.1 Mean-CE bias=False, reused without retraining",
+  "checkpoint_selection": "highest validation BA with bias; validation Mean-CE loss tie-break",
+  "experiment_id": "experiment_7_2_6_2_mean_ce_bias",
+  "new_condition": "Mean-CE bias=True; output W copied from exact paired bias-free initialization; bias initialized to zero",
+  "new_training_runs": 3,
+  "notebook_inputs": [
+    "native_performance_summary.csv",
+    "bias_effect_decomposition_summary.csv",
+    "l2_probe_summary.csv",
+    "l2_probe_delta_summary.csv",
+    "bias_diagnostics_summary.csv",
+    "bias_values.csv",
+    "training_history_summary.csv"
+  ],
+  "primary_decomposition": "total = direct readout + E2E training effect, using bias-zeroed inference on the bias-trained model",
+  "protocol_version": "mean_ce_bias_v1",
+  "regularization": "task_only",
+  "seeds": [
+    11,
+    23,
+    37
+  ]
+}
