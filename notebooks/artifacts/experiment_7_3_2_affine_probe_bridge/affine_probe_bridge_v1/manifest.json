@@ -1,0 +1,77 @@
+{
+  "C_grid": [
+    0.001,
+    0.01,
+    0.1,
+    1.0,
+    10.0
+  ],
+  "architecture": "234x234",
+  "backbone_objectives": [
+    "tsce",
+    "wcce"
+  ],
+  "cases": [
+    {
+      "aggregation": "mean",
+      "bias": false,
+      "center": false,
+      "key": "P0_mean_scale_no_center_no_bias"
+    },
+    {
+      "aggregation": "mean",
+      "bias": true,
+      "center": false,
+      "key": "P1_mean_scale_no_center_bias"
+    },
+    {
+      "aggregation": "mean",
+      "bias": false,
+      "center": true,
+      "key": "P2_mean_scale_center_no_bias"
+    },
+    {
+      "aggregation": "mean",
+      "bias": true,
+      "center": true,
+      "key": "P3_mean_scale_center_bias"
+    },
+    {
+      "aggregation": "wholecount",
+      "bias": false,
+      "center": false,
+      "key": "P4_wholecount_scale_no_center_no_bias"
+    },
+    {
+      "aggregation": "wholecount",
+      "bias": true,
+      "center": false,
+      "key": "P5_wholecount_scale_no_center_bias"
+    },
+    {
+      "aggregation": "wholecount",
+      "bias": false,
+      "center": true,
+      "key": "P6_wholecount_scale_center_no_bias"
+    },
+    {
+      "aggregation": "wholecount",
+      "bias": true,
+      "center": true,
+      "key": "P7_wholecount_scale_center_bias"
+    }
+  ],
+  "experiment_id": "experiment_7_3_2_affine_probe_bridge",
+  "legacy_reproduction_case": "P7_wholecount_scale_center_bias",
+  "legacy_reproduction_note": "P7 intentionally matches Exp7.3 whole-count StandardScaler+intercept probe semantics and probe seed.",
+  "logical_rows": 48,
+  "max_iter": 5000,
+  "protocol_version": "affine_probe_bridge_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "slurm_layout": "48 independent one-core tasks, one per backbone/seed/case; each task performs the C sweep and writes one evaluation",
+  "solver": "lbfgs"
+}

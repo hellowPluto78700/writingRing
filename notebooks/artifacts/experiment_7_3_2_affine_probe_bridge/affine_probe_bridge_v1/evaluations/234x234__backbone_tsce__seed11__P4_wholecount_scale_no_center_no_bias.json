@@ -1,0 +1,101 @@
+{
+  "affine": {
+    "centering_offset_l2": 0.0,
+    "effective_intercept_l2": 0.0,
+    "effective_intercept_span": 0.0,
+    "explicit_intercept_l2": 0.0,
+    "weight_l2": 0.5724746110434226
+  },
+  "candidate_validation": [
+    {
+      "C": 0.001,
+      "n_iter_max": 15,
+      "val_balanced_accuracy": 0.40195406445406445
+    },
+    {
+      "C": 0.01,
+      "n_iter_max": 33,
+      "val_balanced_accuracy": 0.4858585858585858
+    },
+    {
+      "C": 0.1,
+      "n_iter_max": 59,
+      "val_balanced_accuracy": 0.5082431457431458
+    },
+    {
+      "C": 1.0,
+      "n_iter_max": 85,
+      "val_balanced_accuracy": 0.5327801827801829
+    },
+    {
+      "C": 10.0,
+      "n_iter_max": 97,
+      "val_balanced_accuracy": 0.5269360269360269
+    }
+  ],
+  "case": {
+    "aggregation": "wholecount",
+    "bias": false,
+    "center": false,
+    "key": "P4_wholecount_scale_no_center_no_bias"
+  },
+  "contract": {
+    "C_grid": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "architecture": "234x234",
+    "feature_aggregation": "wholecount",
+    "fit_intercept": false,
+    "frozen_l1_l2": true,
+    "max_iter": 5000,
+    "scaler_with_mean": false,
+    "scaler_with_std": true,
+    "selection": "highest validation balanced accuracy; first C in grid wins ties",
+    "solver": "lbfgs",
+    "source_exp73_best_epoch": 86,
+    "source_exp73_method": "A1_e2e_linear_tsce",
+    "test_untouched_until_reporting": true
+  },
+  "experiment_id": "experiment_7_3_2_affine_probe_bridge",
+  "legacy_l2_wholecount_probe": {
+    "probe_C": 0.01,
+    "test_balanced_accuracy": 0.6151737151737151
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.589041095890411,
+      "balanced_accuracy": 0.5781378343878343,
+      "macro_f1": 0.5667011732229124
+    },
+    "train": {
+      "accuracy": 0.9879518072289156,
+      "balanced_accuracy": 0.9884337467180604,
+      "macro_f1": 0.9885294387829603
+    },
+    "val": {
+      "accuracy": 0.5317460317460317,
+      "balanced_accuracy": 0.5327801827801829,
+      "macro_f1": 0.5417269943686341
+    }
+  },
+  "p7_abs_test_ba_delta": null,
+  "p7_reproduction_check": false,
+  "protocol_version": "affine_probe_bridge_v1",
+  "scaler": {
+    "mean_l2": 0.0,
+    "scale_max": 36.44024037981228,
+    "scale_min": 7.014003987501542
+  },
+  "selected_C": 1.0,
+  "selected_val_balanced_accuracy": 0.5327801827801829,
+  "spec": {
+    "backbone_objective": "tsce",
+    "case_key": "P4_wholecount_scale_no_center_no_bias",
+    "seed": 11
+  },
+  "test_ba_minus_legacy_pp": -3.7035880785880826
+}

@@ -1,0 +1,101 @@
+{
+  "affine": {
+    "centering_offset_l2": 0.0,
+    "effective_intercept_l2": 0.0,
+    "effective_intercept_span": 0.0,
+    "explicit_intercept_l2": 0.0,
+    "weight_l2": 18.520479579015408
+  },
+  "candidate_validation": [
+    {
+      "C": 0.001,
+      "n_iter_max": 19,
+      "val_balanced_accuracy": 0.521602934102934
+    },
+    {
+      "C": 0.01,
+      "n_iter_max": 44,
+      "val_balanced_accuracy": 0.5745791245791246
+    },
+    {
+      "C": 0.1,
+      "n_iter_max": 79,
+      "val_balanced_accuracy": 0.577651515151515
+    },
+    {
+      "C": 1.0,
+      "n_iter_max": 111,
+      "val_balanced_accuracy": 0.5260642135642134
+    },
+    {
+      "C": 10.0,
+      "n_iter_max": 128,
+      "val_balanced_accuracy": 0.5246753246753246
+    }
+  ],
+  "case": {
+    "aggregation": "mean",
+    "bias": false,
+    "center": false,
+    "key": "P0_mean_scale_no_center_no_bias"
+  },
+  "contract": {
+    "C_grid": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "architecture": "234x234",
+    "feature_aggregation": "mean",
+    "fit_intercept": false,
+    "frozen_l1_l2": true,
+    "max_iter": 5000,
+    "scaler_with_mean": false,
+    "scaler_with_std": true,
+    "selection": "highest validation balanced accuracy; first C in grid wins ties",
+    "solver": "lbfgs",
+    "source_exp73_best_epoch": 90,
+    "source_exp73_method": "A2_e2e_linear_wcce",
+    "test_untouched_until_reporting": true
+  },
+  "experiment_id": "experiment_7_3_2_affine_probe_bridge",
+  "legacy_l2_wholecount_probe": {
+    "probe_C": 0.01,
+    "test_balanced_accuracy": 0.5951208513708514
+  },
+  "metrics": {
+    "test": {
+      "accuracy": 0.5616438356164384,
+      "balanced_accuracy": 0.5561750749250748,
+      "macro_f1": 0.5416742426253296
+    },
+    "train": {
+      "accuracy": 0.9518072289156626,
+      "balanced_accuracy": 0.9502493917482789,
+      "macro_f1": 0.951178489834935
+    },
+    "val": {
+      "accuracy": 0.5873015873015873,
+      "balanced_accuracy": 0.577651515151515,
+      "macro_f1": 0.57376668822321
+    }
+  },
+  "p7_abs_test_ba_delta": null,
+  "p7_reproduction_check": false,
+  "protocol_version": "affine_probe_bridge_v1",
+  "scaler": {
+    "mean_l2": 0.0,
+    "scale_max": 0.29554520841532544,
+    "scale_min": 0.14359260781363692
+  },
+  "selected_C": 0.1,
+  "selected_val_balanced_accuracy": 0.577651515151515,
+  "spec": {
+    "backbone_objective": "wcce",
+    "case_key": "P0_mean_scale_no_center_no_bias",
+    "seed": 37
+  },
+  "test_ba_minus_legacy_pp": -3.894577644577657
+}
