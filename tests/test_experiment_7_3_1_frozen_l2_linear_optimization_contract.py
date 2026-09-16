@@ -71,8 +71,22 @@ def test_all_main_cases_are_linear_train_then_same_w_lif() -> None:
 
 def test_slurm_multi_cpu_layout_and_dependency_chain() -> None:
     root = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash"
-    assert "#SBATCH --array=0-11%12" in (root / "run_exp_7_3_1_adam_cpu_array.bash").read_text()
-    assert "#SBATCH --array=0-11%12" in (root / "run_exp_7_3_1_lbfgs_noreg_cpu_array.bash").read_text()
+    workers = [
+        root / "run_exp_7_3_1_adam_cpu_array.bash",
+        root / "run_exp_7_3_1_lbfgs_noreg_cpu_array.bash",
+        root / "run_exp_7_3_1_c3_cpu_array.bash",
+        root / "run_exp_7_3_1_c4_cpu_array.bash",
+        root / "run_exp_7_3_1_ref_cpu_array.bash",
+        root / "finalize_exp_7_3_1_cpu.bash",
+    ]
+    module_entry = "python -m scripts.experiment_7_3_1_frozen_l2_linear_optimization"
+    for script in workers:
+        text = script.read_text()
+        assert module_entry in text
+        assert "python scripts/experiment_7_3_1_frozen_l2_linear_optimization.py" not in text
+
+    assert "#SBATCH --array=0-11%12" in workers[0].read_text()
+    assert "#SBATCH --array=0-11%12" in workers[1].read_text()
     for family in ("c3", "c4", "ref"):
         text = (root / f"run_exp_7_3_1_{family}_cpu_array.bash").read_text()
         assert "#SBATCH --array=0-59%50" in text
