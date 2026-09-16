@@ -1,0 +1,101 @@
+{
+  "budget": {
+    "limit": 5000,
+    "unit": "full_objective_evaluations"
+  },
+  "candidate_key": "234x234__backbone_wcce__head_wcce__seed37__Ref_scale_lbfgs_converged__lambda1e-04",
+  "case": "Ref_scale_lbfgs_converged",
+  "contract": {
+    "architecture": "234x234",
+    "bias": false,
+    "ce_gain": 1.0,
+    "frozen_l1_l2": true,
+    "lif_beta": 0.5,
+    "linear_sequence_readout": "valid evidence sum",
+    "no_lif_retraining": true,
+    "output_cap": 1,
+    "same_w_lif_substitution": true,
+    "source_exp73_best_epoch": 90,
+    "source_exp73_method": "A2_e2e_linear_wcce",
+    "threshold": 0.5,
+    "training_objective": "wcce"
+  },
+  "cross_evaluation": {
+    "test": {
+      "analog": {
+        "accuracy": 0.541095890410959,
+        "balanced_accuracy": 0.533553946053946,
+        "macro_f1": 0.5166484648392543
+      },
+      "lif_beta05": {
+        "accuracy": 0.4383561643835616,
+        "balanced_accuracy": 0.4328386890886891,
+        "macro_f1": 0.40514560874942024
+      }
+    },
+    "train": {
+      "analog": {
+        "accuracy": 0.9965576592082617,
+        "balanced_accuracy": 0.9967307692307692,
+        "macro_f1": 0.9966810196516933
+      },
+      "lif_beta05": {
+        "accuracy": 0.7796901893287436,
+        "balanced_accuracy": 0.7735819348890325,
+        "macro_f1": 0.7745300334728203
+      }
+    },
+    "val": {
+      "analog": {
+        "accuracy": 0.5396825396825397,
+        "balanced_accuracy": 0.5253066378066377,
+        "macro_f1": 0.5289501239501241
+      },
+      "lif_beta05": {
+        "accuracy": 0.373015873015873,
+        "balanced_accuracy": 0.38123496873496876,
+        "macro_f1": 0.37765685581475056
+      }
+    }
+  },
+  "experiment_id": "experiment_7_3_1_frozen_l2_linear_optimization",
+  "legacy_l2_fixed250_probe_test_ba": 0.5845980408480408,
+  "legacy_l2_wholecount_probe_test_ba": 0.5951208513708514,
+  "objective_metrics": {
+    "test": {
+      "task_ce": 3.658849000930786,
+      "total_objective": 3.6751785278320312
+    },
+    "train": {
+      "task_ce": 0.028216630220413208,
+      "total_objective": 0.04454610496759415
+    },
+    "val": {
+      "task_ce": 2.9110264778137207,
+      "total_objective": 2.927356004714966
+    }
+  },
+  "optimization": {
+    "history_path": "notebooks/artifacts/experiment_7_3_1_frozen_l2_linear_optimization/frozen_l2_linear_optimization_v1/histories/234x234__backbone_wcce__head_wcce__seed37__Ref_scale_lbfgs_converged__lambda1e-04.csv",
+    "history_size": 50,
+    "lbfgs_max_eval": 5000,
+    "line_search": "strong_wolfe",
+    "objective_evals": 177
+  },
+  "optimizer": "lbfgs",
+  "protocol_version": "frozen_l2_linear_optimization_v1",
+  "reg_lambda": 0.0001,
+  "scaling": {
+    "folded_into_raw_weight": true,
+    "mode": "scale_only",
+    "sigma_max": 0.29554522037506104,
+    "sigma_min": 0.14359261095523834
+  },
+  "spec": {
+    "backbone_objective": "wcce",
+    "objective": "wcce",
+    "seed": 37
+  },
+  "weight_norm_raw": 81.95397145350123,
+  "weight_norm_train_space": 18.071788039205515
+}

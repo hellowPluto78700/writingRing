@@ -1,0 +1,50 @@
+{
+  "adam_c0_epoch_limit": 100,
+  "adam_epochs": 500,
+  "architecture": "234x234",
+  "backbone_objectives": [
+    "tsce",
+    "wcce"
+  ],
+  "cases": [
+    "C0_adam100",
+    "C1_adam500",
+    "C2_lbfgs_noreg",
+    "C3_lbfgs_reg",
+    "C4_scale_lbfgs_reg",
+    "Ref_scale_lbfgs_converged"
+  ],
+  "deployment_contract": "Every selected Linear W is evaluated unchanged through the same beta=0.5, threshold=0.5, cap=1 output LIF spike-count simulator; no LIF retraining or gain/threshold/beta sweep.",
+  "experiment_id": "experiment_7_3_1_frozen_l2_linear_optimization",
+  "head_objectives": [
+    "tsce",
+    "wcce"
+  ],
+  "lbfgs_max_eval": 100,
+  "legacy_probe_note": "Exp7.3 StandardScaler+intercept probes are reported only as auxiliary accessibility references, not as exact same-W LIF-deployable heads.",
+  "logical_rows": 72,
+  "physical_tasks": {
+    "C2_lbfgs_noreg": 12,
+    "C3_candidates": 60,
+    "C4_candidates": 60,
+    "Ref_candidates": 60,
+    "adam_shared_C0_C1": 12
+  },
+  "protocol_version": "frozen_l2_linear_optimization_v1",
+  "ref_max_eval": 5000,
+  "reg_lambdas": [
+    0.0001,
+    0.001,
+    0.01,
+    0.1,
+    1.0
+  ],
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "selection_rule": "C3/C4/Ref select lambda by highest validation Analog BA, then validation task CE, then smaller lambda; test is untouched until reporting.",
+  "source_experiment": "experiment_7_3_training_strategy_decomposition",
+  "source_protocol": "training_strategy_decomposition_v1"
+}

@@ -1,0 +1,101 @@
+{
+  "budget": {
+    "limit": 5000,
+    "unit": "full_objective_evaluations"
+  },
+  "candidate_key": "234x234__backbone_wcce__head_tsce__seed23__Ref_scale_lbfgs_converged__lambda1e-03",
+  "case": "Ref_scale_lbfgs_converged",
+  "contract": {
+    "architecture": "234x234",
+    "bias": false,
+    "ce_gain": 1.0,
+    "frozen_l1_l2": true,
+    "lif_beta": 0.5,
+    "linear_sequence_readout": "valid evidence sum",
+    "no_lif_retraining": true,
+    "output_cap": 1,
+    "same_w_lif_substitution": true,
+    "source_exp73_best_epoch": 89,
+    "source_exp73_method": "A2_e2e_linear_wcce",
+    "threshold": 0.5,
+    "training_objective": "tsce"
+  },
+  "cross_evaluation": {
+    "test": {
+      "analog": {
+        "accuracy": 0.541095890410959,
+        "balanced_accuracy": 0.525041625041625,
+        "macro_f1": 0.5081546558017146
+      },
+      "lif_beta05": {
+        "accuracy": 0.4589041095890411,
+        "balanced_accuracy": 0.4459540459540459,
+        "macro_f1": 0.43480137205383823
+      }
+    },
+    "train": {
+      "analog": {
+        "accuracy": 0.9001721170395869,
+        "balanced_accuracy": 0.8996688757123401,
+        "macro_f1": 0.9003899299751907
+      },
+      "lif_beta05": {
+        "accuracy": 0.7487091222030982,
+        "balanced_accuracy": 0.7471903399863448,
+        "macro_f1": 0.7519786462467347
+      }
+    },
+    "val": {
+      "analog": {
+        "accuracy": 0.5317460317460317,
+        "balanced_accuracy": 0.5041065416065416,
+        "macro_f1": 0.4796174051521176
+      },
+      "lif_beta05": {
+        "accuracy": 0.42063492063492064,
+        "balanced_accuracy": 0.3967051467051466,
+        "macro_f1": 0.37697977559651824
+      }
+    }
+  },
+  "experiment_id": "experiment_7_3_1_frozen_l2_linear_optimization",
+  "legacy_l2_fixed250_probe_test_ba": 0.6055305805305805,
+  "legacy_l2_wholecount_probe_test_ba": 0.5878697691197691,
+  "objective_metrics": {
+    "test": {
+      "task_ce": 2.18812894821167,
+      "total_objective": 2.197702169418335
+    },
+    "train": {
+      "task_ce": 1.5879327058792114,
+      "total_objective": 1.597506046295166
+    },
+    "val": {
+      "task_ce": 2.0487210750579834,
+      "total_objective": 2.0582942962646484
+    }
+  },
+  "optimization": {
+    "history_path": "notebooks/artifacts/experiment_7_3_1_frozen_l2_linear_optimization/frozen_l2_linear_optimization_v1/histories/234x234__backbone_wcce__head_tsce__seed23__Ref_scale_lbfgs_converged__lambda1e-03.csv",
+    "history_size": 50,
+    "lbfgs_max_eval": 5000,
+    "line_search": "strong_wolfe",
+    "objective_evals": 140
+  },
+  "optimizer": "lbfgs",
+  "protocol_version": "frozen_l2_linear_optimization_v1",
+  "reg_lambda": 0.001,
+  "scaling": {
+    "folded_into_raw_weight": true,
+    "mode": "scale_only",
+    "sigma_max": 0.4999818205833435,
+    "sigma_min": 0.4029415547847748
+  },
+  "spec": {
+    "backbone_objective": "wcce",
+    "objective": "tsce",
+    "seed": 23
+  },
+  "weight_norm_raw": 9.270587266361055,
+  "weight_norm_train_space": 4.375691599281505
+}
