@@ -1,0 +1,28 @@
+{
+  "architecture": "234x234",
+  "backbone_objective": "wcce",
+  "experiment_id": "experiment_7_3_4_linear_pretrained_lif_finetuning",
+  "frozen_backbone_contract": "All runs reuse the exact Exp7.3 WCCE L2 cache sourced from A2; no L1/L2 parameter is instantiated as trainable.",
+  "init_sources": [
+    "a2",
+    "b6",
+    "random"
+  ],
+  "lif_beta": 0.5,
+  "logical_training_runs": 9,
+  "max_abs_random_control_vs_exp73_b8_delta_pp": 0.5952380952380931,
+  "notebook_contract": "analysis-only; reads finalized CSV/JSON artifacts",
+  "objective": "wcce",
+  "output_cap": 1,
+  "primary_method_seed_rows": 15,
+  "primary_metric": "test_lif_ba from the best-validation-LIF-BA checkpoint",
+  "protocol_version": "linear_pretrained_lif_finetuning_v1",
+  "random_control_contract": "Random initialization reuses Exp7.3 Stage-2 model-init seed, loader order, optimizer, LIF dynamics, and WCCE objective and should reproduce B8.",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "selection_rule": "epoch 0 is a fixed direct-transfer reference and is excluded from fine-tune selection; epochs >=1 use validation LIF BA with validation LIF WCCE loss tiebreak",
+  "threshold": 0.5
+}
