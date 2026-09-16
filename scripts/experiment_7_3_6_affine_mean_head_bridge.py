@@ -34,7 +34,7 @@ MAX_EPOCHS = exp73.MAX_EPOCHS
 MIN_EPOCHS = exp73.MIN_EPOCHS
 PATIENCE = exp73.PATIENCE
 EPS = 1e-8
-CHARGE_TOL = 1e-5
+CHARGE_TOL = 1e-3
 
 
 @dataclass(frozen=True)

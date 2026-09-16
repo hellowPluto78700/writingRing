@@ -1,0 +1,27 @@
+{
+  "architecture": "234x234",
+  "bias_contract": "H1/H3 train one class bias; repeated once per valid timestep for LIF realization",
+  "cases": [
+    "H0_raw_no_bias",
+    "H1_raw_bias",
+    "H2_scale_no_bias",
+    "H3_scale_bias"
+  ],
+  "experiment_id": "experiment_7_3_6_affine_mean_head_bridge",
+  "frozen_backbone": "Exp7.3 A2_e2e_linear_wcce L2 cache",
+  "logical_training_runs": 12,
+  "max_if_charge_identity_abs_error": 0.000640869140625,
+  "multi_cpu_contract": "one CPU per seed/case task; afterok finalizer aggregates only",
+  "notebook_contract": "analysis-only; reads finalized CSV/JSON artifacts",
+  "p3_mean_affine_test_ba": 0.5567756317756317,
+  "p7_wholecount_affine_test_ba": 0.5862734487734488,
+  "pooling": "valid mean for all training cases",
+  "primary_metric": "analog test BA from validation-BA-selected checkpoint",
+  "protocol_version": "affine_mean_head_bridge_v1",
+  "scale_contract": "train-only std scaling, no centering; folded into raw W",
+  "seeds": [
+    11,
+    23,
+    37
+  ]
+}
