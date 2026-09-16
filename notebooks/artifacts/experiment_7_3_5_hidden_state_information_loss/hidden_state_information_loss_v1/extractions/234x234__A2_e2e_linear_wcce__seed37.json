@@ -1,0 +1,108 @@
+{
+  "contract": {
+    "aggregations": [
+      "whole_mean",
+      "fixed250_ordered_mean"
+    ],
+    "architecture": "234x234",
+    "fixed250_bin_ms": 250.0,
+    "fixed250_bin_steps": 16,
+    "fixed250_feature_dim": 2048,
+    "forward_communication": "binary hidden spikes exactly as Exp7.3 A2",
+    "frozen_l1_l2": true,
+    "primary_states": [
+      "syn_current",
+      "pre_reset",
+      "spike"
+    ],
+    "probe_training": "none during extraction; feature cache only",
+    "secondary_states": [
+      "post_reset"
+    ],
+    "states": [
+      "syn_current",
+      "pre_reset",
+      "spike",
+      "post_reset"
+    ],
+    "whole_feature_dim": 128
+  },
+  "experiment_id": "experiment_7_3_5_hidden_state_information_loss",
+  "feature_cache_count": 16,
+  "protocol_version": "hidden_state_information_loss_v1",
+  "provenance": {
+    "fs_hz": 64.0,
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "n_fixed250_bins": 16,
+    "split": {
+      "test_users": [
+        "user_10",
+        "user_3",
+        "user_6"
+      ],
+      "train_users": [
+        "user_0",
+        "user_1",
+        "user_11",
+        "user_12",
+        "user_13",
+        "user_14",
+        "user_15",
+        "user_18",
+        "user_19",
+        "user_2",
+        "user_20",
+        "user_5",
+        "user_7",
+        "user_8"
+      ],
+      "val_users": [
+        "user_16",
+        "user_4",
+        "user_9"
+      ]
+    },
+    "split_seed": 12345,
+    "timesteps": 256
+  },
+  "source": {
+    "best_epoch": 90,
+    "checkpoint": "notebooks/artifacts/experiment_7_3_training_strategy_decomposition/training_strategy_decomposition_v1/e2e_checkpoints/234x234__A2_e2e_linear_wcce__task_only__seed37.pt",
+    "experiment_id": "experiment_7_3_training_strategy_decomposition",
+    "method": "A2_e2e_linear_wcce",
+    "protocol_version": "training_strategy_decomposition_v1",
+    "stage2_cache_source_best_epoch": 90,
+    "stage2_cache_source_method": "A2_e2e_linear_wcce"
+  },
+  "source_replay_max_abs_delta": {
+    "test": {
+      "fixed250_ordered_mean": 0.0,
+      "whole_mean": 0.0
+    },
+    "train": {
+      "fixed250_ordered_mean": 0.0,
+      "whole_mean": 0.0
+    },
+    "val": {
+      "fixed250_ordered_mean": 0.0,
+      "whole_mean": 0.0
+    }
+  },
+  "source_replay_tolerance": 1e-06,
+  "spec": {
+    "seed": 37
+  }
+}

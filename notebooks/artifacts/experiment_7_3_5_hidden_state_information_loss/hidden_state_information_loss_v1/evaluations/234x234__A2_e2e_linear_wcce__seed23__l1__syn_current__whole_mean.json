@@ -1,0 +1,92 @@
+{
+  "candidate_validation": [
+    {
+      "C": 0.001,
+      "n_iter_max": 25,
+      "val_balanced_accuracy": 0.3299963924963925
+    },
+    {
+      "C": 0.01,
+      "n_iter_max": 44,
+      "val_balanced_accuracy": 0.41310726310726315
+    },
+    {
+      "C": 0.1,
+      "n_iter_max": 67,
+      "val_balanced_accuracy": 0.40202621452621456
+    },
+    {
+      "C": 1.0,
+      "n_iter_max": 147,
+      "val_balanced_accuracy": 0.46797138047138037
+    },
+    {
+      "C": 10.0,
+      "n_iter_max": 364,
+      "val_balanced_accuracy": 0.5101010101010102
+    }
+  ],
+  "contract": {
+    "C_grid": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "classifier": "LogisticRegression",
+    "feature_cache": "notebooks/artifacts/experiment_7_3_5_hidden_state_information_loss/hidden_state_information_loss_v1/feature_cache/234x234__A2_e2e_linear_wcce__seed23__l1__syn_current__whole_mean.npz",
+    "fit_intercept": true,
+    "frozen_snn": true,
+    "max_iter": 5000,
+    "scaler_fit": "train only",
+    "scaler_with_mean": true,
+    "scaler_with_std": true,
+    "selection": "highest validation balanced accuracy; first C in grid wins ties",
+    "snn_retrained": false,
+    "solver": "lbfgs",
+    "test_untouched_until_C_selection": true
+  },
+  "experiment_id": "experiment_7_3_5_hidden_state_information_loss",
+  "feature_dim": 128,
+  "metrics": {
+    "test": {
+      "accuracy": 0.4931506849315068,
+      "balanced_accuracy": 0.4896207958707959,
+      "macro_f1": 0.4932135400160762
+    },
+    "train": {
+      "accuracy": 0.8674698795180723,
+      "balanced_accuracy": 0.8708783872093159,
+      "macro_f1": 0.8718006930300389
+    },
+    "val": {
+      "accuracy": 0.5158730158730159,
+      "balanced_accuracy": 0.5101010101010102,
+      "macro_f1": 0.5103555484756331
+    }
+  },
+  "protocol_version": "hidden_state_information_loss_v1",
+  "scaler": {
+    "mean_l2": 1.720094773249912,
+    "scale_max": 0.17731814109802216,
+    "scale_min": 0.010452495669547755
+  },
+  "selected_C": 10.0,
+  "selected_val_balanced_accuracy": 0.5101010101010102,
+  "source": {
+    "best_epoch": 89,
+    "checkpoint": "notebooks/artifacts/experiment_7_3_training_strategy_decomposition/training_strategy_decomposition_v1/e2e_checkpoints/234x234__A2_e2e_linear_wcce__task_only__seed23.pt",
+    "experiment_id": "experiment_7_3_training_strategy_decomposition",
+    "method": "A2_e2e_linear_wcce",
+    "protocol_version": "training_strategy_decomposition_v1",
+    "stage2_cache_source_best_epoch": 89,
+    "stage2_cache_source_method": "A2_e2e_linear_wcce"
+  },
+  "spec": {
+    "aggregation": "whole_mean",
+    "layer": "l1",
+    "seed": 23,
+    "state": "syn_current"
+  }
+}
