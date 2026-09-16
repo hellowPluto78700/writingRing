@@ -1,0 +1,41 @@
+{
+  "architecture": "234x234",
+  "experiment_id": "experiment_7_3_7_wholecount_bias_transfer",
+  "frozen_backbone": "Exp7.3 A2_e2e_linear_wcce L2 cache",
+  "logical_training_runs": 3,
+  "methods": [
+    "L0_linear_no_bias",
+    "L1_linear_affine",
+    "L2_same_w_lif_count",
+    "L3_same_w_lif_continuous_bias",
+    "L4_same_w_lif_integer_bias"
+  ],
+  "multi_cpu_contract": "one CPU per seed task; each task runs Stage A->B->C->evaluate; afterok finalizer aggregates only",
+  "notebook_contract": "analysis-only; method-level aggregation, no per-run result dump",
+  "protocol_version": "wholecount_bias_transfer_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "source_reproduction": {
+    "available": true,
+    "max_abs_delta_pp": 0.0,
+    "paired_test_ba_delta_pp": {
+      "L0_linear_no_bias": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "L1_linear_affine": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "source": "notebooks/artifacts/experiment_7_3_2_affine_probe_bridge/affine_probe_bridge_v1/method_runs.csv"
+  },
+  "stage_a": "whole-count scale-only LogisticRegression; L0 no bias and L1 affine",
+  "stage_b": "transfer L1 raw W unchanged to beta=0.5 LIF; no input bias and no LIF W training",
+  "stage_c": "fit only class-specific output-count q plus positive CE-only gain; report continuous and integer virtual bias counts"
+}
