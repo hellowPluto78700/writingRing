@@ -1,0 +1,425 @@
+{
+  "contract": {
+    "architecture": "234x234",
+    "bias_pulses": [
+      "start",
+      "end"
+    ],
+    "frozen_l1_l2": true,
+    "if_beta": 1.0,
+    "lif_beta": 0.5,
+    "no_backbone_retraining": true,
+    "no_beta_sweep": true,
+    "no_gain_calibration": true,
+    "no_head_hyperparameter_reselection": true,
+    "no_threshold_sweep": true,
+    "output_cap": 1,
+    "parameter_recovery": "refit exact Exp7.3.2 P7 formulation at its already-selected C because Exp7.3.2 did not persist coef_/intercept_; no new hyperparameter selection",
+    "same_affine_parameters_across_readouts": true,
+    "source_case": "P7_wholecount_scale_center_bias",
+    "source_experiment": "experiment_7_3_2_affine_probe_bridge",
+    "source_protocol": "affine_probe_bridge_v1",
+    "source_selected_C": 0.01,
+    "threshold": 0.5
+  },
+  "diagnostics": {
+    "test": {
+      "if_beta1_bias_end": {
+        "beta": 1.0,
+        "bias_injection_samples": 146,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 2.6645352591003757e-15,
+        "mean_abs_final_membrane": 1.1316565436509043,
+        "mean_total_output_spikes_per_sample": 19.493150684931507,
+        "negative_evidence_fraction": 0.41663215153523303,
+        "output_spikes_per_neuron_second": 1.2573448199690744,
+        "silent_output_neuron_fraction": 0.4280821917808219,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_bias_start": {
+        "beta": 1.0,
+        "bias_injection_samples": 146,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 3.552713678800501e-15,
+        "mean_abs_final_membrane": 1.0770485996682777,
+        "mean_total_output_spikes_per_sample": 22.363013698630137,
+        "negative_evidence_fraction": 0.4225342390103822,
+        "output_spikes_per_neuron_second": 1.442456372873868,
+        "silent_output_neuron_fraction": 0.4018264840182648,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_end_charge_vs_analog_max_abs_error": 4.440892098500626e-15,
+      "if_beta1_start_charge_vs_analog_max_abs_error": 4.884981308350689e-15,
+      "lif_beta05_bias_end": {
+        "beta": 0.5,
+        "bias_injection_samples": 146,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 4.884981308350689e-15,
+        "mean_abs_final_membrane": 1.0211658774073342,
+        "mean_total_output_spikes_per_sample": 4.027397260273973,
+        "negative_evidence_fraction": 0.41663215153523303,
+        "output_spikes_per_neuron_second": 0.2597746852220013,
+        "silent_output_neuron_fraction": 0.6643835616438356,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_bias_start": {
+        "beta": 0.5,
+        "bias_injection_samples": 146,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 4.3298697960381105e-15,
+        "mean_abs_final_membrane": 0.06974872940960439,
+        "mean_total_output_spikes_per_sample": 7.0,
+        "negative_evidence_fraction": 0.4225342390103822,
+        "output_spikes_per_neuron_second": 0.4515131433620499,
+        "silent_output_neuron_fraction": 0.6666666666666666,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_w_only": {
+        "beta": 0.5,
+        "bias_injection_samples": 0,
+        "bias_pulse": "none",
+        "max_abs_charge_identity_error": 4.440892098500626e-15,
+        "mean_abs_final_membrane": 0.06974872940960485,
+        "mean_total_output_spikes_per_sample": 0.0,
+        "negative_evidence_fraction": 0.4175364479787939,
+        "output_spikes_per_neuron_second": 0.0,
+        "silent_output_neuron_fraction": 1.0,
+        "silent_sample_fraction": 1.0
+      }
+    },
+    "train": {
+      "if_beta1_bias_end": {
+        "beta": 1.0,
+        "bias_injection_samples": 581,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 7.105427357601002e-15,
+        "mean_abs_final_membrane": 1.2319090542819524,
+        "mean_total_output_spikes_per_sample": 22.815834767641995,
+        "negative_evidence_fraction": 0.4253144522417807,
+        "output_spikes_per_neuron_second": 1.1840934340473759,
+        "silent_output_neuron_fraction": 0.4368904188181297,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_bias_start": {
+        "beta": 1.0,
+        "bias_injection_samples": 581,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 7.993605777301127e-15,
+        "mean_abs_final_membrane": 1.2214769777757615,
+        "mean_total_output_spikes_per_sample": 25.416523235800344,
+        "negative_evidence_fraction": 0.42985467923917353,
+        "output_spikes_per_neuron_second": 1.3190636497116475,
+        "silent_output_neuron_fraction": 0.37664945496270796,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_end_charge_vs_analog_max_abs_error": 8.881784197001252e-15,
+      "if_beta1_start_charge_vs_analog_max_abs_error": 7.105427357601002e-15,
+      "lif_beta05_bias_end": {
+        "beta": 0.5,
+        "bias_injection_samples": 581,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 8.881784197001252e-15,
+        "mean_abs_final_membrane": 1.0283288336478547,
+        "mean_total_output_spikes_per_sample": 4.072289156626506,
+        "negative_evidence_fraction": 0.4253144522417807,
+        "output_spikes_per_neuron_second": 0.21134317025921026,
+        "silent_output_neuron_fraction": 0.6606425702811245,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_bias_start": {
+        "beta": 0.5,
+        "bias_injection_samples": 581,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 7.993605777301127e-15,
+        "mean_abs_final_membrane": 0.06381175534137931,
+        "mean_total_output_spikes_per_sample": 7.0,
+        "negative_evidence_fraction": 0.42985467923917353,
+        "output_spikes_per_neuron_second": 0.363285153611246,
+        "silent_output_neuron_fraction": 0.6666666666666666,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_w_only": {
+        "beta": 0.5,
+        "bias_injection_samples": 0,
+        "bias_pulse": "none",
+        "max_abs_charge_identity_error": 8.881784197001252e-15,
+        "mean_abs_final_membrane": 0.06381175534137931,
+        "mean_total_output_spikes_per_sample": 0.0,
+        "negative_evidence_fraction": 0.4258476113911825,
+        "output_spikes_per_neuron_second": 0.0,
+        "silent_output_neuron_fraction": 1.0,
+        "silent_sample_fraction": 1.0
+      }
+    },
+    "val": {
+      "if_beta1_bias_end": {
+        "beta": 1.0,
+        "bias_injection_samples": 126,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 5.329070518200751e-15,
+        "mean_abs_final_membrane": 1.158084564184228,
+        "mean_total_output_spikes_per_sample": 19.642857142857142,
+        "negative_evidence_fraction": 0.3952974570567407,
+        "output_spikes_per_neuron_second": 1.1588095865156702,
+        "silent_output_neuron_fraction": 0.458994708994709,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_bias_start": {
+        "beta": 1.0,
+        "bias_injection_samples": 126,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 5.329070518200751e-15,
+        "mean_abs_final_membrane": 1.0924389075813077,
+        "mean_total_output_spikes_per_sample": 22.5,
+        "negative_evidence_fraction": 0.4005501419249115,
+        "output_spikes_per_neuron_second": 1.3273637081906768,
+        "silent_output_neuron_fraction": 0.4113756613756614,
+        "silent_sample_fraction": 0.0
+      },
+      "if_beta1_end_charge_vs_analog_max_abs_error": 6.217248937900877e-15,
+      "if_beta1_start_charge_vs_analog_max_abs_error": 6.217248937900877e-15,
+      "lif_beta05_bias_end": {
+        "beta": 0.5,
+        "bias_injection_samples": 126,
+        "bias_pulse": "end",
+        "max_abs_charge_identity_error": 5.773159728050814e-15,
+        "mean_abs_final_membrane": 1.0263798167703173,
+        "mean_total_output_spikes_per_sample": 4.031746031746032,
+        "negative_evidence_fraction": 0.3952974570567407,
+        "output_spikes_per_neuron_second": 0.23784859391917595,
+        "silent_output_neuron_fraction": 0.6640211640211641,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_bias_start": {
+        "beta": 0.5,
+        "bias_injection_samples": 126,
+        "bias_pulse": "start",
+        "max_abs_charge_identity_error": 4.884981308350689e-15,
+        "mean_abs_final_membrane": 0.06218689042667924,
+        "mean_total_output_spikes_per_sample": 7.0,
+        "negative_evidence_fraction": 0.4005501419249115,
+        "output_spikes_per_neuron_second": 0.41295759810376614,
+        "silent_output_neuron_fraction": 0.6666666666666666,
+        "silent_sample_fraction": 0.0
+      },
+      "lif_beta05_w_only": {
+        "beta": 0.5,
+        "bias_injection_samples": 0,
+        "bias_pulse": "none",
+        "max_abs_charge_identity_error": 5.329070518200751e-15,
+        "mean_abs_final_membrane": 0.06218689042667926,
+        "mean_total_output_spikes_per_sample": 0.0,
+        "negative_evidence_fraction": 0.39594124016036053,
+        "output_spikes_per_neuron_second": 0.0,
+        "silent_output_neuron_fraction": 1.0,
+        "silent_sample_fraction": 1.0
+      }
+    }
+  },
+  "experiment_id": "experiment_7_3_3_affine_lif_substitution",
+  "metrics": {
+    "test": {
+      "analog_affine": {
+        "accuracy": 0.6027397260273972,
+        "balanced_accuracy": 0.5878697691197691,
+        "macro_f1": 0.5918189327859674
+      },
+      "analog_w_only": {
+        "accuracy": 0.4383561643835616,
+        "balanced_accuracy": 0.4186223498723498,
+        "macro_f1": 0.3654105793601779
+      },
+      "if_beta1_bias_end_charge": {
+        "accuracy": 0.6027397260273972,
+        "balanced_accuracy": 0.5878697691197691,
+        "macro_f1": 0.5918189327859674
+      },
+      "if_beta1_bias_end_count": {
+        "accuracy": 0.4657534246575342,
+        "balanced_accuracy": 0.4464209401709402,
+        "macro_f1": 0.4174709232573682
+      },
+      "if_beta1_bias_start_charge": {
+        "accuracy": 0.6027397260273972,
+        "balanced_accuracy": 0.5878697691197691,
+        "macro_f1": 0.5918189327859674
+      },
+      "if_beta1_bias_start_count": {
+        "accuracy": 0.4863013698630137,
+        "balanced_accuracy": 0.4669663669663669,
+        "macro_f1": 0.48456894885649704
+      },
+      "lif_beta05_bias_end": {
+        "accuracy": 0.08904109589041095,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.013626834381551363
+      },
+      "lif_beta05_bias_start": {
+        "accuracy": 0.08904109589041095,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.013626834381551363
+      },
+      "lif_beta05_w_only": {
+        "accuracy": 0.07534246575342465,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.01167728237791932
+      }
+    },
+    "train": {
+      "analog_affine": {
+        "accuracy": 0.9036144578313253,
+        "balanced_accuracy": 0.8985211802679326,
+        "macro_f1": 0.9048353299108571
+      },
+      "analog_w_only": {
+        "accuracy": 0.6712564543889845,
+        "balanced_accuracy": 0.6749898139639526,
+        "macro_f1": 0.6360277839810965
+      },
+      "if_beta1_bias_end_charge": {
+        "accuracy": 0.9036144578313253,
+        "balanced_accuracy": 0.8985211802679326,
+        "macro_f1": 0.9048353299108571
+      },
+      "if_beta1_bias_end_count": {
+        "accuracy": 0.7091222030981067,
+        "balanced_accuracy": 0.7147623272847486,
+        "macro_f1": 0.683513333588125
+      },
+      "if_beta1_bias_start_charge": {
+        "accuracy": 0.9036144578313253,
+        "balanced_accuracy": 0.8985211802679326,
+        "macro_f1": 0.9048353299108571
+      },
+      "if_beta1_bias_start_count": {
+        "accuracy": 0.8037865748709122,
+        "balanced_accuracy": 0.7855416522037092,
+        "macro_f1": 0.8015037406027951
+      },
+      "lif_beta05_bias_end": {
+        "accuracy": 0.09122203098106713,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.013932702418506833
+      },
+      "lif_beta05_bias_start": {
+        "accuracy": 0.09122203098106713,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.013932702418506833
+      },
+      "lif_beta05_w_only": {
+        "accuracy": 0.08261617900172118,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.01271860095389507
+      }
+    },
+    "val": {
+      "analog_affine": {
+        "accuracy": 0.5714285714285714,
+        "balanced_accuracy": 0.5597342472342473,
+        "macro_f1": 0.5645234023352685
+      },
+      "analog_w_only": {
+        "accuracy": 0.4365079365079365,
+        "balanced_accuracy": 0.4271524771524771,
+        "macro_f1": 0.39088114672822316
+      },
+      "if_beta1_bias_end_charge": {
+        "accuracy": 0.5714285714285714,
+        "balanced_accuracy": 0.5597342472342473,
+        "macro_f1": 0.5645234023352685
+      },
+      "if_beta1_bias_end_count": {
+        "accuracy": 0.4603174603174603,
+        "balanced_accuracy": 0.4531144781144782,
+        "macro_f1": 0.4221667294801387
+      },
+      "if_beta1_bias_start_charge": {
+        "accuracy": 0.5714285714285714,
+        "balanced_accuracy": 0.5597342472342473,
+        "macro_f1": 0.5645234023352685
+      },
+      "if_beta1_bias_start_count": {
+        "accuracy": 0.4365079365079365,
+        "balanced_accuracy": 0.416480278980279,
+        "macro_f1": 0.4064287999976406
+      },
+      "lif_beta05_bias_end": {
+        "accuracy": 0.09523809523809523,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.014492753623188406
+      },
+      "lif_beta05_bias_start": {
+        "accuracy": 0.09523809523809523,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.014492753623188406
+      },
+      "lif_beta05_w_only": {
+        "accuracy": 0.05555555555555555,
+        "balanced_accuracy": 0.08333333333333333,
+        "macro_f1": 0.008771929824561403
+      }
+    }
+  },
+  "parameter_reconstruction": {
+    "effective_intercept_l2": 4.987903772204378,
+    "effective_intercept_span": 4.239927414387379,
+    "max_abs_ba_delta": 0.0,
+    "max_abs_score_error": 8.881784197001252e-15,
+    "max_prediction_mismatch_count": 0,
+    "metrics": {
+      "test": {
+        "abs_ba_delta": 0.0,
+        "metrics": {
+          "accuracy": 0.6027397260273972,
+          "balanced_accuracy": 0.5878697691197691,
+          "macro_f1": 0.5918189327859674
+        },
+        "prediction_mismatch_count": 0,
+        "source_balanced_accuracy": 0.5878697691197691
+      },
+      "train": {
+        "abs_ba_delta": 0.0,
+        "metrics": {
+          "accuracy": 0.9036144578313253,
+          "balanced_accuracy": 0.8985211802679326,
+          "macro_f1": 0.9048353299108571
+        },
+        "prediction_mismatch_count": 0,
+        "source_balanced_accuracy": 0.8985211802679326
+      },
+      "val": {
+        "abs_ba_delta": 0.0,
+        "metrics": {
+          "accuracy": 0.5714285714285714,
+          "balanced_accuracy": 0.5597342472342473,
+          "macro_f1": 0.5645234023352685
+        },
+        "prediction_mismatch_count": 0,
+        "source_balanced_accuracy": 0.5597342472342473
+      }
+    },
+    "selected_C": 0.01,
+    "weight_l2": 0.07938502026111048
+  },
+  "parameters": {
+    "effective_intercept_l2": 4.987903772204378,
+    "effective_intercept_span": 4.239927414387379,
+    "weight_l2": 0.07938502026111048,
+    "weight_shape": [
+      12,
+      128
+    ]
+  },
+  "protocol_version": "affine_lif_substitution_v1",
+  "source_p7": {
+    "path": "notebooks/artifacts/experiment_7_3_2_affine_probe_bridge/affine_probe_bridge_v1/evaluations/234x234__backbone_wcce__seed23__P7_wholecount_scale_center_bias.json",
+    "selected_C": 0.01,
+    "source_best_epoch": 89,
+    "source_method": "A2_e2e_linear_wcce",
+    "test_balanced_accuracy": 0.5878697691197691
+  },
+  "spec": {
+    "backbone_objective": "wcce",
+    "seed": 23
+  }
+}
