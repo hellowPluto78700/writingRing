@@ -169,7 +169,7 @@ def _scaled_mean(
 
 
 def _metrics(y: np.ndarray, scores: np.ndarray) -> dict[str, float]:
-    return exp73._metrics(y, scores.argmax(axis=1))
+    return exp73._metrics(y, scores)
 
 
 def _evaluate_analog(
@@ -536,9 +536,11 @@ def _probe_references(config: Config) -> dict[str, float | None]:
         return {"p3_mean_affine_test_ba": None, "p7_wholecount_affine_test_ba": None}
     df = pd.read_csv(path)
     wc = df[df["backbone_objective"] == "wcce"]
+
     def get(case: str) -> float | None:
         row = wc[wc["case"].str.startswith(case)]
         return None if row.empty else float(row.iloc[0]["test_ba_mean"])
+
     return {
         "p3_mean_affine_test_ba": get("P3_"),
         "p7_wholecount_affine_test_ba": get("P7_"),
