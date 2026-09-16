@@ -38,6 +38,20 @@ def test_case_flags_are_exact() -> None:
     assert specs["H3_scale_bias"].use_bias
 
 
+def test_metrics_accepts_two_dimensional_class_scores() -> None:
+    y = np.array([0, 1, 2], dtype=np.int64)
+    scores = np.array(
+        [
+            [2.0, 0.0, -1.0],
+            [0.1, 1.5, 0.2],
+            [-0.2, 0.0, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    metrics = exp736._metrics(y, scores)
+    assert metrics["balanced_accuracy"] == 1.0
+
+
 def test_scale_fold_preserves_raw_function() -> None:
     sigma = np.array([2.0, 0.5], dtype=np.float32)
     head = exp736.AffineHead(2, 2, bias=True)
@@ -46,7 +60,10 @@ def test_scale_fold_preserves_raw_function() -> None:
         head.linear.bias.copy_(torch.tensor([0.25, -0.5]))
     raw_w, raw_b = exp736._raw_parameters(head, sigma, use_scale=True)
     x = np.array([[1.0, 3.0], [2.0, -1.0]], dtype=np.float32)
-    scaled_score = (x / sigma[None, :]) @ head.linear.weight.detach().numpy().T + head.linear.bias.detach().numpy()[None, :]
+    scaled_score = (
+        (x / sigma[None, :]) @ head.linear.weight.detach().numpy().T
+        + head.linear.bias.detach().numpy()[None, :]
+    )
     raw_score = x @ raw_w.T + raw_b[None, :]
     np.testing.assert_allclose(scaled_score, raw_score, rtol=1e-6, atol=1e-6)
 
