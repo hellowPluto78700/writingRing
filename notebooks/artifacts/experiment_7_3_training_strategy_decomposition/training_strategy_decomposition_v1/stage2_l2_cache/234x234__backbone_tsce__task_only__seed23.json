@@ -1,0 +1,94 @@
+{
+  "discard_stage1_w": true,
+  "experiment_id": "experiment_7_3_training_strategy_decomposition",
+  "frozen_l1_l2": true,
+  "protocol_version": "training_strategy_decomposition_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5684931506849316,
+          "balanced_accuracy": 0.5542540792540792,
+          "macro_f1": 0.5467229259166588
+        },
+        "train": {
+          "accuracy": 0.9397590361445783,
+          "balanced_accuracy": 0.9392200563996687,
+          "macro_f1": 0.9430326112944
+        },
+        "val": {
+          "accuracy": 0.5634920634920635,
+          "balanced_accuracy": 0.550595238095238,
+          "macro_f1": 0.5628811928811929
+        }
+      },
+      "probe_C": 0.01
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5684931506849316,
+          "balanced_accuracy": 0.5594148906648906,
+          "macro_f1": 0.5469413302746635
+        },
+        "train": {
+          "accuracy": 0.8709122203098106,
+          "balanced_accuracy": 0.8698922069794636,
+          "macro_f1": 0.8769939439564985
+        },
+        "val": {
+          "accuracy": 0.5238095238095238,
+          "balanced_accuracy": 0.5092291967291968,
+          "macro_f1": 0.5130633841012205
+        }
+      },
+      "probe_C": 0.1
+    }
+  },
+  "source_best_epoch": 59,
+  "source_checkpoint": "notebooks/artifacts/experiment_7_3_training_strategy_decomposition/training_strategy_decomposition_v1/e2e_checkpoints/234x234__A1_e2e_linear_tsce__task_only__seed23.pt",
+  "source_e2e_spec": {
+    "objective": "tsce",
+    "readout": "linear",
+    "seed": 23
+  },
+  "source_method": "A1_e2e_linear_tsce",
+  "spec": {
+    "objective": "tsce",
+    "seed": 23
+  },
+  "splits": {
+    "test": {
+      "mean_firing_fraction_full": 0.09008914232254028,
+      "mean_valid_length": 82.68493150684931,
+      "n_samples": 146,
+      "shape": [
+        146,
+        256,
+        128
+      ]
+    },
+    "train": {
+      "mean_firing_fraction_full": 0.09791625291109085,
+      "mean_valid_length": 102.76592082616179,
+      "n_samples": 581,
+      "shape": [
+        581,
+        256,
+        128
+      ]
+    },
+    "val": {
+      "mean_firing_fraction_full": 0.0733533576130867,
+      "mean_valid_length": 90.4047619047619,
+      "n_samples": 126,
+      "shape": [
+        126,
+        256,
+        128
+      ]
+    }
+  }
+}

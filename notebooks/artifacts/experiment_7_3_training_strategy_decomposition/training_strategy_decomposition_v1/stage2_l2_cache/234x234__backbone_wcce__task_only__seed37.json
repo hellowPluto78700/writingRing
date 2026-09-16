@@ -1,0 +1,94 @@
+{
+  "discard_stage1_w": true,
+  "experiment_id": "experiment_7_3_training_strategy_decomposition",
+  "frozen_l1_l2": true,
+  "protocol_version": "training_strategy_decomposition_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5958904109589042,
+          "balanced_accuracy": 0.5845980408480408,
+          "macro_f1": 0.5834881585108447
+        },
+        "train": {
+          "accuracy": 0.9948364888123924,
+          "balanced_accuracy": 0.9950023741690409,
+          "macro_f1": 0.9950948403429826
+        },
+        "val": {
+          "accuracy": 0.6031746031746031,
+          "balanced_accuracy": 0.5930976430976431,
+          "macro_f1": 0.6069840248824286
+        }
+      },
+      "probe_C": 0.1
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6027397260273972,
+          "balanced_accuracy": 0.5951208513708514,
+          "macro_f1": 0.5886323296910186
+        },
+        "train": {
+          "accuracy": 0.9173838209982789,
+          "balanced_accuracy": 0.9142970468060572,
+          "macro_f1": 0.9185230914067345
+        },
+        "val": {
+          "accuracy": 0.5873015873015873,
+          "balanced_accuracy": 0.5677308802308801,
+          "macro_f1": 0.5722902952522518
+        }
+      },
+      "probe_C": 0.01
+    }
+  },
+  "source_best_epoch": 90,
+  "source_checkpoint": "notebooks/artifacts/experiment_7_3_training_strategy_decomposition/training_strategy_decomposition_v1/e2e_checkpoints/234x234__A2_e2e_linear_wcce__task_only__seed37.pt",
+  "source_e2e_spec": {
+    "objective": "wcce",
+    "readout": "linear",
+    "seed": 37
+  },
+  "source_method": "A2_e2e_linear_wcce",
+  "spec": {
+    "objective": "wcce",
+    "seed": 37
+  },
+  "splits": {
+    "test": {
+      "mean_firing_fraction_full": 0.14609642326831818,
+      "mean_valid_length": 82.68493150684931,
+      "n_samples": 146,
+      "shape": [
+        146,
+        256,
+        128
+      ]
+    },
+    "train": {
+      "mean_firing_fraction_full": 0.17119982838630676,
+      "mean_valid_length": 102.76592082616179,
+      "n_samples": 581,
+      "shape": [
+        581,
+        256,
+        128
+      ]
+    },
+    "val": {
+      "mean_firing_fraction_full": 0.1333574503660202,
+      "mean_valid_length": 90.4047619047619,
+      "n_samples": 126,
+      "shape": [
+        126,
+        256,
+        128
+      ]
+    }
+  }
+}

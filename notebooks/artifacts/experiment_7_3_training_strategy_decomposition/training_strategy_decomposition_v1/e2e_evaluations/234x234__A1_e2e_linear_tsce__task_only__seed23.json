@@ -1,0 +1,140 @@
+{
+  "best_epoch": 59,
+  "contract": {
+    "all_l1_l2_w_trainable": true,
+    "architecture": "234x234",
+    "bias": false,
+    "ce_gain": 1.0,
+    "checkpoint_metric": "native_validation_balanced_accuracy",
+    "final_primary_readout": "lif_beta05_spike_count",
+    "lif_beta": 0.5,
+    "output_cap": 1,
+    "regularization": "task_only",
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "threshold": 0.5
+  },
+  "cross_evaluation": {
+    "test": {
+      "analog": {
+        "accuracy": 0.4589041095890411,
+        "balanced_accuracy": 0.4421994671994671,
+        "macro_f1": 0.40405529622423547
+      },
+      "lif_beta05": {
+        "accuracy": 0.4589041095890411,
+        "balanced_accuracy": 0.43418664668664664,
+        "macro_f1": 0.3825878880703442
+      }
+    },
+    "train": {
+      "analog": {
+        "accuracy": 0.6798623063683304,
+        "balanced_accuracy": 0.6678467291939033,
+        "macro_f1": 0.6573990079440221
+      },
+      "lif_beta05": {
+        "accuracy": 0.6764199655765921,
+        "balanced_accuracy": 0.6644955895927636,
+        "macro_f1": 0.6534852080416881
+      }
+    },
+    "val": {
+      "analog": {
+        "accuracy": 0.5317460317460317,
+        "balanced_accuracy": 0.5151214526214526,
+        "macro_f1": 0.49188875494367484
+      },
+      "lif_beta05": {
+        "accuracy": 0.4523809523809524,
+        "balanced_accuracy": 0.43436147186147184,
+        "macro_f1": 0.39464991192630666
+      }
+    }
+  },
+  "experiment_id": "experiment_7_3_training_strategy_decomposition",
+  "group": "e2e",
+  "lif_native_reference_ba_equal": null,
+  "method": "A1_e2e_linear_tsce",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.4589041095890411,
+      "balanced_accuracy": 0.4421994671994671,
+      "macro_f1": 0.40405529622423547,
+      "objective_loss": 2.1153849902218336
+    },
+    "train": {
+      "accuracy": 0.6798623063683304,
+      "balanced_accuracy": 0.6678467291939033,
+      "macro_f1": 0.6573990079440221,
+      "objective_loss": 1.7723743987370686
+    },
+    "val": {
+      "accuracy": 0.5317460317460317,
+      "balanced_accuracy": 0.5151214526214526,
+      "macro_f1": 0.49188875494367484,
+      "objective_loss": 2.0453364849090576
+    }
+  },
+  "protocol_version": "training_strategy_decomposition_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5684931506849316,
+          "balanced_accuracy": 0.5542540792540792,
+          "macro_f1": 0.5467229259166588
+        },
+        "train": {
+          "accuracy": 0.9397590361445783,
+          "balanced_accuracy": 0.9392200563996687,
+          "macro_f1": 0.9430326112944
+        },
+        "val": {
+          "accuracy": 0.5634920634920635,
+          "balanced_accuracy": 0.550595238095238,
+          "macro_f1": 0.5628811928811929
+        }
+      },
+      "probe_C": 0.01
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5684931506849316,
+          "balanced_accuracy": 0.5594148906648906,
+          "macro_f1": 0.5469413302746635
+        },
+        "train": {
+          "accuracy": 0.8709122203098106,
+          "balanced_accuracy": 0.8698922069794636,
+          "macro_f1": 0.8769939439564985
+        },
+        "val": {
+          "accuracy": 0.5238095238095238,
+          "balanced_accuracy": 0.5092291967291968,
+          "macro_f1": 0.5130633841012205
+        }
+      },
+      "probe_C": 0.1
+    }
+  },
+  "spec": {
+    "objective": "tsce",
+    "readout": "linear",
+    "seed": 23
+  },
+  "stopped_epoch": 89
+}

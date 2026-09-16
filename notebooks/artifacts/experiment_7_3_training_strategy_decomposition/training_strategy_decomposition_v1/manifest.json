@@ -1,0 +1,54 @@
+{
+  "architecture": "234x234",
+  "ce_gain": 1.0,
+  "checkpoint_rule": "native validation BA primary, native objective loss tiebreak",
+  "counts": {
+    "e2e_runs": 12,
+    "final_method_seed_rows": 36,
+    "stage2_backbone_caches": 6,
+    "stage2_runs": 24
+  },
+  "e2e_methods": [
+    "A1_e2e_linear_tsce",
+    "A2_e2e_linear_wcce",
+    "A3_e2e_lif_tsce",
+    "A4_e2e_lif_wcce"
+  ],
+  "experiment_id": "experiment_7_3_training_strategy_decomposition",
+  "final_deployment_contract": "Every method is re-evaluated through the same beta=0.5, threshold=0.5, cap=1 LIF spike-count simulator.",
+  "hypothesis_method": "B2_tsbackbone_linear_wcce",
+  "lif_beta": 0.5,
+  "output_cap": 1,
+  "primary_metric": "final_lif_test_ba",
+  "protocol_version": "training_strategy_decomposition_v1",
+  "regularization": "task_only",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "stage2_contract": "Stage 1 uses Linear TSCE/WCCE to train L1/L2, then discards W; Stage 2 freezes L1/L2 and retrains a fresh W with paired initialization/order.",
+  "threshold": 0.5,
+  "two_stage_methods": [
+    "B1_tsbackbone_linear_tsce",
+    "B2_tsbackbone_linear_wcce",
+    "B3_tsbackbone_lif_tsce",
+    "B4_tsbackbone_lif_wcce",
+    "B5_wcbackbone_linear_tsce",
+    "B6_wcbackbone_linear_wcce",
+    "B7_wcbackbone_lif_tsce",
+    "B8_wcbackbone_lif_wcce"
+  ]
+}
