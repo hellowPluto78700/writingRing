@@ -24,5 +24,5 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-python scripts/experiment_7_3_1_frozen_l2_linear_optimization.py \
+python -m scripts.experiment_7_3_1_frozen_l2_linear_optimization \
   --repo-root "$REPO_ROOT" --device cpu --threads 1 finalize
