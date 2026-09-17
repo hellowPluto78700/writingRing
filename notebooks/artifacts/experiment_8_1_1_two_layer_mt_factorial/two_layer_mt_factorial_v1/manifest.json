@@ -1,0 +1,77 @@
+{
+  "architecture": {
+    "l1_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l1_width": 128,
+    "l2_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l2_width": 128,
+    "threshold": 0.5,
+    "threshold_multipliers": [
+      0.5,
+      1.0,
+      1.5
+    ]
+  },
+  "counts": {
+    "methods": 4,
+    "parallel_runs": 12,
+    "seeds": 3
+  },
+  "diagnostics": {
+    "aggregations": [
+      "whole_mean",
+      "fixed250_ordered_mean"
+    ],
+    "factorial_effects": [
+      "l1_mt_main_effect",
+      "l2_mt_main_effect",
+      "l1_x_l2_interaction"
+    ],
+    "states": [
+      "pre_reset",
+      "communication"
+    ]
+  },
+  "experiment_id": "experiment_8_1_1_two_layer_mt_factorial",
+  "method_order": [
+    "bb",
+    "mb",
+    "bm",
+    "mm"
+  ],
+  "methods": {
+    "bb": {
+      "l1_coding": "binary",
+      "l2_coding": "binary"
+    },
+    "bm": {
+      "l1_coding": "binary",
+      "l2_coding": "hetero3"
+    },
+    "mb": {
+      "l1_coding": "hetero3",
+      "l2_coding": "binary"
+    },
+    "mm": {
+      "l1_coding": "hetero3",
+      "l2_coding": "hetero3"
+    }
+  },
+  "primary_representation_metric": "l2_communication_fixed250_ba",
+  "protocol_version": "two_layer_mt_factorial_v1",
+  "scope": "2x2 factorial over L1/L2 binary vs fixed heterogeneous-threshold coding",
+  "secondary_task_metric": "linear_test_ba",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "training": "Exp7.3 A2-compatible end-to-end Linear/WCCE"
+}
