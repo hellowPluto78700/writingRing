@@ -1,0 +1,34 @@
+{
+  "experiment_id": "experiment_9_0_within_user_generalization",
+  "protocol_version": "rotating_grouped_cv_v2",
+  "total_samples": 853,
+  "total_users": 20,
+  "total_classes": 12,
+  "source_trials": 39,
+  "n_folds": 5,
+  "rotations": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "model_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "target_split": {
+    "train": 0.6,
+    "val": 0.2,
+    "test": 0.2
+  },
+  "within_user_split_unit": "segment",
+  "within_user_source_trial_grouping": false,
+  "cross_user_split_unit": "user",
+  "cross_user_user_grouping": true,
+  "within_user_note": "Segments are split within each user because the dataset has only 1-2 source trials per user; grouping source trials would make within-user 5-fold CV impossible.",
+  "expected_runs": 20
+}

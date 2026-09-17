@@ -1,0 +1,64 @@
+{
+  "a2": "Exp7.3 A2-compatible 30->128->128->12, shifts (234)(234), shared Linear/WCCE, validation BA checkpoint selection",
+  "a2_architecture": "234x234",
+  "a2_architecture_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "cross_user": {
+    "split_unit": "user",
+    "test_users_unseen": true,
+    "user_grouping": true
+  },
+  "cv_modes": [
+    "within_user",
+    "cross_user"
+  ],
+  "experiment_id": "experiment_9_0_within_user_generalization",
+  "methods": [
+    "raw250_linear",
+    "a2_234x234"
+  ],
+  "model_seeds": [
+    11,
+    23,
+    37,
+    53,
+    71
+  ],
+  "n_folds": 5,
+  "parallel_runs": 20,
+  "primary_metric": "pooled out-of-fold balanced_accuracy",
+  "protocol_version": "rotating_grouped_cv_v2",
+  "raw250": "Raw64 events -> ordered 250-ms counts -> StandardScaler(train only) -> validation-selected LogisticRegression C",
+  "rotations": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "secondary_metrics": [
+    "accuracy",
+    "macro_f1",
+    "fold mean/std"
+  ],
+  "target_split": {
+    "test": 0.2,
+    "train": 0.6,
+    "val": 0.2
+  },
+  "within_user": {
+    "source_trial_grouping": false,
+    "split_unit": "segment",
+    "stratified_within_each_user": true
+  }
+}
