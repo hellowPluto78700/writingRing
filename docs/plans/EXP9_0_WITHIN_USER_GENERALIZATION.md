@@ -1,90 +1,137 @@
-# Exp9.0 — Within-user Segment Generalization
+# Exp9.0 — Rotating within-user vs cross-user generalization
 
-## Goal
+## Question
 
-Quantify how much of the current generalization gap comes from unseen segments of known users versus unseen-user domain shift.
+Exp9.0 separates two sources of error:
 
-The experiment changes **only the split protocol**. It intentionally keeps the two reference methods fixed:
+1. **within-user unseen-segment generalization** — the model has seen the user, but never the held-out segment;
+2. **cross-user generalization** — validation/test users are completely absent from training.
 
-- **A — Raw250 + Linear**: raw 30-channel event stream, ordered 250 ms count features, train-only scaling, validation-selected LogisticRegression.
-- **B — A2 `(234)(234)`**: Exp7.3 A2-compatible two-hidden-layer binary SNN with shared linear WCCE readout.
+The model family is held fixed. Only the evaluation split changes.
 
-No MM, RSNN, tau sweep, new regularizer, new augmentation, or auxiliary loss is included.
+## Methods
 
-## Within-user split
+Only two methods are run:
 
-For every active user and class, target counts follow a `60/20/20` train/val/test split. Integer allocation uses largest remainder and requires at least one sample in train, val, and test whenever the pair has at least three samples.
+1. `raw250_linear` — **Raw250 + Linear**
+   - Raw64 30-channel unsigned events.
+   - Ordered 250 ms counts.
+   - Train-only StandardScaler.
+   - LogisticRegression with C selected by validation balanced accuracy.
 
-The physical split unit is the **source trial**, not a derived segment. All segments from:
+2. `a2_234x234`
+   - Exp7.3 A2-compatible `30 -> 128 -> 128 -> 12`.
+   - L1 shifts `(2,3,4)`, L2 shifts `(2,3,4)`.
+   - Binary hidden LIF neurons.
+   - Shared bias-free Linear head.
+   - Whole-sequence CE/WCCE-compatible valid-time mean evidence.
+   - Validation BA checkpoint selection with validation loss tie-break.
+
+No MM, RSNN, tau sweep, new loss, or augmentation is included.
+
+## Five-fold rotating protocol
+
+There are five folds. For rotation k:
+
+- fold k = test;
+- fold (k+1) mod 5 = validation;
+- the other three folds = training.
+
+Thus every sample is test exactly once and validation exactly once, while the train/val/test fold ratio is 3/1/1 = 60/20/20.
+
+### A — within-user CV
+
+Split unit: **segment**.
+
+A StratifiedKFold is built independently inside every user. Therefore every user contributes segments to every fold. Sparse `(user,class)` pairs are retained; a class with fewer than five samples cannot appear in all five folds, which is reported rather than treated as an error.
+
+The dataset has only 1–2 source trials per user, so source-trial grouping would make 5-fold within-user evaluation impossible. Sharing a recording session across folds is intentional here: this benchmark measures new segments from an already-seen user/session domain.
+
+### B — cross-user CV
+
+Split unit: **user**.
+
+Twenty users are assigned to five user folds. Each rotation uses about:
+
+- 12 users for training;
+- 4 users for validation;
+- 4 completely unseen users for test.
+
+A user never appears in more than one fold, so the test-user condition is strict.
+
+## Out-of-fold metrics
+
+Fold mean/std is reported, but the primary result is **pooled out-of-fold test performance**.
+
+Across five rotations every segment is test exactly once for each CV mode and method. The finalizer concatenates those predictions and reports:
+
+- Accuracy;
+- Balanced Accuracy — primary;
+- Macro-F1;
+- per-user OOF metrics;
+- per-class OOF metrics;
+- pooled confusion matrices.
+
+The primary domain-shift diagnostic is:
+
+[
+G_{user}=BA_{within,OOF}-BA_{cross,OOF}.
+]
+
+## Multi-CPU strategy
+
+`2 CV modes x 2 methods x 5 rotations = 20 independent jobs`.
+
+Submission graph:
 
 ```text
-<user>/action_<action>/<package.stem>
+prepare fold assignments
+        |
+        v
+20-way CPU array
+        |
+        v
+finalizer
 ```
 
-remain in exactly one split. Trial assignment is optimized per user to approach the `(user,class)` 60/20/20 targets. For pairs with at least three samples, missing class coverage is strongly penalized; sparse pairs with one or two samples are retained and assigned best-effort while preserving source-trial isolation.
+Each array task requests one CPU and forces BLAS/OpenMP thread counts to one.
 
-Five repeated split seeds are used: `11, 23, 37, 53, 71`.
-
-## Insufficient-data audit
-
-The prepare stage always writes the complete `(user,class)` table. A pair with fewer than three segments is marked `insufficient` because strict three-way coverage is impossible.
-
-Default behavior is **fail closed**: write the audit, then stop before training. One of these policies must be selected explicitly if the audit is not clean:
-
-- `exclude_pair`
-- `exclude_user`
-- `exclude_class`
-
-The Slurm entrypoint reads the policy from `EXP9_INSUFFICIENT_POLICY`; if unset, it uses `error`.
-
-## Experiment matrix
-
-`2 methods x 5 split seeds = 10 independent CPU jobs`.
-
-Each task reports train/val/test:
-
-- accuracy
-- balanced accuracy (primary)
-- macro-F1
-
-It also writes per-user metrics, per-class precision/recall/F1, and confusion matrices.
-
-## Multi-CPU execution
-
-The dependency chain is:
-
-```text
-prepare/audit -> 10-task CPU array -> finalizer
-```
-
-Every task requests one CPU and sets OpenMP/MKL/OpenBLAS/NumExpr to one thread. The array therefore parallelizes across independent model/split jobs without nested CPU oversubscription.
+Run:
 
 ```bash
 bash scripts/bash_script/SNN_Bash/submit_exp_9_0_cpu.bash
 ```
 
-The audit reports sparse pairs and realized coverage under:
+List array task identities:
+
+```bash
+python -m scripts.experiment_9_0_within_user_generalization list-runs
+```
+
+## Main outputs
+
+Artifacts are written under:
 
 ```text
 notebooks/artifacts/experiment_9_0_within_user_generalization/
-  within_user_segment_generalization_v1/manifests/
+  rotating_grouped_cv_v2/
 ```
 
-For a sensitivity run that excludes sparse pairs, resubmit with:
+Key files:
 
-```bash
-EXP9_INSUFFICIENT_POLICY=exclude_pair \
-  bash scripts/bash_script/SNN_Bash/submit_exp_9_0_cpu.bash
-```
+- `audit.json`
+- `fold_summary.csv`
+- `rotation_summary.csv`
+- `within_user_fold_counts.csv`
+- `cross_user_fold_users.csv`
+- `metric_runs.csv`
+- `metric_summary.csv`
+- `prediction_runs.csv`
+- `oof_test_predictions.csv`
+- `oof_test_metrics.csv`
+- `oof_per_user_test.csv`
+- `oof_per_class_test.csv`
+- `confusion_summary.csv`
+- `within_vs_cross_user.csv`
 
-## Interpretation
-
-The primary diagnostic quantity is:
-
-\[
-G_{user}=BA_{within-user,test}-BA_{cross-user,test}.
-\]
-
-A large positive gap means the models classify unseen segments from known users substantially better than segments from unseen users, supporting cross-user domain shift as the dominant bottleneck.
-
-The finalizer opportunistically reads the existing Exp0.1 Raw250 and Exp8.0 A2 cross-user artifacts when available and writes `within_vs_cross_user.csv`. Missing historical artifacts do not invalidate the Exp9.0 within-user benchmark.
+The notebook is aggregation-only and never trains or refits a model.
