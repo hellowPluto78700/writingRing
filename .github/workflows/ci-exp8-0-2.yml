@@ -1,0 +1,43 @@
+name: Exp8.0.2 CI
+
+on:
+  push:
+    paths:
+      - 'scripts/experiment_8_0_2_joint_l1_l2_supervision.py'
+      - 'scripts/experiment_8_0_2_joint_l1_l2_supervision/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_2*'
+      - 'tests/test_experiment_8_0_2_joint_l1_l2_supervision_contract.py'
+      - 'docs/plans/EXP8_0_2_JOINT_L1_L2_SUPERVISION.md'
+      - 'notebooks/experiment_8_0_2_joint_l1_l2_supervision.ipynb'
+      - '.github/workflows/ci-exp8-0-2.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_8_0_2_joint_l1_l2_supervision.py'
+      - 'scripts/experiment_8_0_2_joint_l1_l2_supervision/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_2*'
+      - 'tests/test_experiment_8_0_2_joint_l1_l2_supervision_contract.py'
+      - 'docs/plans/EXP8_0_2_JOINT_L1_L2_SUPERVISION.md'
+      - 'notebooks/experiment_8_0_2_joint_l1_l2_supervision.ipynb'
+      - '.github/workflows/ci-exp8-0-2.yml'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas matplotlib scikit-learn pytest
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Run Exp8.0.2 fast checks
+        run: |
+          python -m pytest -q \
+            tests/test_repository_source_syntax.py \
+            tests/test_experiment_8_0_2_joint_l1_l2_supervision_contract.py
