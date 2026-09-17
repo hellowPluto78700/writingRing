@@ -116,17 +116,33 @@ def _recording_dirs(source_root: Path, user: str | None = None) -> list[tuple[st
     return found
 
 
+def _completed_segmentation_packages(source_root: Path) -> list[tuple[str, str, Path]]:
+    root = source_root / "segmentation"
+    if not root.is_dir():
+        raise BuildError(f"missing completed source segmentation root: {root}")
+    found: list[tuple[str, str, Path]] = []
+    for lengths_path in sorted(root.glob("*/action_*/*_segment_lengths.npy")):
+        directory = lengths_path.parent
+        user = directory.parent.name
+        action = directory.name.removeprefix("action_")
+        stem = f"{user}_action_{action}"
+        if lengths_path.name != f"{stem}_segment_lengths.npy":
+            continue
+        found.append((user, action, directory))
+    if not found:
+        raise BuildError(f"no completed segmentation packages found below {root}")
+    return found
+
+
 def list_users(source_root: Path) -> tuple[str, ...]:
-    users = {item[0] for item in _recording_dirs(source_root)}
-    if not users:
-        raise BuildError("no source recordings discovered")
+    users = {item[0] for item in _completed_segmentation_packages(source_root)}
     return tuple(sorted(users, key=_user_sort_key))
 
 
 def infer_action(source_root: Path) -> str:
-    actions = {item[1] for item in _recording_dirs(source_root)}
+    actions = {item[1] for item in _completed_segmentation_packages(source_root)}
     if len(actions) != 1:
-        raise BuildError(f"expected exactly one action, got {sorted(actions)}")
+        raise BuildError(f"expected exactly one completed segmentation action, got {sorted(actions)}")
     return next(iter(actions))
 
 
@@ -434,17 +450,38 @@ def build_user(
     if int(np.sum(segment_lengths, dtype=np.int64)) != len(source_segmented):
         raise BuildError("source segment lengths do not sum to segmented row count")
 
-    recordings = _recording_dirs(source_root, user)
-    if not recordings:
-        raise BuildError(f"no source recordings for {user}")
+    exported_dataset_ids = sorted(
+        {
+            _integral(row["dataset_id"], field="dataset_id")
+            for row in segment_rows
+            if str(row.get("segment_index", "")).strip() != ""
+            and str(row.get("exported", "true")).strip().lower() not in {"false", "0"}
+        }
+    )
+    if not exported_dataset_ids:
+        raise BuildError(f"completed source segmentation has no exported recordings for {user}")
+    recording_index: dict[int, Path] = {}
+    for rec_user, rec_action, dataset_id, directory in _recording_dirs(source_root, user):
+        if rec_action != action:
+            continue
+        if dataset_id in recording_index:
+            raise BuildError(f"duplicate source recording dataset id {dataset_id} for {user}")
+        recording_index[dataset_id] = directory
+    missing_recordings = [dataset_id for dataset_id in exported_dataset_ids if dataset_id not in recording_index]
+    if missing_recordings:
+        raise BuildError(
+            f"source segmentation references missing SpikeIMU recordings for {user}: {missing_recordings}"
+        )
+    recordings = [
+        (user, action, dataset_id, recording_index[dataset_id])
+        for dataset_id in exported_dataset_ids
+    ]
     d1_recordings: dict[int, np.ndarray] = {}
     d2_recordings: dict[int, np.ndarray] = {}
     intervals_by_dataset: dict[int, Sequence[Any]] = {}
     writing_stats: list[dict[str, Any]] = []
 
     for rec_user, rec_action, dataset_id, directory in recordings:
-        if rec_action != action:
-            raise BuildError("source user contains mixed actions")
         source_values, metadata, timestamps, encoder = _validate_recording(directory)
         rate = float(metadata["sampling_rate_hz"])
         recording_mask, intervals, boundary_timestamps = build_recording_writing_mask(
