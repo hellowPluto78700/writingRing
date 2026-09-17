@@ -29,7 +29,7 @@ No MM, RSNN, new regularizer, augmentation, or tau sweep is included.
 
 ## Split protocol
 
-The target split is `60/20/20` train/val/test within each user while preserving all three splits for every active class.
+The target split is `60/20/20` train/val/test within each user. For `(user,class)` pairs with at least three samples, three-way class coverage is strongly preferred; pairs with only one or two samples are retained with deterministic best-effort placement because strict train/val/test coverage is mathematically impossible.
 
 A source trial is defined as:
 
@@ -37,7 +37,7 @@ A source trial is defined as:
 <user>/action_<action>/<package.stem>
 ```
 
-All segments from one source trial must remain in one split. The assignment optimizer targets the per-`(user,class)` 60/20/20 counts while enforcing at least one train, val, and test sample for every active `(user,class)` pair.
+All segments from one source trial must remain in one split. The assignment optimizer targets the per-`(user,class)` 60/20/20 counts and strongly penalizes missing train/val/test coverage for pairs where three-way coverage is possible.
 
 Five repeated split seeds are used:
 
