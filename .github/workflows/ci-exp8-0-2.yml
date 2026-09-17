@@ -20,23 +20,47 @@ on:
       - 'notebooks/experiment_8_0_2_joint_l1_l2_supervision.ipynb'
       - '.github/workflows/ci-exp8-0-2.yml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: exp802-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install CPU test dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install numpy pandas matplotlib scikit-learn pytest
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[test,snn]'
 
-      - name: Run Exp8.0.2 fast checks
+      - name: Validate Exp8.0.2 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/submit_exp_8_0_2_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_8_0_2_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_8_0_2_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
+      - name: Run Exp8.0.2 contract tests
         run: |
           python -m pytest -q \
             tests/test_repository_source_syntax.py \
