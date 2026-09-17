@@ -550,7 +550,7 @@ def _per_user_rows(spec: RunSpec, split: str, frame: pd.DataFrame, y_true: np.nd
     for user in sorted(frame.user.unique().tolist()):
         mask = users == user
         metrics = _classification_metrics(y_true[mask], pred[mask])
-        rows.append({"method": spec.method, "split_seed": spec.split_seed, "split": split, "user": user, "n": int(mask.sum()), **metrics})
+        rows.append({"cv_mode": spec.cv_mode, "method": spec.method, "rotation": spec.rotation, "seed": spec.seed, "split": split, "user": user, "n": int(mask.sum()), **metrics})
     return rows
 
 
@@ -560,8 +560,10 @@ def _per_class_rows(spec: RunSpec, split: str, labels: tuple[str, ...], y_true: 
     )
     return [
         {
+            "cv_mode": spec.cv_mode,
             "method": spec.method,
-            "split_seed": spec.split_seed,
+            "rotation": spec.rotation,
+            "seed": spec.seed,
             "split": split,
             "class_index": idx,
             "class_label": labels[idx],
@@ -608,7 +610,7 @@ def _fit_raw250(prepared: PreparedSplit, spec: RunSpec):
             C=C,
             max_iter=5000,
             solver="lbfgs",
-            random_state=_stable_seed(spec.split_seed, EXPERIMENT_ID, "raw250", C),
+            random_state=_stable_seed(spec.seed, EXPERIMENT_ID, spec.cv_mode, spec.rotation, "raw250", C),
         ).fit(z["train"], built["train"][1])
         val_pred = classifier.predict(z["val"])
         val_ba = float(balanced_accuracy_score(built["val"][1], val_pred))
@@ -647,11 +649,11 @@ def _evaluate_a2(model: exp80.Exp80Net, loader: Iterable, device: torch.device):
 def _train_a2(prepared: PreparedSplit, spec: RunSpec, config: Config):
     data = prepared.data
     device = torch.device(config.device)
-    exp3.seed_all(_stable_seed(spec.split_seed, EXPERIMENT_ID, "a2_model_init"))
+    exp3.seed_all(_stable_seed(spec.seed, EXPERIMENT_ID, spec.cv_mode, spec.rotation, "a2_model_init"))
     model = exp80.Exp80Net(ARCHITECTURE_SHIFTS, len(data.labels), data.fs).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=exp72.LR, weight_decay=exp72.WEIGHT_DECAY)
-    train_loader = _make_loaders(data, spec.split_seed, config.batch_size, True)["train"]
-    eval_loaders = _make_loaders(data, spec.split_seed, config.batch_size, False)
+    train_loader = _make_loaders(data, spec.seed, config.batch_size, True)["train"]
+    eval_loaders = _make_loaders(data, spec.seed, config.batch_size, False)
     best_state: dict[str, torch.Tensor] | None = None
     best_epoch, best_ba, best_loss = -1, -1.0, float("inf")
     stopped_epoch = config.max_epochs
@@ -697,39 +699,60 @@ def _train_a2(prepared: PreparedSplit, spec: RunSpec, config: Config):
 
 
 def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any]:
-    if spec.method not in METHODS or spec.split_seed not in SPLIT_SEEDS:
+    if (
+        spec.cv_mode not in CV_MODES
+        or spec.method not in METHODS
+        or spec.rotation not in ROTATIONS
+        or spec.seed != MODEL_SEEDS[spec.rotation]
+    ):
         raise ValueError(spec)
     eval_path = _path(config.results_dir, "evaluations", spec.key, ".json")
     if eval_path.exists() and not force:
         return json.loads(eval_path.read_text(encoding="utf-8"))
     torch.set_num_threads(config.threads)
-    prepared = prepare_split(config, spec.split_seed, write_artifacts=False)
+    prepared = prepare_rotation(config, spec.cv_mode, spec.rotation, write_artifacts=False)
     best_epoch = None
     stopped_epoch = None
     selected_C = None
     if spec.method == METHOD_RAW250:
         selected_C, metrics, predictions = _fit_raw250(prepared, spec)
-        parameter_count = int(prepared.data.n_bins * exp3.EVENT_CHANNELS * len(prepared.data.labels))
+        parameter_count = int(
+            prepared.data.n_bins * exp3.EVENT_CHANNELS * len(prepared.data.labels)
+        )
     else:
-        model, best_state, best_epoch, stopped_epoch, best_ba, best_loss, history, metrics, predictions = _train_a2(prepared, spec, config)
+        (
+            model,
+            best_state,
+            best_epoch,
+            stopped_epoch,
+            best_ba,
+            best_loss,
+            history,
+            metrics,
+            predictions,
+        ) = _train_a2(prepared, spec, config)
         parameter_count = int(sum(p.numel() for p in model.parameters()))
         ckpt = _path(config.results_dir, "checkpoints", spec.key, ".pt")
         ckpt.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            "experiment_id": EXPERIMENT_ID,
-            "protocol_version": PROTOCOL_VERSION,
-            "spec": asdict(spec),
-            "architecture": ARCHITECTURE,
-            "architecture_shifts": ARCHITECTURE_SHIFTS,
-            "best_epoch": best_epoch,
-            "stopped_epoch": stopped_epoch,
-            "best_val_ba": best_ba,
-            "best_val_objective_loss": best_loss,
-            "model_state_dict": best_state,
-        }, ckpt)
+        torch.save(
+            {
+                "experiment_id": EXPERIMENT_ID,
+                "protocol_version": PROTOCOL_VERSION,
+                "spec": asdict(spec),
+                "architecture": ARCHITECTURE,
+                "architecture_shifts": ARCHITECTURE_SHIFTS,
+                "best_epoch": best_epoch,
+                "stopped_epoch": stopped_epoch,
+                "best_val_ba": best_ba,
+                "best_val_objective_loss": best_loss,
+                "model_state_dict": best_state,
+            },
+            ckpt,
+        )
         hist_path = _path(config.results_dir, "histories", spec.key, ".csv")
         hist_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(history).to_csv(hist_path, index=False)
+
     per_user, per_class, confusions = _diagnostic_tables(spec, prepared, predictions)
     per_user_path = _path(config.results_dir, "per_user", spec.key, ".csv")
     per_user_path.parent.mkdir(parents=True, exist_ok=True)
@@ -737,13 +760,13 @@ def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any
     per_class_path = _path(config.results_dir, "per_class", spec.key, ".csv")
     per_class_path.parent.mkdir(parents=True, exist_ok=True)
     per_class.to_csv(per_class_path, index=False)
+
     payload = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "spec": asdict(spec),
-        "insufficient_policy": config.insufficient_policy,
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
+        "split_unit": "segment" if spec.cv_mode == CV_WITHIN else "user",
         "architecture": ARCHITECTURE if spec.method == METHOD_A2 else None,
         "architecture_shifts": ARCHITECTURE_SHIFTS if spec.method == METHOD_A2 else None,
         "selected_probe_C": selected_C,
@@ -754,11 +777,15 @@ def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any
         "confusion_matrices": confusions,
         "labels": list(prepared.data.labels),
         "counts": {split: int(len(prepared.frames[split])) for split in SPLITS},
-        "users": sorted(prepared.full_manifest.user.unique().tolist()),
-        "excluded": prepared.excluded,
+        "split_users": {
+            split: sorted(prepared.frames[split].user.astype(str).unique().tolist())
+            for split in SPLITS
+        },
+        "coverage_metrics": prepared.coverage_metrics,
     }
     _save_json(eval_path, payload)
     return payload
+
 
 
 def _summary_frame(frame: pd.DataFrame, groups: list[str], metrics: list[str]) -> pd.DataFrame:
