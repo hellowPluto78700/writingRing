@@ -822,115 +822,253 @@ def _summary_frame(frame: pd.DataFrame, groups: list[str], metrics: list[str]) -
     return out
 
 
-def _cross_user_reference(repo_root: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    raw_path = repo_root / "notebooks/artifacts/experiment_0_1_general_comparison/general_comparison_v1/raw_baselines.json"
-    if raw_path.exists():
-        payload = json.loads(raw_path.read_text(encoding="utf-8"))
-        raw = payload.get("representations", {}).get("fixed250", {})
-        if isinstance(raw, dict) and isinstance(raw.get("test"), dict):
-            rows.append({
-                "method": METHOD_RAW250,
-                "source": str(raw_path.relative_to(repo_root)),
-                "cross_user_test_ba": float(raw["test"]["balanced_accuracy"]),
-                "cross_user_test_accuracy": float(raw["test"]["accuracy"]),
-                "cross_user_test_macro_f1": float(raw["test"]["macro_f1"]),
-            })
-    exp80_root = repo_root / "notebooks/artifacts/experiment_8_0_local_backbone_tau_sweep/local_backbone_tau_sweep_v1/evaluations"
-    a2_values = []
-    if exp80_root.exists():
-        for path in sorted(exp80_root.glob("234x234__a2_wcce__*__seed*.json")):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            test = payload.get("linear_metrics", {}).get("test", {})
-            if isinstance(test, dict) and "balanced_accuracy" in test:
-                a2_values.append(test)
-    if a2_values:
-        rows.append({
-            "method": METHOD_A2,
-            "source": str(exp80_root.relative_to(repo_root)),
-            "cross_user_test_ba": float(np.mean([v["balanced_accuracy"] for v in a2_values])),
-            "cross_user_test_accuracy": float(np.mean([v["accuracy"] for v in a2_values])),
-            "cross_user_test_macro_f1": float(np.mean([v["macro_f1"] for v in a2_values])),
-        })
-    return rows
+def _pooled_oof_tables(predictions: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    test = predictions[predictions.split == "test"].copy()
+    metric_rows: list[dict[str, Any]] = []
+    user_rows: list[dict[str, Any]] = []
+    class_rows: list[dict[str, Any]] = []
+    confusion_rows: list[dict[str, Any]] = []
+
+    for (cv_mode, method), frame in test.groupby(["cv_mode", "method"], sort=False):
+        if frame.sample_id.duplicated().any():
+            duplicated = frame.loc[frame.sample_id.duplicated(), "sample_id"].head().tolist()
+            raise RuntimeError(
+                f"OOF test samples repeated for {cv_mode}/{method}: {duplicated}"
+            )
+        metrics = _classification_metrics(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+        )
+        metric_rows.append(
+            {
+                "cv_mode": cv_mode,
+                "method": method,
+                "n": int(len(frame)),
+                **metrics,
+            }
+        )
+
+        for user, user_frame in frame.groupby("user", sort=True):
+            user_metrics = _classification_metrics(
+                user_frame.y_true.to_numpy(dtype=np.int64),
+                user_frame.y_pred.to_numpy(dtype=np.int64),
+            )
+            user_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "method": method,
+                    "user": user,
+                    "n": int(len(user_frame)),
+                    **user_metrics,
+                }
+            )
+
+        labels = sorted(frame.class_label.unique().tolist())
+        label_to_y = (
+            frame[["class_label", "y_true"]]
+            .drop_duplicates()
+            .set_index("class_label")
+            .y_true.to_dict()
+        )
+        y_indices = [int(label_to_y[label]) for label in labels]
+        precision, recall, f1, support = precision_recall_fscore_support(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+            labels=y_indices,
+            zero_division=0,
+        )
+        for idx, label in enumerate(labels):
+            class_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "method": method,
+                    "class_label": label,
+                    "class_index": y_indices[idx],
+                    "precision": float(precision[idx]),
+                    "recall": float(recall[idx]),
+                    "f1": float(f1[idx]),
+                    "support": int(support[idx]),
+                }
+            )
+
+        matrix = confusion_matrix(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+            labels=y_indices,
+        )
+        for i, true_label in enumerate(labels):
+            for j, pred_label in enumerate(labels):
+                confusion_rows.append(
+                    {
+                        "cv_mode": cv_mode,
+                        "method": method,
+                        "true_label": true_label,
+                        "pred_label": pred_label,
+                        "count": int(matrix[i, j]),
+                    }
+                )
+
+    return (
+        pd.DataFrame(metric_rows),
+        pd.DataFrame(user_rows),
+        pd.DataFrame(class_rows),
+        pd.DataFrame(confusion_rows),
+    )
 
 
 def finalize(config: Config) -> dict[str, Any]:
+    specs = run_specs()
     payloads = []
-    for spec in run_specs():
+    for spec in specs:
         path = _path(config.results_dir, "evaluations", spec.key, ".json")
         if not path.exists():
             raise FileNotFoundError(f"Missing Exp9.0 evaluation: {path}")
         payloads.append(json.loads(path.read_text(encoding="utf-8")))
     if len(payloads) != EXPECTED_RUNS:
         raise RuntimeError(f"Expected {EXPECTED_RUNS} runs, got {len(payloads)}")
+
     run_rows = []
     for payload in payloads:
+        spec = payload["spec"]
         for split in SPLITS:
             metrics = payload["metrics"][split]
-            run_rows.append({
-                "method": payload["spec"]["method"],
-                "split_seed": int(payload["spec"]["split_seed"]),
-                "split": split,
-                "accuracy": float(metrics["accuracy"]),
-                "balanced_accuracy": float(metrics["balanced_accuracy"]),
-                "macro_f1": float(metrics["macro_f1"]),
-                "objective_loss": float(metrics.get("objective_loss", np.nan)),
-                "n": int(payload["counts"][split]),
-                "best_epoch": payload.get("best_epoch"),
-                "parameter_count": int(payload["parameter_count"]),
-            })
+            run_rows.append(
+                {
+                    "cv_mode": spec["cv_mode"],
+                    "method": spec["method"],
+                    "rotation": int(spec["rotation"]),
+                    "seed": int(spec["seed"]),
+                    "split": split,
+                    "accuracy": float(metrics["accuracy"]),
+                    "balanced_accuracy": float(metrics["balanced_accuracy"]),
+                    "macro_f1": float(metrics["macro_f1"]),
+                    "objective_loss": float(metrics.get("objective_loss", np.nan)),
+                    "n": int(payload["counts"][split]),
+                    "best_epoch": payload.get("best_epoch"),
+                    "parameter_count": int(payload["parameter_count"]),
+                    "test_same_user_seen_fraction": float(
+                        payload["coverage_metrics"]["test_same_user_seen_fraction"]
+                    ),
+                    "test_same_user_class_seen_fraction": float(
+                        payload["coverage_metrics"]["test_same_user_class_seen_fraction"]
+                    ),
+                }
+            )
     runs = pd.DataFrame(run_rows)
     config.results_dir.mkdir(parents=True, exist_ok=True)
     runs.to_csv(config.results_dir / "metric_runs.csv", index=False)
-    _summary_frame(runs, ["method", "split"], ["accuracy", "balanced_accuracy", "macro_f1", "objective_loss", "n"]).to_csv(config.results_dir / "metric_summary.csv", index=False)
-    users = pd.concat([pd.read_csv(_path(config.results_dir, "per_user", spec.key, ".csv")) for spec in run_specs()], ignore_index=True)
+    _summary_frame(
+        runs,
+        ["cv_mode", "method", "split"],
+        ["accuracy", "balanced_accuracy", "macro_f1", "objective_loss", "n"],
+    ).to_csv(config.results_dir / "metric_summary.csv", index=False)
+
+    users = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "per_user", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
     users.to_csv(config.results_dir / "per_user_runs.csv", index=False)
-    _summary_frame(users, ["method", "split", "user"], ["accuracy", "balanced_accuracy", "macro_f1", "n"]).to_csv(config.results_dir / "per_user_summary.csv", index=False)
-    classes = pd.concat([pd.read_csv(_path(config.results_dir, "per_class", spec.key, ".csv")) for spec in run_specs()], ignore_index=True)
+    _summary_frame(
+        users,
+        ["cv_mode", "method", "split", "user"],
+        ["accuracy", "balanced_accuracy", "macro_f1", "n"],
+    ).to_csv(config.results_dir / "per_user_summary.csv", index=False)
+
+    classes = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "per_class", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
     classes.to_csv(config.results_dir / "per_class_runs.csv", index=False)
-    _summary_frame(classes, ["method", "split", "class_index", "class_label"], ["precision", "recall", "f1", "support"]).to_csv(config.results_dir / "per_class_summary.csv", index=False)
-    confusion_rows = []
-    for method in METHODS:
-        method_payloads = [p for p in payloads if p["spec"]["method"] == method]
-        labels = method_payloads[0]["labels"]
-        for split in SPLITS:
-            matrices = np.asarray([p["confusion_matrices"][split] for p in method_payloads], dtype=float)
-            mean_matrix = matrices.mean(axis=0)
-            for i, true_label in enumerate(labels):
-                for j, pred_label in enumerate(labels):
-                    confusion_rows.append({"method": method, "split": split, "true_label": true_label, "pred_label": pred_label, "mean_count": float(mean_matrix[i, j])})
-    pd.DataFrame(confusion_rows).to_csv(config.results_dir / "confusion_summary.csv", index=False)
-    within_test = runs[runs.split == "test"].groupby("method")[["balanced_accuracy", "accuracy", "macro_f1"]].agg(["mean", "std"])
+    _summary_frame(
+        classes,
+        ["cv_mode", "method", "split", "class_index", "class_label"],
+        ["precision", "recall", "f1", "support"],
+    ).to_csv(config.results_dir / "per_class_summary.csv", index=False)
+
+    predictions = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "predictions", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
+    predictions.to_csv(config.results_dir / "prediction_runs.csv", index=False)
+    oof_test = predictions[predictions.split == "test"].copy()
+    oof_test.to_csv(config.results_dir / "oof_test_predictions.csv", index=False)
+
+    expected_samples = int(
+        pd.read_csv(_assignment_path(config.results_dir, CV_WITHIN)).sample_id.nunique()
+    )
+    for (cv_mode, method), frame in oof_test.groupby(["cv_mode", "method"], sort=False):
+        if len(frame) != expected_samples or frame.sample_id.nunique() != expected_samples:
+            raise RuntimeError(
+                f"Incomplete OOF coverage for {cv_mode}/{method}: "
+                f"{len(frame)} rows, {frame.sample_id.nunique()} unique, "
+                f"expected {expected_samples}"
+            )
+
+    oof_metrics, oof_users, oof_classes, oof_confusion = _pooled_oof_tables(predictions)
+    oof_metrics.to_csv(config.results_dir / "oof_test_metrics.csv", index=False)
+    oof_users.to_csv(config.results_dir / "oof_per_user_test.csv", index=False)
+    oof_classes.to_csv(config.results_dir / "oof_per_class_test.csv", index=False)
+    oof_confusion.to_csv(config.results_dir / "confusion_summary.csv", index=False)
+
     gap_rows = []
-    refs = {row["method"]: row for row in _cross_user_reference(config.repo_root)}
     for method in METHODS:
-        row: dict[str, Any] = {"method": method}
-        if method in within_test.index:
-            row["within_user_test_ba_mean"] = float(within_test.loc[method, ("balanced_accuracy", "mean")])
-            row["within_user_test_ba_std"] = float(within_test.loc[method, ("balanced_accuracy", "std")])
-            row["within_user_test_macro_f1_mean"] = float(within_test.loc[method, ("macro_f1", "mean")])
-        ref = refs.get(method)
-        if ref:
-            row.update(ref)
-            row["user_gap_ba"] = row["within_user_test_ba_mean"] - row["cross_user_test_ba"]
-        gap_rows.append(row)
-    pd.DataFrame(gap_rows).to_csv(config.results_dir / "within_vs_cross_user.csv", index=False)
+        within = oof_metrics[
+            (oof_metrics.cv_mode == CV_WITHIN) & (oof_metrics.method == method)
+        ].iloc[0]
+        cross = oof_metrics[
+            (oof_metrics.cv_mode == CV_CROSS) & (oof_metrics.method == method)
+        ].iloc[0]
+        gap_rows.append(
+            {
+                "method": method,
+                "within_user_oof_accuracy": float(within.accuracy),
+                "within_user_oof_ba": float(within.balanced_accuracy),
+                "within_user_oof_macro_f1": float(within.macro_f1),
+                "cross_user_oof_accuracy": float(cross.accuracy),
+                "cross_user_oof_ba": float(cross.balanced_accuracy),
+                "cross_user_oof_macro_f1": float(cross.macro_f1),
+                "user_gap_accuracy": float(within.accuracy - cross.accuracy),
+                "user_gap_ba": float(within.balanced_accuracy - cross.balanced_accuracy),
+                "user_gap_macro_f1": float(within.macro_f1 - cross.macro_f1),
+            }
+        )
+    pd.DataFrame(gap_rows).to_csv(
+        config.results_dir / "within_vs_cross_user.csv",
+        index=False,
+    )
+
     manifest = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
+        "cv_modes": list(CV_MODES),
         "methods": list(METHODS),
-        "split_seeds": list(SPLIT_SEEDS),
+        "n_folds": N_FOLDS,
+        "rotations": list(ROTATIONS),
+        "model_seeds": list(MODEL_SEEDS),
         "parallel_runs": EXPECTED_RUNS,
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
-        "insufficient_policy": config.insufficient_policy,
+        "within_user": {
+            "split_unit": "segment",
+            "stratified_within_each_user": True,
+            "source_trial_grouping": False,
+        },
+        "cross_user": {
+            "split_unit": "user",
+            "user_grouping": True,
+            "test_users_unseen": True,
+        },
+        "primary_metric": "pooled out-of-fold balanced_accuracy",
+        "secondary_metrics": ["accuracy", "macro_f1", "fold mean/std"],
         "a2_architecture": ARCHITECTURE,
         "a2_architecture_shifts": [list(v) for v in ARCHITECTURE_SHIFTS],
-        "primary_metric": "balanced_accuracy",
-        "secondary_metrics": ["accuracy", "macro_f1"],
-        "raw250": "Raw64 events -> ordered 250-ms counts -> StandardScaler(train only) -> validation-selected LogisticRegression C",
-        "a2": "Exp7.3 A2-compatible 30->128->128->12, shifts (234)(234), shared Linear/WCCE, validation BA checkpoint selection",
+        "raw250": (
+            "Raw64 events -> ordered 250-ms counts -> StandardScaler(train only) -> "
+            "validation-selected LogisticRegression C"
+        ),
+        "a2": (
+            "Exp7.3 A2-compatible 30->128->128->12, shifts (234)(234), "
+            "shared Linear/WCCE, validation BA checkpoint selection"
+        ),
     }
     _save_json(config.results_dir / "manifest.json", manifest)
     return manifest
@@ -946,19 +1084,17 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         threads=args.threads,
         batch_size=args.batch_size,
         max_epochs=args.max_epochs,
-        insufficient_policy=args.insufficient_policy,
     )
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Exp9.0 within-user unseen-segment generalization")
+    parser = argparse.ArgumentParser(description="Exp9.0 rotating within-user and cross-user CV")
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--results-dir", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-epochs", type=int, default=MAX_EPOCHS)
-    parser.add_argument("--insufficient-policy", choices=INSUFFICIENT_POLICIES, default="keep_all")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prepare")
     sub.add_parser("list-runs")
