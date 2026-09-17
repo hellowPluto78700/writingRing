@@ -21,7 +21,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold
 
 from snn.accel_reconstruction_eval.datasets import load_acceleration_data
 from scripts import experiment_0_1_general_comparison as exp01
@@ -244,20 +243,61 @@ def _assign_within_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
 
 
 def _assign_cross_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
-    """5-fold user-grouped assignment: every user appears in exactly one fold."""
-    users = np.asarray(sorted(manifest.user.unique().tolist()), dtype=object)
-    if len(users) < N_FOLDS:
+    """Balanced 5-fold user grouping with exactly four users/fold for 20 users."""
+    user_sizes = (
+        manifest.groupby("user")
+        .size()
+        .rename("n")
+        .reset_index()
+    )
+    if len(user_sizes) < N_FOLDS:
         raise RuntimeError(f"Need at least {N_FOLDS} users for cross-user CV")
-    splitter = KFold(n_splits=N_FOLDS, shuffle=True, random_state=FOLD_ASSIGNMENT_SEED)
+
+    max_users_per_fold = int(math.ceil(len(user_sizes) / N_FOLDS))
+    fold_totals = np.zeros(N_FOLDS, dtype=np.int64)
+    fold_users: list[list[str]] = [[] for _ in range(N_FOLDS)]
     user_to_fold: dict[str, int] = {}
-    for fold_id, (_, held_out) in enumerate(splitter.split(users)):
-        for index in held_out:
-            user_to_fold[str(users[index])] = fold_id
+
+    ordered = sorted(
+        user_sizes.itertuples(index=False),
+        key=lambda row: (
+            -int(row.n),
+            _stable_seed(FOLD_ASSIGNMENT_SEED, CV_CROSS, str(row.user)),
+        ),
+    )
+    for row in ordered:
+        user = str(row.user)
+        n = int(row.n)
+        candidates = [
+            fold
+            for fold in range(N_FOLDS)
+            if len(fold_users[fold]) < max_users_per_fold
+        ]
+        if not candidates:
+            raise RuntimeError("No cross-user fold has remaining capacity")
+        fold = min(
+            candidates,
+            key=lambda candidate: (
+                int(fold_totals[candidate]),
+                len(fold_users[candidate]),
+                _stable_seed(FOLD_ASSIGNMENT_SEED, CV_CROSS, user, candidate),
+            ),
+        )
+        user_to_fold[user] = fold
+        fold_users[fold].append(user)
+        fold_totals[fold] += n
+
     out = manifest.copy()
     out["cv_fold"] = out.user.map(user_to_fold).astype(int)
     if out.groupby("user").cv_fold.nunique().max() != 1:
         raise AssertionError("A user appeared in more than one cross-user fold")
+    if len(user_sizes) % N_FOLDS == 0:
+        counts = out[["user", "cv_fold"]].drop_duplicates().groupby("cv_fold").size()
+        expected = len(user_sizes) // N_FOLDS
+        if set(counts.index) != set(range(N_FOLDS)) or not (counts == expected).all():
+            raise RuntimeError("Balanced cross-user assignment did not preserve equal user counts")
     return out
+
 
 
 def _build_fold_assignment(manifest: pd.DataFrame, cv_mode: str) -> pd.DataFrame:
