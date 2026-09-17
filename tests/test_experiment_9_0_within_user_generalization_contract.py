@@ -8,119 +8,130 @@ from scripts import experiment_9_0_within_user_generalization as exp90
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_experiment_matrix_contract() -> None:
-    assert exp90.PROTOCOL_VERSION == "within_user_segment_generalization_v1"
-    assert exp90.METHODS == ("raw250_linear", "a2_234x234")
-    assert exp90.SPLIT_SEEDS == (11, 23, 37, 53, 71)
-    assert exp90.ARCHITECTURE_SHIFTS == ((2, 3, 4), (2, 3, 4))
-    assert exp90.EXPECTED_RUNS == 10
-    specs = exp90.run_specs()
-    assert len(specs) == 10
-    assert len({spec.key for spec in specs}) == 10
-
-
-def test_602020_allocator_has_minimum_val_and_test() -> None:
-    expected = {
-        3: (1, 1, 1),
-        4: (2, 1, 1),
-        5: (3, 1, 1),
-        6: (4, 1, 1),
-        9: (5, 2, 2),
-        10: (6, 2, 2),
-    }
-    for n, target in expected.items():
-        counts = exp90._allocate_counts(n, seed=7)
-        assert sum(counts.values()) == n
-        assert counts["val"] >= 1
-        assert counts["test"] >= 1
-        assert counts["train"] >= 1
-        assert (counts["train"], counts["val"], counts["test"]) == target
-    assert exp90._allocate_counts(2) == {"train": 2, "val": 0, "test": 0}
-
-
-def test_source_trial_assignment_is_disjoint_and_class_complete() -> None:
+def _synthetic_manifest(n_users: int = 10) -> pd.DataFrame:
     rows = []
-    for trial in range(5):
-        for label in ("A", "B"):
+    for user_index in range(n_users):
+        user = f"user_{user_index}"
+        labels = ["A", "A", "B", "B", "B", "C", "C", "C", "C", "C"]
+        for segment, label in enumerate(labels):
             rows.append(
                 {
-                    "user": "user_0",
+                    "user": user,
                     "label": label,
-                    "source_trial": f"user_0/action_0/trial_{trial}",
-                    "sample_id": f"{trial}/{label}",
+                    "sample_id": f"{user}/segment_{segment}",
+                    "source_trial": f"{user}/session_0",
                 }
             )
-    frame = pd.DataFrame(rows)
-    assignment = exp90._assign_user_trials(frame, seed=11)
-    assert set(assignment.values()) == {"train", "val", "test"}
-    split = frame.assign(split=frame.source_trial.map(assignment))
-    assert split.groupby("source_trial").split.nunique().max() == 1
-    counts = split.groupby(["label", "split"]).size()
-    for label in ("A", "B"):
-        for part in exp90.SPLITS:
-            assert counts[(label, part)] >= 1
+    return pd.DataFrame(rows)
 
 
-def test_sparse_pair_default_keeps_data_and_exclusions_remain_explicit() -> None:
-    manifest = pd.DataFrame(
-        [
-            {"user": "u0", "label": "A"},
-            {"user": "u0", "label": "A"},
-            {"user": "u0", "label": "B"},
-            {"user": "u0", "label": "B"},
-            {"user": "u0", "label": "B"},
-        ]
+def test_experiment_matrix_contract() -> None:
+    assert exp90.PROTOCOL_VERSION == "rotating_grouped_cv_v2"
+    assert exp90.CV_MODES == ("within_user", "cross_user")
+    assert exp90.METHODS == ("raw250_linear", "a2_234x234")
+    assert exp90.N_FOLDS == 5
+    assert exp90.ROTATIONS == (0, 1, 2, 3, 4)
+    assert exp90.MODEL_SEEDS == (11, 23, 37, 53, 71)
+    assert exp90.ARCHITECTURE_SHIFTS == ((2, 3, 4), (2, 3, 4))
+    assert exp90.EXPECTED_RUNS == 20
+    specs = exp90.run_specs()
+    assert len(specs) == 20
+    assert len({spec.key for spec in specs}) == 20
+
+
+def test_within_user_folds_keep_every_user_in_every_fold() -> None:
+    manifest = _synthetic_manifest()
+    assignment = exp90._assign_within_user_folds(manifest)
+    assert len(assignment) == len(manifest)
+    assert assignment.sample_id.nunique() == len(manifest)
+    counts = assignment.groupby(["user", "cv_fold"]).size().unstack(fill_value=0)
+    assert list(counts.columns) == list(range(exp90.N_FOLDS))
+    assert (counts > 0).all().all()
+
+
+def test_cross_user_folds_keep_each_user_in_one_fold() -> None:
+    manifest = _synthetic_manifest()
+    assignment = exp90._assign_cross_user_folds(manifest)
+    assert assignment.groupby("user").cv_fold.nunique().max() == 1
+    users_per_fold = (
+        assignment[["user", "cv_fold"]].drop_duplicates().groupby("cv_fold").size()
     )
-    summary = exp90._initial_pair_summary(manifest)
-    bad = summary[~summary.strict_three_way_eligible]
-    assert {(row.user, row.label) for row in bad.itertuples()} == {("u0", "A")}
-    kept, kept_meta = exp90._apply_insufficient_policy(manifest, summary, "keep_all")
-    assert len(kept) == len(manifest)
-    assert kept_meta == {"users": [], "classes": [], "pairs": []}
-    filtered, excluded = exp90._apply_insufficient_policy(manifest, summary, "exclude_pair")
-    assert set(filtered.label) == {"B"}
-    assert excluded["pairs"] == ["u0:A"]
+    assert set(users_per_fold.index) == set(range(exp90.N_FOLDS))
+    assert users_per_fold.sum() == manifest.user.nunique()
+
+
+def test_rotations_make_every_sample_oof_test_exactly_once() -> None:
+    manifest = _synthetic_manifest()
+    for mode in exp90.CV_MODES:
+        assignment = exp90._build_fold_assignment(manifest, mode)
+        held_out = []
+        for rotation in exp90.ROTATIONS:
+            split = exp90._apply_rotation(assignment, rotation)
+            held_out.append(split[split.split == "test"]["sample_id"])
+            if mode == exp90.CV_WITHIN:
+                assert set(split[split.split == "train"].user) == set(manifest.user)
+                assert set(split[split.split == "test"].user) == set(manifest.user)
+            else:
+                train_users = set(split[split.split == "train"].user)
+                val_users = set(split[split.split == "val"].user)
+                test_users = set(split[split.split == "test"].user)
+                assert not (train_users & val_users)
+                assert not (train_users & test_users)
+                assert not (val_users & test_users)
+        test_ids = pd.concat(held_out, ignore_index=True)
+        assert len(test_ids) == len(manifest)
+        assert test_ids.nunique() == len(manifest)
+
+
+def test_rotation_roles_are_602020_by_fold_count() -> None:
+    for rotation in exp90.ROTATIONS:
+        roles = exp90._rotation_fold_roles(rotation)
+        assert list(roles.values()).count("train") == 3
+        assert list(roles.values()).count("val") == 1
+        assert list(roles.values()).count("test") == 1
+        assert roles[rotation] == "test"
+        assert roles[(rotation + 1) % exp90.N_FOLDS] == "val"
 
 
 def test_cpu_array_dependency_and_thread_contract() -> None:
     root = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash"
     run = (root / "run_exp_9_0_cpu_array.bash").read_text()
-    assert "#SBATCH --array=0-9%10" in run
+    assert "#SBATCH --array=0-19%20" in run
     assert "#SBATCH --cpus-per-task=1" in run
     assert "OMP_NUM_THREADS=1" in run
     assert "MKL_NUM_THREADS=1" in run
     assert "OPENBLAS_NUM_THREADS=1" in run
     assert "NUMEXPR_NUM_THREADS=1" in run
     assert "--array-task-id" in run
-    assert "experiment_9_0_within_user_generalization" in run
+    assert "--insufficient-policy" not in run
 
     submit = (root / "submit_exp_9_0_cpu.bash").read_text()
     assert "prepare_exp_9_0_cpu.bash" in submit
-    assert 'afterok:${prepare_job}' in submit
-    assert 'afterok:${array_job}' in submit
+    assert 'afterok:\${prepare_job}' in submit
+    assert 'afterok:\${array_job}' in submit
     assert "finalize_exp_9_0_cpu.bash" in submit
-    assert "EXP9_INSUFFICIENT_POLICY" in submit
-    assert "keep_all" in submit
+    assert "EXP9_INSUFFICIENT_POLICY" not in submit
 
 
-def test_readme_and_notebook_are_aggregation_only() -> None:
+def test_readme_and_notebook_are_rotating_cv_and_aggregation_only() -> None:
     readme = (
         REPO_ROOT
         / "scripts"
         / "experiment_9_0_within_user_generalization"
         / "README.md"
     ).read_text()
-    assert "60/20/20" in readme
+    assert "5-fold" in readme
+    assert "within-user" in readme
+    assert "cross-user" in readme
     assert "Raw250" in readme
     assert "a2_234x234" in readme
-    assert "exclude_pair" in readme
-    assert "10-way CPU array" in readme
+    assert "20-way CPU array" in readme
 
     notebook = (
         REPO_ROOT / "notebooks" / "experiment_9_0_within_user_generalization.ipynb"
     ).read_text()
-    assert "within_user_segment_generalization_v1" in notebook
-    assert "metric_summary.csv" in notebook
-    assert "per_user_summary.csv" in notebook
+    assert "rotating_grouped_cv_v2" in notebook
+    assert "oof_test_metrics.csv" in notebook
+    assert "oof_per_user_test.csv" in notebook
     assert "within_vs_cross_user.csv" in notebook
     assert "fit(" not in notebook
