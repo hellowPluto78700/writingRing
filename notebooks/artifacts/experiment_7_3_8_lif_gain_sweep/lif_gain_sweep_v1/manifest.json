@@ -1,0 +1,46 @@
+{
+  "architecture": "234x234",
+  "count_bias_training": "after gain selection, only q plus CE-only positive scalar gain",
+  "experiment_id": "experiment_7_3_8_lif_gain_sweep",
+  "frozen_backbone": "Exp7.3 A2_e2e_linear_wcce L2 cache",
+  "gain_grid": [
+    0.125,
+    0.25,
+    0.5,
+    1.0,
+    2.0,
+    4.0,
+    8.0,
+    16.0,
+    32.0,
+    64.0
+  ],
+  "gain_selection": "per seed and weight source on validation BA; smallest gain wins ties",
+  "hybrid_control": "W0 from no-bias Linear + b1 from affine Linear, exact reuse with no retraining/rescaling",
+  "lif_weight_training": "none",
+  "logical_training_runs": 3,
+  "methods": [
+    "A0_linear_no_bias_W0",
+    "A1_linear_affine_W1_b1",
+    "A2_linear_hybrid_W0_b1",
+    "A3_linear_affine_W1_bias_off",
+    "B0_affineW_lif_selected_gain",
+    "B1_affineW_lif_continuous_count_bias",
+    "B2_affineW_lif_integer_count_bias",
+    "C0_noBiasW_lif_selected_gain",
+    "C1_noBiasW_lif_continuous_count_bias",
+    "C2_noBiasW_lif_integer_count_bias"
+  ],
+  "multi_cpu_contract": "one CPU per seed task; each task evaluates both weight sources and full gain sweep; afterok finalizer aggregates only",
+  "notebook_contract": "analysis-only; method-level and gain-level aggregation only",
+  "protocol_version": "lif_gain_sweep_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "weight_sources": [
+    "affine_w",
+    "no_bias_w"
+  ]
+}
