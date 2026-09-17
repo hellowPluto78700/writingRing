@@ -1,0 +1,311 @@
+{
+  "activity": {
+    "l1": [
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 128,
+        "fraction_at_cap": 0.002231403247183565,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.002231403247183565,
+        "mean_value_per_neuron_step": 0.002231403247183565,
+        "shift": 2,
+        "start": 0,
+        "stop": 128,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 128,
+        "fraction_at_cap": 0.017180769549370443,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.017180769549370443,
+        "mean_value_per_neuron_step": 0.017180769549370443,
+        "shift": 3,
+        "start": 128,
+        "stop": 256,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 128,
+        "fraction_at_cap": 0.08468007061795892,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.08468007061795892,
+        "mean_value_per_neuron_step": 0.08468007061795892,
+        "shift": 4,
+        "start": 256,
+        "stop": 384,
+        "threshold_multiplier": 1.0
+      }
+    ],
+    "l2": [
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 43,
+        "fraction_at_cap": 0.37197936412532556,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.37197936412532556,
+        "mean_value_per_neuron_step": 0.37197936412532556,
+        "shift": 2,
+        "start": 0,
+        "stop": 43,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 43,
+        "fraction_at_cap": 0.4068072187032842,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.4068072187032842,
+        "mean_value_per_neuron_step": 0.4068072187032842,
+        "shift": 3,
+        "start": 43,
+        "stop": 86,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "cap": 1,
+        "count": 42,
+        "fraction_at_cap": 0.4097735018460665,
+        "fraction_gt1": 0.0,
+        "fraction_nonzero": 0.4097735018460665,
+        "mean_value_per_neuron_step": 0.4097735018460665,
+        "shift": 4,
+        "start": 86,
+        "stop": 128,
+        "threshold_multiplier": 1.0
+      }
+    ]
+  },
+  "best_epoch": 66,
+  "experiment_id": "experiment_8_1_hidden_quantization_ablation",
+  "l1_threshold_bank_widths": [
+    384
+  ],
+  "lif_transfer_metrics": {
+    "test": {
+      "accuracy": 0.5205479452054794,
+      "balanced_accuracy": 0.5252358752358752,
+      "macro_f1": 0.5100160460544743
+    },
+    "train": {
+      "accuracy": 0.8950086058519794,
+      "balanced_accuracy": 0.8963051380805699,
+      "macro_f1": 0.8991831079850625
+    },
+    "val": {
+      "accuracy": 0.48412698412698413,
+      "balanced_accuracy": 0.4882996632996633,
+      "macro_f1": 0.4890521691768494
+    }
+  },
+  "linear_metrics": {
+    "test": {
+      "accuracy": 0.5958904109589042,
+      "balanced_accuracy": 0.5787469474969474,
+      "macro_f1": 0.5673162921408537,
+      "objective_loss": 1.3050773372388866
+    },
+    "train": {
+      "accuracy": 0.9535283993115319,
+      "balanced_accuracy": 0.9530859131245726,
+      "macro_f1": 0.9545927639323527,
+      "objective_loss": 0.4868030917418803
+    },
+    "val": {
+      "accuracy": 0.5476190476190477,
+      "balanced_accuracy": 0.5460377585377586,
+      "macro_f1": 0.5559631190566884,
+      "objective_loss": 1.2236701250076294
+    }
+  },
+  "method_config": {
+    "coding": "binary",
+    "l1_width": 384
+  },
+  "parameter_count": 62208,
+  "protocol_version": "hidden_quantization_ablation_v1",
+  "representation_probes": {
+    "l1": {
+      "communication": {
+        "fixed250_ordered_mean": {
+          "feature_dim": 6144,
+          "probe_C": 10.0,
+          "test": {
+            "accuracy": 0.5136986301369864,
+            "balanced_accuracy": 0.4944756632256632,
+            "macro_f1": 0.49391242083128056
+          },
+          "train": {
+            "accuracy": 1.0,
+            "balanced_accuracy": 1.0,
+            "macro_f1": 1.0
+          },
+          "val": {
+            "accuracy": 0.5396825396825397,
+            "balanced_accuracy": 0.5397727272727272,
+            "macro_f1": 0.5478551502141488
+          }
+        },
+        "whole_mean": {
+          "feature_dim": 384,
+          "probe_C": 1.0,
+          "test": {
+            "accuracy": 0.5684931506849316,
+            "balanced_accuracy": 0.5547050172050172,
+            "macro_f1": 0.5473043160944605
+          },
+          "train": {
+            "accuracy": 0.9793459552495697,
+            "balanced_accuracy": 0.9791690915176842,
+            "macro_f1": 0.980121091543929
+          },
+          "val": {
+            "accuracy": 0.5396825396825397,
+            "balanced_accuracy": 0.5296777296777296,
+            "macro_f1": 0.5278158153918803
+          }
+        }
+      },
+      "pre_reset": {
+        "fixed250_ordered_mean": {
+          "feature_dim": 6144,
+          "probe_C": 10.0,
+          "test": {
+            "accuracy": 0.6712328767123288,
+            "balanced_accuracy": 0.6560966810966811,
+            "macro_f1": 0.655467749389318
+          },
+          "train": {
+            "accuracy": 1.0,
+            "balanced_accuracy": 1.0,
+            "macro_f1": 1.0
+          },
+          "val": {
+            "accuracy": 0.6111111111111112,
+            "balanced_accuracy": 0.6003787878787878,
+            "macro_f1": 0.6047148503670243
+          }
+        },
+        "whole_mean": {
+          "feature_dim": 384,
+          "probe_C": 1.0,
+          "test": {
+            "accuracy": 0.541095890410959,
+            "balanced_accuracy": 0.5267760017760017,
+            "macro_f1": 0.5353617683418407
+          },
+          "train": {
+            "accuracy": 0.9672977624784854,
+            "balanced_accuracy": 0.967395642622474,
+            "macro_f1": 0.967913219089848
+          },
+          "val": {
+            "accuracy": 0.5396825396825397,
+            "balanced_accuracy": 0.5394660894660894,
+            "macro_f1": 0.5418077345958471
+          }
+        }
+      }
+    },
+    "l2": {
+      "communication": {
+        "fixed250_ordered_mean": {
+          "feature_dim": 2048,
+          "probe_C": 0.1,
+          "test": {
+            "accuracy": 0.6232876712328768,
+            "balanced_accuracy": 0.6095078532578533,
+            "macro_f1": 0.6104135517456624
+          },
+          "train": {
+            "accuracy": 1.0,
+            "balanced_accuracy": 1.0,
+            "macro_f1": 1.0
+          },
+          "val": {
+            "accuracy": 0.5793650793650794,
+            "balanced_accuracy": 0.5778619528619527,
+            "macro_f1": 0.5830774376027213
+          }
+        },
+        "whole_mean": {
+          "feature_dim": 128,
+          "probe_C": 1.0,
+          "test": {
+            "accuracy": 0.6232876712328768,
+            "balanced_accuracy": 0.6062611000110999,
+            "macro_f1": 0.5957776609737394
+          },
+          "train": {
+            "accuracy": 0.9931153184165232,
+            "balanced_accuracy": 0.9932449304508127,
+            "macro_f1": 0.9934128933157805
+          },
+          "val": {
+            "accuracy": 0.5634920634920635,
+            "balanced_accuracy": 0.5715728715728716,
+            "macro_f1": 0.5765718628257753
+          }
+        }
+      },
+      "pre_reset": {
+        "fixed250_ordered_mean": {
+          "feature_dim": 2048,
+          "probe_C": 0.1,
+          "test": {
+            "accuracy": 0.5616438356164384,
+            "balanced_accuracy": 0.5501262626262626,
+            "macro_f1": 0.5603856825423751
+          },
+          "train": {
+            "accuracy": 0.9965576592082617,
+            "balanced_accuracy": 0.9968251088534107,
+            "macro_f1": 0.9967947236151119
+          },
+          "val": {
+            "accuracy": 0.5396825396825397,
+            "balanced_accuracy": 0.5335497835497837,
+            "macro_f1": 0.5459981653480105
+          }
+        },
+        "whole_mean": {
+          "feature_dim": 128,
+          "probe_C": 10.0,
+          "test": {
+            "accuracy": 0.6095890410958904,
+            "balanced_accuracy": 0.5935897435897435,
+            "macro_f1": 0.5911587248748487
+          },
+          "train": {
+            "accuracy": 0.9913941480206541,
+            "balanced_accuracy": 0.9916702977487292,
+            "macro_f1": 0.991808227214778
+          },
+          "val": {
+            "accuracy": 0.5793650793650794,
+            "balanced_accuracy": 0.5905964405964405,
+            "macro_f1": 0.5853904764825388
+          }
+        }
+      }
+    }
+  },
+  "spec": {
+    "method": "binary384",
+    "seed": 11
+  },
+  "stopped_epoch": 96,
+  "threshold_multipliers": [
+    0.5,
+    1.0,
+    1.5
+  ],
+  "weighted_cap": 31
+}

@@ -1,0 +1,69 @@
+{
+  "counts": {
+    "methods": 5,
+    "parallel_runs": 15,
+    "seeds": 3
+  },
+  "diagnostics": {
+    "aggregations": [
+      "whole_mean",
+      "fixed250_ordered_mean"
+    ],
+    "states": [
+      "pre_reset",
+      "communication"
+    ]
+  },
+  "experiment_id": "experiment_8_1_hidden_quantization_ablation",
+  "hidden_shifts": [
+    2,
+    3,
+    4
+  ],
+  "l2_width": 128,
+  "method_order": [
+    "binary128",
+    "weighted31_128",
+    "mt3_128",
+    "binary384",
+    "mt3_384"
+  ],
+  "methods": {
+    "binary128": {
+      "coding": "binary",
+      "l1_width": 128
+    },
+    "binary384": {
+      "coding": "binary",
+      "l1_width": 384
+    },
+    "mt3_128": {
+      "coding": "hetero3",
+      "l1_width": 128
+    },
+    "mt3_384": {
+      "coding": "hetero3",
+      "l1_width": 384
+    },
+    "weighted31_128": {
+      "coding": "weighted31",
+      "l1_width": 128
+    }
+  },
+  "primary_metric": "linear_test_ba",
+  "protocol_version": "hidden_quantization_ablation_v1",
+  "scope": "L1 coding/width only; L2 remains 128-neuron binary (234)",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "threshold": 0.5,
+  "threshold_multipliers": [
+    0.5,
+    1.0,
+    1.5
+  ],
+  "training": "Exp7.3 A2-compatible end-to-end Linear/WCCE",
+  "weighted_hidden_cap": 31
+}

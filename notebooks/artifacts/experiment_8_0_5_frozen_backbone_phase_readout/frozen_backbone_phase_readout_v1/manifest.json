@@ -1,0 +1,45 @@
+{
+  "architecture": "234x234",
+  "architecture_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "backbone_frozen": true,
+  "counts": {
+    "methods": 4,
+    "parallel_runs": 12,
+    "seeds": 3
+  },
+  "diagnostics": [
+    "full/L1-only/L2-only test BA and branch removal drops",
+    "true-phase global circular-shift sweep over every phase bin"
+  ],
+  "experiment_id": "experiment_8_0_5_frozen_backbone_phase_readout",
+  "methods": [
+    "l2_whole",
+    "l1_l2_timeshared",
+    "l1_fixed250_l2_whole_true_phase",
+    "l1_fixed250_l2_whole_destroyed_phase"
+  ],
+  "phase_destroyed_control": "sample-specific deterministic non-zero cyclic phase offset; same Bx128 L1 feature bank and same head dimensionality as true phase",
+  "phase_pair_initialization": "true-phase and destroyed-phase heads use the exact same initialization seed at each backbone seed",
+  "primary_comparison": "l1_fixed250_l2_whole_true_phase - l1_fixed250_l2_whole_destroyed_phase",
+  "protocol_version": "frozen_backbone_phase_readout_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "source_backbone_method": "l1_l2_timeshared_count",
+  "source_experiment_id": "experiment_8_0_4_phase_aware_hierarchical_readout_mean",
+  "source_protocol_version": "phase_aware_hierarchical_readout_mean_v1",
+  "training": "readout-only bias-free linear CE on valid-length-normalized frozen L1/L2 spike-count features"
+}
