@@ -321,7 +321,11 @@ def _build_events(loaded, frame: pd.DataFrame, T: int) -> np.ndarray:
     return out
 
 
-def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> tuple[exp3.Data, dict[str, pd.DataFrame]]:
+def _to_data(
+    loaded,
+    split_manifest: pd.DataFrame,
+    labels: tuple[str, ...],
+) -> tuple[exp3.Data, dict[str, pd.DataFrame]]:
     fs = float(loaded.producer_metadatas[0].sampling_rate_hz)
     original_T = int(split_manifest.pad.max())
     bin_steps = int(np.rint(exp3.FIXED_MS * fs / 1000.0))
@@ -330,7 +334,9 @@ def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> t
     if bin_steps != 16:
         raise ValueError(f"Exp9.0 requires 250 ms = 16 samples, got {bin_steps}")
     frames = {
-        split: split_manifest[split_manifest.split == split].sort_values("sample_id").reset_index(drop=True)
+        split: split_manifest[split_manifest.split == split]
+        .sort_values("sample_id")
+        .reset_index(drop=True)
         for split in SPLITS
     }
     arrays: list[np.ndarray] = []
@@ -343,93 +349,171 @@ def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> t
                 np.minimum(frame.valid.to_numpy(dtype=np.int64, copy=True), T).copy(),
             ]
         )
-    all_users = tuple(sorted(split_manifest.user.unique().tolist()))
-    split_info = {"train_users": all_users, "val_users": all_users, "test_users": all_users}
+    split_info = {
+        f"{split}_users": tuple(sorted(frames[split].user.astype(str).unique().tolist()))
+        for split in SPLITS
+    }
     return exp3.Data(*arrays, labels, fs, T, bin_steps, n_bins, split_info), frames
 
 
-def _audit_paths(root: Path, split_seed: int) -> dict[str, Path]:
-    base = root / "manifests"
-    return {
-        "manifest": base / f"split_seed{split_seed}.csv",
-        "summary": base / f"manifest_summary_seed{split_seed}.csv",
-        "trials": base / f"source_trial_summary_seed{split_seed}.csv",
-    }
+def _assignment_path(root: Path, cv_mode: str) -> Path:
+    return root / "fold_assignments" / f"{cv_mode}.csv"
 
 
-def prepare_split(config: Config, split_seed: int, write_artifacts: bool = True) -> PreparedSplit:
-    loaded, raw_manifest, _ = _load_manifest(config.repo_root)
-    initial_summary = _initial_pair_summary(raw_manifest)
-    insufficient = initial_summary[~initial_summary.strict_three_way_eligible].copy()
+def _rotation_manifest_path(root: Path, cv_mode: str, rotation: int) -> Path:
+    return root / "manifests" / f"{cv_mode}__rotation{rotation}.csv"
+
+
+def _coverage_path(root: Path, cv_mode: str, rotation: int) -> Path:
+    return root / "manifests" / f"{cv_mode}__rotation{rotation}__coverage.csv"
+
+
+def _load_or_build_assignment(
+    config: Config,
+    raw_manifest: pd.DataFrame,
+    cv_mode: str,
+) -> pd.DataFrame:
+    path = _assignment_path(config.results_dir, cv_mode)
+    if path.exists():
+        saved = pd.read_csv(path, usecols=["sample_id", "cv_fold"])
+        if saved.sample_id.duplicated().any():
+            raise RuntimeError(f"Duplicate sample_id in {path}")
+        merged = raw_manifest.merge(saved, on="sample_id", how="inner", validate="one_to_one")
+        if len(merged) != len(raw_manifest):
+            raise RuntimeError(
+                f"Saved fold assignment {path} does not match current dataset: "
+                f"{len(merged)} vs {len(raw_manifest)} samples"
+            )
+        merged["cv_fold"] = merged.cv_fold.astype(int)
+        return merged
+    return _build_fold_assignment(raw_manifest, cv_mode)
+
+
+def prepare_rotation(
+    config: Config,
+    cv_mode: str,
+    rotation: int,
+    write_artifacts: bool = False,
+) -> PreparedSplit:
+    loaded, raw_manifest, labels = _load_manifest(config.repo_root)
+    assignment = _load_or_build_assignment(config, raw_manifest, cv_mode)
+    split_manifest = _apply_rotation(assignment, rotation)
+    coverage = _coverage_summary(split_manifest)
+    coverage_metrics = _coverage_metrics(split_manifest)
+    data, frames = _to_data(loaded, split_manifest, labels)
     if write_artifacts:
-        manifest_dir = config.results_dir / "manifests"
-        manifest_dir.mkdir(parents=True, exist_ok=True)
-        insufficient.to_csv(manifest_dir / "insufficient_user_class_pairs.csv", index=False)
-        initial_summary.to_csv(manifest_dir / "initial_pair_summary.csv", index=False)
-    filtered, excluded = _apply_insufficient_policy(raw_manifest, initial_summary, config.insufficient_policy)
-    if filtered.empty:
-        raise RuntimeError("Insufficient-data policy removed all samples")
-    active_summary = (
-        _present_pair_summary(filtered)
-        if config.insufficient_policy == "exclude_pair"
-        else _initial_pair_summary(filtered)
+        manifest_path = _rotation_manifest_path(config.results_dir, cv_mode, rotation)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        split_manifest.to_csv(manifest_path, index=False)
+        coverage.to_csv(_coverage_path(config.results_dir, cv_mode, rotation), index=False)
+    return PreparedSplit(
+        cv_mode=cv_mode,
+        rotation=rotation,
+        data=data,
+        frames=frames,
+        full_manifest=split_manifest,
+        coverage_summary=coverage,
+        coverage_metrics=coverage_metrics,
     )
-    split_manifest, trial_summary = _build_split_manifest(filtered, split_seed)
-    actual_summary = _pair_actual_summary(split_manifest, active_summary)
-    actual_summary["coverage_expected"] = actual_summary.strict_three_way_eligible
-    actual_summary["coverage_met_when_expected"] = (
-        (~actual_summary.coverage_expected) | actual_summary.actual_three_way_coverage
-    )
-    data, frames = _to_data(loaded, split_manifest, tuple(sorted(filtered.label.unique())))
-    if write_artifacts:
-        paths = _audit_paths(config.results_dir, split_seed)
-        paths["manifest"].parent.mkdir(parents=True, exist_ok=True)
-        split_manifest.to_csv(paths["manifest"], index=False)
-        actual_summary.to_csv(paths["summary"], index=False)
-        trial_summary.to_csv(paths["trials"], index=False)
-    return PreparedSplit(data, frames, split_manifest, actual_summary, trial_summary, excluded)
 
 
 def prepare_all(config: Config) -> dict[str, Any]:
     loaded, raw_manifest, _ = _load_manifest(config.repo_root)
     del loaded
-    initial = _initial_pair_summary(raw_manifest)
+    config.results_dir.mkdir(parents=True, exist_ok=True)
+    assignment_dir = config.results_dir / "fold_assignments"
     manifest_dir = config.results_dir / "manifests"
+    assignment_dir.mkdir(parents=True, exist_ok=True)
     manifest_dir.mkdir(parents=True, exist_ok=True)
-    initial.to_csv(manifest_dir / "initial_pair_summary.csv", index=False)
-    insufficient = initial[~initial.strict_three_way_eligible].copy()
-    insufficient.to_csv(manifest_dir / "insufficient_user_class_pairs.csv", index=False)
+
+    fold_frames: list[pd.DataFrame] = []
+    rotation_rows: list[dict[str, Any]] = []
+    for cv_mode in CV_MODES:
+        assignment = _build_fold_assignment(raw_manifest, cv_mode)
+        assignment.to_csv(_assignment_path(config.results_dir, cv_mode), index=False)
+        fold_frames.append(_fold_summary(assignment, cv_mode))
+        for rotation in ROTATIONS:
+            split_manifest = _apply_rotation(assignment, rotation)
+            split_manifest.to_csv(
+                _rotation_manifest_path(config.results_dir, cv_mode, rotation),
+                index=False,
+            )
+            coverage = _coverage_summary(split_manifest)
+            coverage.to_csv(
+                _coverage_path(config.results_dir, cv_mode, rotation),
+                index=False,
+            )
+            metrics = _coverage_metrics(split_manifest)
+            counts = split_manifest.split.value_counts()
+            users = {
+                split: int(split_manifest.loc[split_manifest.split == split, "user"].nunique())
+                for split in SPLITS
+            }
+            rotation_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "rotation": rotation,
+                    "test_fold": rotation,
+                    "val_fold": (rotation + 1) % N_FOLDS,
+                    "train_samples": int(counts.get("train", 0)),
+                    "val_samples": int(counts.get("val", 0)),
+                    "test_samples": int(counts.get("test", 0)),
+                    "train_users": users["train"],
+                    "val_users": users["val"],
+                    "test_users": users["test"],
+                    **metrics,
+                }
+            )
+
+    fold_summary = pd.concat(fold_frames, ignore_index=True)
+    fold_summary.to_csv(config.results_dir / "fold_summary.csv", index=False)
+    rotation_summary = pd.DataFrame(rotation_rows)
+    rotation_summary.to_csv(config.results_dir / "rotation_summary.csv", index=False)
+
+    within_assignment = pd.read_csv(_assignment_path(config.results_dir, CV_WITHIN))
+    within_user_fold = (
+        within_assignment.groupby(["user", "cv_fold"])
+        .size()
+        .rename("n")
+        .reset_index()
+    )
+    within_user_fold.to_csv(
+        config.results_dir / "within_user_fold_counts.csv",
+        index=False,
+    )
+
+    cross_assignment = pd.read_csv(_assignment_path(config.results_dir, CV_CROSS))
+    cross_users = (
+        cross_assignment[["user", "cv_fold"]]
+        .drop_duplicates()
+        .sort_values(["cv_fold", "user"])
+        .reset_index(drop=True)
+    )
+    cross_users.to_csv(config.results_dir / "cross_user_fold_users.csv", index=False)
+
     audit = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
-        "insufficient_policy": config.insufficient_policy,
         "total_samples": int(len(raw_manifest)),
         "total_users": int(raw_manifest.user.nunique()),
         "total_classes": int(raw_manifest.label.nunique()),
-        "total_user_class_pairs": int(len(initial)),
-        "insufficient_user_class_pairs": int(len(insufficient)),
-        "affected_users": sorted(insufficient.user.astype(str).unique().tolist()),
-        "affected_classes": sorted(insufficient.label.astype(str).unique().tolist()),
+        "source_trials": int(raw_manifest.source_trial.nunique()),
+        "n_folds": N_FOLDS,
+        "rotations": list(ROTATIONS),
+        "model_seeds": list(MODEL_SEEDS),
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
+        "within_user_split_unit": "segment",
+        "within_user_source_trial_grouping": False,
+        "cross_user_split_unit": "user",
+        "cross_user_user_grouping": True,
+        "within_user_note": (
+            "Segments are split within each user because the dataset has only 1-2 "
+            "source trials per user; grouping source trials would make within-user "
+            "5-fold CV impossible."
+        ),
+        "expected_runs": EXPECTED_RUNS,
     }
-    _save_json(manifest_dir / "audit.json", audit)
-    prepared = []
-    for seed in SPLIT_SEEDS:
-        try:
-            prepared.append(prepare_split(config, seed, write_artifacts=True))
-        except Exception as error:
-            _save_json(
-                manifest_dir / f"split_failure_seed{seed}.json",
-                {"split_seed": int(seed), "error_type": type(error).__name__, "error": str(error)},
-            )
-            raise
-    audit["prepared_split_seeds"] = list(SPLIT_SEEDS)
-    audit["active_samples_per_seed"] = {
-        str(seed): int(len(prep.full_manifest)) for seed, prep in zip(SPLIT_SEEDS, prepared, strict=True)
-    }
-    audit["excluded"] = prepared[0].excluded if prepared else {}
-    _save_json(manifest_dir / "audit.json", audit)
+    _save_json(config.results_dir / "audit.json", audit)
     return audit
 
 
