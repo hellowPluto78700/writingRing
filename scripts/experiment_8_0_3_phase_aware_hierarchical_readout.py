@@ -21,15 +21,15 @@ from scripts import experiment_8_0_2_joint_l1_l2_supervision as exp802
 
 
 EXPERIMENT_ID = "experiment_8_0_3_phase_aware_hierarchical_readout"
-PROTOCOL_VERSION = "phase_aware_hierarchical_readout_v1"
+PROTOCOL_VERSION = "phase_aware_hierarchical_readout_v2"
 SEEDS = exp73.SEEDS
 ARCHITECTURE = "234x234"
 ARCHITECTURE_SHIFTS = exp80.ARCHITECTURES[ARCHITECTURE]
 METHODS = (
-    "l2_only",
-    "l1_l2_timeshared",
-    "l1_fixed250_l2_whole",
-    "l1_capacity_no_phase_l2_whole",
+    "l2_only_count",
+    "l1_l2_timeshared_count",
+    "l1_fixed250_l2_whole_count",
+    "l1_capacity_no_phase_l2_whole_count",
 )
 EXPECTED_RUNS = len(METHODS) * len(SEEDS)
 TARGET_PROBE = "l1fixed250_l2whole"
@@ -83,8 +83,13 @@ def _save_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _valid_sum(values: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+    mask = exp80._valid_mask(lengths, values.shape[1]).to(values.dtype).unsqueeze(-1)
+    return (values * mask).sum(dim=1)
+
+
 class Exp803Net(exp80.Exp80Net):
-    """Exp8.0 local backbone with time-shared or absolute-bin L1 readout."""
+    """Exp8.0 local backbone with count-form hierarchical readout."""
 
     def __init__(
         self,
@@ -105,15 +110,15 @@ class Exp803Net(exp80.Exp80Net):
         self.l1_timeshared_linear: nn.Linear | None = None
         self.l1_phase_linear: nn.Linear | None = None
 
-        # The inherited backbone and W2 are initialized first. Therefore all
-        # shared parameters preserve the Exp7.3/8.0 paired initialization.
-        if method == "l1_l2_timeshared":
+        # Inherited backbone and W2 initialize first, preserving paired shared
+        # initialization across all methods at a fixed seed.
+        if method == "l1_l2_timeshared_count":
             self.l1_timeshared_linear = nn.Linear(
                 exp80.HIDDEN_WIDTH, n_classes, bias=False
             )
         elif method in {
-            "l1_fixed250_l2_whole",
-            "l1_capacity_no_phase_l2_whole",
+            "l1_fixed250_l2_whole_count",
+            "l1_capacity_no_phase_l2_whole_count",
         }:
             self.l1_phase_linear = nn.Linear(
                 self.n_bins * exp80.HIDDEN_WIDTH, n_classes, bias=False
@@ -138,18 +143,18 @@ def new_model(spec: RunSpec, data: exp3.Data) -> Exp803Net:
 
 
 def _l1_branch_evidence(model: Exp803Net, l1: torch.Tensor) -> torch.Tensor:
-    if model.method == "l2_only":
+    if model.method == "l2_only_count":
         return torch.zeros(
             l1.shape[0], l1.shape[1], model.n_classes,
             dtype=l1.dtype, device=l1.device,
         )
-    if model.method == "l1_l2_timeshared":
+    if model.method == "l1_l2_timeshared_count":
         if model.l1_timeshared_linear is None:
             raise RuntimeError("Missing time-shared L1 head")
         return model.l1_timeshared_linear(l1)
 
     bank = model.phase_weight_bank()
-    if model.method == "l1_fixed250_l2_whole":
+    if model.method == "l1_fixed250_l2_whole_count":
         bin_index = torch.div(
             torch.arange(l1.shape[1], device=l1.device),
             model.bin_steps,
@@ -158,10 +163,11 @@ def _l1_branch_evidence(model: Exp803Net, l1: torch.Tensor) -> torch.Tensor:
         weights_by_t = bank[bin_index]
         return torch.einsum("bth,tkh->btk", l1, weights_by_t)
 
-    if model.method == "l1_capacity_no_phase_l2_whole":
-        # Same B x K x H parameters as the phase-aware head but without access
-        # to b(t). This is equivalent to feeding Whole(L1) into every bin slot.
-        effective_weight = bank.sum(dim=0)
+    if model.method == "l1_capacity_no_phase_l2_whole_count":
+        # Same B*K*H parameters as the phase-aware bank, but no b(t) access.
+        # 1/sqrt(B) keeps both initialization variance and the effective SGD
+        # update scale comparable to a conventional time-shared H->K head.
+        effective_weight = bank.sum(dim=0) / math.sqrt(model.n_bins)
         return F.linear(l1, effective_weight)
 
     raise ValueError(model.method)
@@ -183,7 +189,9 @@ def _native_evidence(model: Exp803Net, trajectory: dict[str, Any]) -> torch.Tens
 def _scores(
     model: Exp803Net, trajectory: dict[str, Any], lengths: torch.Tensor
 ) -> torch.Tensor:
-    return exp80._valid_mean(_native_evidence(model, trajectory), lengths)
+    # Exact count-form objective. This is intentionally not divided by T:
+    # Fixed250 and Whole probes in Exp8.0.1/8.0.2 are count features.
+    return _valid_sum(_native_evidence(model, trajectory), lengths)
 
 
 def _loss(
@@ -200,34 +208,33 @@ def _explicit_feature_scores(
     trajectory: dict[str, Any],
     lengths: torch.Tensor,
 ) -> torch.Tensor:
-    """Count-form implementation of the native per-timestep evidence score."""
+    """Explicit feature-form implementation of the native count score."""
     l1 = trajectory["hidden_spikes"][0]
     l2 = trajectory["hidden_spikes"][1]
     valid = exp80._valid_mask(lengths, l2.shape[1]).to(l2.dtype).unsqueeze(-1)
     l2_count = (l2 * valid).sum(dim=1)
     score = F.linear(l2_count, model.output_linear.weight)
 
-    if model.method == "l1_l2_timeshared":
+    if model.method == "l1_l2_timeshared_count":
         if model.l1_timeshared_linear is None:
             raise RuntimeError("Missing time-shared L1 head")
         l1_count = (l1 * valid).sum(dim=1)
         score = score + F.linear(l1_count, model.l1_timeshared_linear.weight)
-    elif model.method == "l1_fixed250_l2_whole":
+    elif model.method == "l1_fixed250_l2_whole_count":
         if model.l1_phase_linear is None:
             raise RuntimeError("Missing phase-aware L1 head")
         l1_fixed = exp3.fixed_counts(l1, lengths, model.bin_steps).flatten(1)
         score = score + model.l1_phase_linear(l1_fixed)
-    elif model.method == "l1_capacity_no_phase_l2_whole":
+    elif model.method == "l1_capacity_no_phase_l2_whole_count":
         if model.l1_phase_linear is None:
             raise RuntimeError("Missing capacity-control L1 head")
         l1_count = (l1 * valid).sum(dim=1)
-        repeated = l1_count.repeat(1, model.n_bins)
+        repeated = l1_count.repeat(1, model.n_bins) / math.sqrt(model.n_bins)
         score = score + model.l1_phase_linear(repeated)
-    elif model.method != "l2_only":
+    elif model.method != "l2_only_count":
         raise ValueError(model.method)
 
-    denominator = lengths.clamp_min(1).to(score.dtype).unsqueeze(1)
-    return score / denominator
+    return score
 
 
 def _evaluate_native(
@@ -294,8 +301,8 @@ def _branch_score_diagnostics(
             lengths_d = lengths.to(device)
             trajectory = model.forward_trajectory(X)
             l1_e, l2_e = _branch_evidence(model, trajectory)
-            l1_scores.append(exp80._valid_mean(l1_e, lengths_d).cpu())
-            l2_scores.append(exp80._valid_mean(l2_e, lengths_d).cpu())
+            l1_scores.append(_valid_sum(l1_e, lengths_d).cpu())
+            l2_scores.append(_valid_sum(l2_e, lengths_d).cpu())
     l1 = torch.cat(l1_scores, dim=0)
     l2 = torch.cat(l2_scores, dim=0)
     l1_rms = float(torch.sqrt(torch.mean(l1.square())))
@@ -565,9 +572,17 @@ def _paired_deltas(
     method_runs: pd.DataFrame, probe_runs: pd.DataFrame
 ) -> pd.DataFrame:
     comparisons = (
-        ("phase_vs_capacity", "l1_fixed250_l2_whole", "l1_capacity_no_phase_l2_whole"),
-        ("phase_vs_timeshared", "l1_fixed250_l2_whole", "l1_l2_timeshared"),
-        ("timeshared_vs_l2", "l1_l2_timeshared", "l2_only"),
+        (
+            "phase_vs_capacity",
+            "l1_fixed250_l2_whole_count",
+            "l1_capacity_no_phase_l2_whole_count",
+        ),
+        (
+            "phase_vs_timeshared",
+            "l1_fixed250_l2_whole_count",
+            "l1_l2_timeshared_count",
+        ),
+        ("timeshared_vs_l2", "l1_l2_timeshared_count", "l2_only_count"),
     )
     target = probe_runs[probe_runs.feature == TARGET_PROBE][
         ["method", "seed", "test_ba"]
@@ -743,9 +758,16 @@ def finalize(config: Config) -> dict[str, Any]:
             "seeds": len(SEEDS),
             "parallel_runs": EXPECTED_RUNS,
         },
-        "primary_comparison": "l1_fixed250_l2_whole - l1_capacity_no_phase_l2_whole",
+        "primary_comparison": (
+            "l1_fixed250_l2_whole_count - "
+            "l1_capacity_no_phase_l2_whole_count"
+        ),
         "target_posthoc_probe": TARGET_PROBE,
-        "training": "A2-compatible end-to-end CE on valid-mean accumulated class evidence",
+        "training": (
+            "end-to-end CE on the exact count-form accumulated class evidence; "
+            "no valid-length division"
+        ),
+        "capacity_control_scale": "1/sqrt(n_bins)",
         "output_lif": {
             "alpha": 0.0,
             "beta": exp80.OUTPUT_BETA,
