@@ -107,8 +107,8 @@ def test_cpu_array_dependency_and_thread_contract() -> None:
 
     submit = (root / "submit_exp_9_0_cpu.bash").read_text()
     assert "prepare_exp_9_0_cpu.bash" in submit
-    assert 'afterok:\${prepare_job}' in submit
-    assert 'afterok:\${array_job}' in submit
+    assert 'afterok:${prepare_job}' in submit
+    assert 'afterok:${array_job}' in submit
     assert "finalize_exp_9_0_cpu.bash" in submit
     assert "EXP9_INSUFFICIENT_POLICY" not in submit
 
