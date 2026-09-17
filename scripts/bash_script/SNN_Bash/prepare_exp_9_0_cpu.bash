@@ -24,7 +24,7 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
-POLICY="${EXP9_INSUFFICIENT_POLICY:-error}"
+POLICY="${EXP9_INSUFFICIENT_POLICY:-keep_all}"
 
 python -u -m scripts.experiment_9_0_within_user_generalization \
   --device cpu --threads 1 --insufficient-policy "$POLICY" prepare

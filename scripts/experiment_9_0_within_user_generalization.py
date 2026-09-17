@@ -38,7 +38,7 @@ METHOD_A2 = "a2_234x234"
 METHODS = (METHOD_RAW250, METHOD_A2)
 SPLIT_SEEDS = (11, 23, 37, 53, 71)
 EXPECTED_RUNS = len(METHODS) * len(SPLIT_SEEDS)
-INSUFFICIENT_POLICIES = ("error", "exclude_pair", "exclude_user", "exclude_class")
+INSUFFICIENT_POLICIES = ("keep_all", "error", "exclude_pair", "exclude_user", "exclude_class")
 TARGET_FRACTIONS = {"train": 0.60, "val": 0.20, "test": 0.20}
 SPLITS = ("train", "val", "test")
 ARCHITECTURE = "234x234"
@@ -68,7 +68,7 @@ class Config:
     threads: int = 1
     batch_size: int = BATCH_SIZE
     max_epochs: int = MAX_EPOCHS
-    insufficient_policy: str = "error"
+    insufficient_policy: str = "keep_all"
 
 
 @dataclass
@@ -241,14 +241,14 @@ def _apply_insufficient_policy(
         raise ValueError(policy)
     bad = pair_summary[~pair_summary.strict_three_way_eligible]
     excluded = {"users": [], "classes": [], "pairs": []}
-    if bad.empty:
+    if bad.empty or policy == "keep_all":
         return manifest.copy(), excluded
     excluded["pairs"] = [f"{r.user}:{r.label}" for r in bad.itertuples(index=False)]
     if policy == "error":
         raise RuntimeError(
             "Exp9.0 has (user,class) pairs with fewer than 3 samples. "
             "Inspect manifests/insufficient_user_class_pairs.csv, then rerun with "
-            "--insufficient-policy exclude_pair, exclude_user, or exclude_class."
+            "--insufficient-policy keep_all, exclude_pair, exclude_user, or exclude_class."
         )
     if policy == "exclude_pair":
         bad_pairs = {(str(r.user), str(r.label)) for r in bad.itertuples(index=False)}
@@ -280,12 +280,18 @@ def _assignment_score(
     feasible = True
     score = 0.0
     for label in labels:
+        label_total = int((frame.label == label).sum())
         for part in SPLITS:
             actual = int(counts.get((label, part), 0))
             wanted = int(target[(label, part)])
-            if actual < 1:
-                feasible = False
             score += abs(actual - wanted) / max(wanted, 1)
+            # Three-way per-(user,class) coverage is impossible when fewer than
+            # three samples exist. For eligible pairs, treat missing coverage as
+            # a strong preference rather than a hard feasibility constraint,
+            # because source-trial isolation can still make exact coverage
+            # impossible (e.g. all samples from one trial).
+            if label_total >= 3 and actual < 1:
+                score += 10.0
     total = len(frame)
     split_counts = work._split.value_counts()
     for part in SPLITS:
@@ -304,10 +310,6 @@ def _assign_user_trials(frame: pd.DataFrame, seed: int) -> dict[str, str]:
     targets: dict[tuple[str, str], int] = {}
     for label, group in frame.groupby("label", sort=True):
         alloc = _allocate_counts(len(group), _stable_seed(seed, frame.user.iloc[0], label))
-        if min(alloc.values()) < 1:
-            raise RuntimeError(
-                f"User {frame.user.iloc[0]} class {label} cannot satisfy three-way coverage"
-            )
         for part in SPLITS:
             targets[(str(label), part)] = int(alloc[part])
 
@@ -333,8 +335,8 @@ def _assign_user_trials(frame: pd.DataFrame, seed: int) -> dict[str, str]:
                 break
     if best is None:
         raise RuntimeError(
-            f"Could not find a source-trial-isolated 60/20/20 split with all classes "
-            f"present for user {frame.user.iloc[0]}."
+            f"Could not find a source-trial-isolated 60/20/20 split for user "
+            f"{frame.user.iloc[0]}."
         )
     return best
 
@@ -450,17 +452,12 @@ def prepare_split(config: Config, split_seed: int, write_artifacts: bool = True)
         if config.insufficient_policy == "exclude_pair"
         else _initial_pair_summary(filtered)
     )
-    remaining_bad = active_summary[~active_summary.strict_three_way_eligible]
-    if not remaining_bad.empty:
-        raise RuntimeError("Selected insufficient-data policy still leaves pairs with fewer than 3 samples")
     split_manifest, trial_summary = _build_split_manifest(filtered, split_seed)
     actual_summary = _pair_actual_summary(split_manifest, active_summary)
-    if not bool(actual_summary.actual_three_way_coverage.all()):
-        bad = actual_summary[~actual_summary.actual_three_way_coverage]
-        raise RuntimeError(
-            "Source-trial grouping prevented class coverage in one or more pairs: "
-            + ", ".join(f"{r.user}:{r.label}" for r in bad.itertuples(index=False))
-        )
+    actual_summary["coverage_expected"] = actual_summary.strict_three_way_eligible
+    actual_summary["coverage_met_when_expected"] = (
+        (~actual_summary.coverage_expected) | actual_summary.actual_three_way_coverage
+    )
     data, frames = _to_data(loaded, split_manifest, tuple(sorted(filtered.label.unique())))
     if write_artifacts:
         paths = _audit_paths(config.results_dir, split_seed)
@@ -495,11 +492,6 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "source_trial_isolation": True,
     }
     _save_json(manifest_dir / "audit.json", audit)
-    if config.insufficient_policy == "error" and len(insufficient):
-        raise RuntimeError(
-            "Exp9.0 audit found insufficient (user,class) pairs. Summary artifacts were written. "
-            "Choose EXP9_INSUFFICIENT_POLICY=exclude_pair, exclude_user, or exclude_class."
-        )
     prepared = []
     for seed in SPLIT_SEEDS:
         try:
@@ -910,7 +902,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-epochs", type=int, default=MAX_EPOCHS)
-    parser.add_argument("--insufficient-policy", choices=INSUFFICIENT_POLICIES, default="error")
+    parser.add_argument("--insufficient-policy", choices=INSUFFICIENT_POLICIES, default="keep_all")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prepare")
     sub.add_parser("list-runs")

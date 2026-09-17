@@ -61,7 +61,7 @@ def test_source_trial_assignment_is_disjoint_and_class_complete() -> None:
             assert counts[(label, part)] >= 1
 
 
-def test_insufficient_pair_policies_are_explicit() -> None:
+def test_sparse_pair_default_keeps_data_and_exclusions_remain_explicit() -> None:
     manifest = pd.DataFrame(
         [
             {"user": "u0", "label": "A"},
@@ -74,6 +74,9 @@ def test_insufficient_pair_policies_are_explicit() -> None:
     summary = exp90._initial_pair_summary(manifest)
     bad = summary[~summary.strict_three_way_eligible]
     assert {(row.user, row.label) for row in bad.itertuples()} == {("u0", "A")}
+    kept, kept_meta = exp90._apply_insufficient_policy(manifest, summary, "keep_all")
+    assert len(kept) == len(manifest)
+    assert kept_meta == {"users": [], "classes": [], "pairs": []}
     filtered, excluded = exp90._apply_insufficient_policy(manifest, summary, "exclude_pair")
     assert set(filtered.label) == {"B"}
     assert excluded["pairs"] == ["u0:A"]
@@ -97,6 +100,7 @@ def test_cpu_array_dependency_and_thread_contract() -> None:
     assert 'afterok:${array_job}' in submit
     assert "finalize_exp_9_0_cpu.bash" in submit
     assert "EXP9_INSUFFICIENT_POLICY" in submit
+    assert "keep_all" in submit
 
 
 def test_readme_and_notebook_are_aggregation_only() -> None:
