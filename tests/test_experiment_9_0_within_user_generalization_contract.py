@@ -76,7 +76,7 @@ def test_sparse_pair_default_keeps_data_and_exclusions_remain_explicit() -> None
     assert {(row.user, row.label) for row in bad.itertuples()} == {("u0", "A")}
     kept, kept_meta = exp90._apply_insufficient_policy(manifest, summary, "keep_all")
     assert len(kept) == len(manifest)
-    assert kept_meta["pairs"] == ["u0:A"]
+    assert kept_meta == {"users": [], "classes": [], "pairs": []}
     filtered, excluded = exp90._apply_insufficient_policy(manifest, summary, "exclude_pair")
     assert set(filtered.label) == {"B"}
     assert excluded["pairs"] == ["u0:A"]
