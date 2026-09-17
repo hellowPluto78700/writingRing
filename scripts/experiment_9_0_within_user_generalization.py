@@ -761,6 +761,29 @@ def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any
     per_class_path.parent.mkdir(parents=True, exist_ok=True)
     per_class.to_csv(per_class_path, index=False)
 
+    prediction_rows: list[dict[str, Any]] = []
+    for split in SPLITS:
+        y_true, pred = predictions[split]
+        frame = prepared.frames[split]
+        for index, row in enumerate(frame.itertuples(index=False)):
+            prediction_rows.append(
+                {
+                    "cv_mode": spec.cv_mode,
+                    "method": spec.method,
+                    "rotation": spec.rotation,
+                    "seed": spec.seed,
+                    "split": split,
+                    "sample_id": str(row.sample_id),
+                    "user": str(row.user),
+                    "class_label": str(row.label),
+                    "y_true": int(y_true[index]),
+                    "y_pred": int(pred[index]),
+                }
+            )
+    prediction_path = _path(config.results_dir, "predictions", spec.key, ".csv")
+    prediction_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(prediction_rows).to_csv(prediction_path, index=False)
+
     payload = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
