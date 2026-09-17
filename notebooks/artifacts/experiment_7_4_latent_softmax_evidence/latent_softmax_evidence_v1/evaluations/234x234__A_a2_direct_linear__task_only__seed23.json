@@ -1,0 +1,126 @@
+{
+  "best_epoch": 89,
+  "contract": {
+    "aggregation": "valid_timestep_mean",
+    "all_l1_l2_head_trainable": true,
+    "architecture": "234x234",
+    "bias": false,
+    "case_a_reuses_exp73_a2_pairing": true,
+    "checkpoint_metric": "native_validation_balanced_accuracy",
+    "checkpoint_tiebreak": "native_validation_objective_loss",
+    "head_trainable_parameters": 1536,
+    "objective": "wcce",
+    "regularization": "task_only",
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "temperature": 1.0
+  },
+  "diagnostics": {
+    "test": {
+      "evidence_rms": {
+        "max": 7.415928363800049,
+        "mean": 3.818098783493042,
+        "min": 9.999999974752427e-07,
+        "std": 2.032914638519287
+      }
+    },
+    "train": {
+      "evidence_rms": {
+        "max": 7.709939956665039,
+        "mean": 3.7445995807647705,
+        "min": 9.999999974752427e-07,
+        "std": 2.0386714935302734
+      }
+    },
+    "val": {
+      "evidence_rms": {
+        "max": 7.547670364379883,
+        "mean": 3.3999745845794678,
+        "min": 9.999999974752427e-07,
+        "std": 2.1834168434143066
+      }
+    }
+  },
+  "experiment_id": "experiment_7_4_latent_softmax_evidence",
+  "method": "A_a2_direct_linear",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.6027397260273972,
+      "balanced_accuracy": 0.5961822899322898,
+      "macro_f1": 0.5890452140452139,
+      "objective_loss": 1.343819404301578
+    },
+    "train": {
+      "accuracy": 0.9173838209982789,
+      "balanced_accuracy": 0.9174331048696077,
+      "macro_f1": 0.9189651579067158,
+      "objective_loss": 0.6015098478112902
+    },
+    "val": {
+      "accuracy": 0.5793650793650794,
+      "balanced_accuracy": 0.5722643097643098,
+      "macro_f1": 0.5762265557285365,
+      "objective_loss": 1.2229338884353638
+    }
+  },
+  "protocol_version": "latent_softmax_evidence_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6164383561643836,
+          "balanced_accuracy": 0.6055305805305805,
+          "macro_f1": 0.6114296861203555
+        },
+        "train": {
+          "accuracy": 0.9948364888123924,
+          "balanced_accuracy": 0.9949115971174795,
+          "macro_f1": 0.9950930778169301
+        },
+        "val": {
+          "accuracy": 0.6031746031746031,
+          "balanced_accuracy": 0.5963804713804713,
+          "macro_f1": 0.6122524285472417
+        }
+      },
+      "probe_C": 0.1
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6027397260273972,
+          "balanced_accuracy": 0.5878697691197691,
+          "macro_f1": 0.5918189327859674
+        },
+        "train": {
+          "accuracy": 0.9036144578313253,
+          "balanced_accuracy": 0.8985211802679326,
+          "macro_f1": 0.9048353299108571
+        },
+        "val": {
+          "accuracy": 0.5714285714285714,
+          "balanced_accuracy": 0.5597342472342473,
+          "macro_f1": 0.5645234023352685
+        }
+      },
+      "probe_C": 0.01
+    }
+  },
+  "spec": {
+    "head": "direct",
+    "seed": 23
+  },
+  "stopped_epoch": 100
+}

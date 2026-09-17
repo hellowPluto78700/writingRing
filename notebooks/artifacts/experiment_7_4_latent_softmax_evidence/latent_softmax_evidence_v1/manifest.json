@@ -1,0 +1,44 @@
+{
+  "architecture": "234x234",
+  "checkpoint_rule": "native validation BA primary, native WCCE loss tiebreak",
+  "counts": {
+    "methods": 4,
+    "parallel_runs": 12,
+    "seeds": 3
+  },
+  "experiment_id": "experiment_7_4_latent_softmax_evidence",
+  "hypotheses": {
+    "B_minus_A": "Controls for adding a factorized 128x128 then 128x12 linear head.",
+    "C_minus_B": "Isolates the effect of per-timestep 128-way softmax normalization.",
+    "D_minus_C": "Tests whether restoring deterministic latent RMS magnitude recovers performance lost by softmax normalization."
+  },
+  "methods": [
+    "A_a2_direct_linear",
+    "B_two_linear",
+    "C_latent_softmax",
+    "D_latent_softmax_rms"
+  ],
+  "objective": "wcce",
+  "pairing_contract": "All methods reuse Exp7.3 A2 model-init and loader seeds. Case A is intended as a strict A2 replication.",
+  "primary_metric": "native_test_balanced_accuracy",
+  "protocol_version": "latent_softmax_evidence_v1",
+  "regularization": "task_only",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "temperature": 1.0
+}
