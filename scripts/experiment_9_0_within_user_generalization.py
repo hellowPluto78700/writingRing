@@ -241,11 +241,9 @@ def _apply_insufficient_policy(
         raise ValueError(policy)
     bad = pair_summary[~pair_summary.strict_three_way_eligible]
     excluded = {"users": [], "classes": [], "pairs": []}
-    if bad.empty:
+    if bad.empty or policy == "keep_all":
         return manifest.copy(), excluded
     excluded["pairs"] = [f"{r.user}:{r.label}" for r in bad.itertuples(index=False)]
-    if policy == "keep_all":
-        return manifest.copy(), excluded
     if policy == "error":
         raise RuntimeError(
             "Exp9.0 has (user,class) pairs with fewer than 3 samples. "
