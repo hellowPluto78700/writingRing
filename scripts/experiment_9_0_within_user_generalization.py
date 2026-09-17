@@ -5,7 +5,6 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
-import warnings
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -22,7 +21,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold
 
 from snn.accel_reconstruction_eval.datasets import load_acceleration_data
 from scripts import experiment_0_1_general_comparison as exp01
@@ -180,33 +179,68 @@ def _load_manifest(repo_root: Path):
 
 
 def _assign_within_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
-    """5-fold segment-level stratification performed independently inside each user."""
+    """Sparse-safe 5-fold segment stratification performed inside each user."""
     pieces: list[pd.DataFrame] = []
     for user, frame in manifest.groupby("user", sort=True):
-        frame = frame.copy().reset_index(drop=True)
+        frame = frame.copy()
         if len(frame) < N_FOLDS:
-            raise RuntimeError(f"{user} has only {len(frame)} segments; {N_FOLDS}-fold CV is impossible")
-        splitter = StratifiedKFold(
-            n_splits=N_FOLDS,
-            shuffle=True,
-            random_state=_stable_seed(FOLD_ASSIGNMENT_SEED, CV_WITHIN, user),
+            raise RuntimeError(
+                f"{user} has only {len(frame)} segments; {N_FOLDS}-fold CV is impossible"
+            )
+
+        fold_total = np.zeros(N_FOLDS, dtype=np.int64)
+        fold_by_label: dict[str, np.ndarray] = {}
+        assigned: dict[int, int] = {}
+
+        label_groups = sorted(
+            frame.groupby("label", sort=True),
+            key=lambda item: (-len(item[1]), str(item[0])),
         )
-        fold = np.full(len(frame), -1, dtype=np.int64)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="The least populated class in y has only")
-            for fold_id, (_, held_out) in enumerate(
-                splitter.split(np.zeros(len(frame), dtype=np.int8), frame.label.to_numpy())
-            ):
-                fold[held_out] = fold_id
-        if np.any(fold < 0):
-            raise RuntimeError(f"Unassigned within-user fold for {user}")
-        frame["cv_fold"] = fold
+        for label, group in label_groups:
+            label = str(label)
+            label_counts = fold_by_label.setdefault(
+                label, np.zeros(N_FOLDS, dtype=np.int64)
+            )
+            indices = group.index.to_numpy(dtype=np.int64, copy=True)
+            rng = np.random.default_rng(
+                _stable_seed(FOLD_ASSIGNMENT_SEED, CV_WITHIN, user, label)
+            )
+            rng.shuffle(indices)
+            for row_index in indices:
+                sample_id = str(frame.loc[row_index, "sample_id"])
+                fold = min(
+                    range(N_FOLDS),
+                    key=lambda candidate: (
+                        int(label_counts[candidate]),
+                        int(fold_total[candidate]),
+                        _stable_seed(
+                            FOLD_ASSIGNMENT_SEED,
+                            CV_WITHIN,
+                            user,
+                            label,
+                            sample_id,
+                            candidate,
+                        ),
+                    ),
+                )
+                assigned[int(row_index)] = int(fold)
+                label_counts[fold] += 1
+                fold_total[fold] += 1
+
+        frame["cv_fold"] = [assigned[int(index)] for index in frame.index]
         pieces.append(frame)
+
     out = pd.concat(pieces, ignore_index=True)
     user_fold_counts = out.groupby(["user", "cv_fold"]).size().unstack(fill_value=0)
-    if user_fold_counts.shape[1] != N_FOLDS or (user_fold_counts == 0).any().any():
-        raise RuntimeError("Every user must contribute at least one segment to every within-user fold")
+    expected_columns = set(range(N_FOLDS))
+    if set(user_fold_counts.columns) != expected_columns:
+        raise RuntimeError("Within-user fold assignment did not create all five folds")
+    if (user_fold_counts == 0).any().any():
+        raise RuntimeError(
+            "Every user must contribute at least one segment to every within-user fold"
+        )
     return out
+
 
 
 def _assign_cross_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
