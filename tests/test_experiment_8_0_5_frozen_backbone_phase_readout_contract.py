@@ -141,7 +141,8 @@ def test_slurm_and_artifact_contract() -> None:
     assert "#SBATCH --cpus-per-task=1" in run_script
     assert "OMP_NUM_THREADS=1" in run_script
     assert 'afterok:${array_job}' in submit_script
-    assert "backbone is frozen" in plan.lower() or "backbone_frozen" in plan.lower()
+    assert "L1 is frozen" in plan
+    assert "L2 is frozen" in plan
     assert "true_phase_vs_destroyed_phase" in notebook
     assert "branch_ablation_summary.csv" in notebook
     assert "phase_shift_summary.csv" in notebook
