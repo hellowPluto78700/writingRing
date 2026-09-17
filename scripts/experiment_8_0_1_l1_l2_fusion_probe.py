@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 from scripts import experiment_0_1_general_comparison as exp01
 from scripts import experiment_3_0_1_single_tau_objective_comparison as exp3
 from scripts import experiment_3_0_2_hidden_multitau_architectures as exp302
+from scripts import experiment_7_2_two_layer_tau_training as exp72
 from scripts import experiment_7_3_training_strategy_decomposition as exp73
 from scripts import experiment_8_0_local_backbone_tau_sweep as exp80
 
@@ -61,7 +62,7 @@ class Config:
     repo_root: Path
     results_dir: Path
     device: str = "cpu"
-    batch_size: int = exp80.exp72.BATCH_SIZE
+    batch_size: int = exp72.BATCH_SIZE
     threads: int = 1
 
 
@@ -441,7 +442,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-root", type=Path, default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=exp80.exp72.BATCH_SIZE)
+    parser.add_argument("--batch-size", type=int, default=exp72.BATCH_SIZE)
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run")
     run.add_argument("--array-task-id", type=int, required=True)
