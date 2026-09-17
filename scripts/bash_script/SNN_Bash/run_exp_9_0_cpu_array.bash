@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp9_0
-#SBATCH --array=0-9%10
+#SBATCH --array=0-19%20
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --time=48:00:00
@@ -25,8 +25,6 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
-POLICY="${EXP9_INSUFFICIENT_POLICY:-keep_all}"
-
 python -u -m scripts.experiment_9_0_within_user_generalization \
-  --device cpu --threads 1 --insufficient-policy "$POLICY" run \
+  --device cpu --threads 1 run \
   --array-task-id "${SLURM_ARRAY_TASK_ID:?}"
