@@ -1,0 +1,82 @@
+{
+  "backbone_training": "none; reuse and freeze Exp8.0 234x234 checkpoints",
+  "experiment_id": "experiment_8_0_1_l1_l2_fusion_probe",
+  "feature_specs": {
+    "l1_fixed250": [
+      [
+        "l1",
+        "fixed250"
+      ]
+    ],
+    "l1_l2_fixed250": [
+      [
+        "l1",
+        "fixed250"
+      ],
+      [
+        "l2",
+        "fixed250"
+      ]
+    ],
+    "l1_l2_whole": [
+      [
+        "l1",
+        "whole_count"
+      ],
+      [
+        "l2",
+        "whole_count"
+      ]
+    ],
+    "l1_whole": [
+      [
+        "l1",
+        "whole_count"
+      ]
+    ],
+    "l1fixed250_l2whole": [
+      [
+        "l1",
+        "fixed250"
+      ],
+      [
+        "l2",
+        "whole_count"
+      ]
+    ],
+    "l1whole_l2fixed250": [
+      [
+        "l1",
+        "whole_count"
+      ],
+      [
+        "l2",
+        "fixed250"
+      ]
+    ],
+    "l2_fixed250": [
+      [
+        "l2",
+        "fixed250"
+      ]
+    ],
+    "l2_whole": [
+      [
+        "l2",
+        "whole_count"
+      ]
+    ]
+  },
+  "parallel_runs": 3,
+  "primary_question": "Do frozen L1 and L2 spike representations carry complementary whole-count and/or ordered Fixed250 information?",
+  "probe_protocol": "train-only StandardScaler + validation-selected LogisticRegression C",
+  "protocol_version": "l1_l2_fusion_probe_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "source_architecture": "234x234",
+  "source_experiment_id": "experiment_8_0_local_backbone_tau_sweep",
+  "source_protocol_version": "local_backbone_tau_sweep_v1"
+}
