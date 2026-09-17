@@ -105,8 +105,8 @@ def test_phase_head_changes_weight_with_absolute_bin() -> None:
     l1[0, 0, 0] = 1.0
     l1[0, 16, 0] = 1.0
     evidence = exp803._l1_branch_evidence(model, l1)
-    assert evidence[0, 0, 0].item() == 1.0
-    assert evidence[0, 16, 0].item() == 3.0
+    torch.testing.assert_close(evidence[0, 0, 0], torch.tensor(1.0))
+    torch.testing.assert_close(evidence[0, 16, 0], torch.tensor(3.0))
 
 
 def test_capacity_control_has_no_phase_access_and_uses_sqrt_scaling() -> None:
@@ -126,9 +126,9 @@ def test_capacity_control_has_no_phase_access_and_uses_sqrt_scaling() -> None:
     l1[0, 0, 0] = 1.0
     l1[0, 16, 0] = 1.0
     evidence = exp803._l1_branch_evidence(model, l1)
-    expected = (model.n_bins ** 0.5)
-    assert evidence[0, 0, 0].item() == expected
-    assert evidence[0, 16, 0].item() == expected
+    expected = torch.tensor(model.n_bins ** 0.5, dtype=evidence.dtype)
+    torch.testing.assert_close(evidence[0, 0, 0], expected)
+    torch.testing.assert_close(evidence[0, 16, 0], expected)
 
 
 def test_cpu_array_and_dependency_chain() -> None:
