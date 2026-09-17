@@ -1,0 +1,43 @@
+{
+  "architecture": "234x234",
+  "architecture_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "capacity_control_scale": "1/sqrt(n_bins)",
+  "counts": {
+    "methods": 4,
+    "parallel_runs": 12,
+    "seeds": 3
+  },
+  "experiment_id": "experiment_8_0_3_phase_aware_hierarchical_readout",
+  "methods": [
+    "l2_only_count",
+    "l1_l2_timeshared_count",
+    "l1_fixed250_l2_whole_count",
+    "l1_capacity_no_phase_l2_whole_count"
+  ],
+  "output_lif": {
+    "alpha": 0.0,
+    "beta": 0.5,
+    "cap": 1,
+    "threshold": 0.5
+  },
+  "primary_comparison": "l1_fixed250_l2_whole_count - l1_capacity_no_phase_l2_whole_count",
+  "protocol_version": "phase_aware_hierarchical_readout_v2",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "target_posthoc_probe": "l1fixed250_l2whole",
+  "training": "end-to-end CE on the exact count-form accumulated class evidence; no valid-length division"
+}
