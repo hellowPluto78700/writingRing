@@ -11,7 +11,7 @@ The experiment deliberately does not change the classifier family, SNN architect
 
 Only two methods are run:
 
-1. `raw250_linear`
+1. `raw250_linear` — **Raw250 + Linear**
    - Raw64 30-channel unsigned events.
    - Ordered 250 ms counts (`16` samples/bin at 64 Hz).
    - Flatten -> train-only `StandardScaler` -> LogisticRegression.
