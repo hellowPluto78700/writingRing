@@ -21,7 +21,7 @@ The physical split unit is the **source trial**, not a derived segment. All segm
 <user>/action_<action>/<package.stem>
 ```
 
-remain in exactly one split. Trial assignment is optimized per user to approach the `(user,class)` 60/20/20 targets while enforcing class presence in all three splits.
+remain in exactly one split. Trial assignment is optimized per user to approach the `(user,class)` 60/20/20 targets. For pairs with at least three samples, missing class coverage is strongly penalized; sparse pairs with one or two samples are retained and assigned best-effort while preserving source-trial isolation.
 
 Five repeated split seeds are used: `11, 23, 37, 53, 71`.
 
@@ -63,14 +63,14 @@ Every task requests one CPU and sets OpenMP/MKL/OpenBLAS/NumExpr to one thread. 
 bash scripts/bash_script/SNN_Bash/submit_exp_9_0_cpu.bash
 ```
 
-If the audit reports insufficient pairs, inspect:
+The audit reports sparse pairs and realized coverage under:
 
 ```text
 notebooks/artifacts/experiment_9_0_within_user_generalization/
   within_user_segment_generalization_v1/manifests/
 ```
 
-then resubmit with an explicit policy, for example:
+For a sensitivity run that excludes sparse pairs, resubmit with:
 
 ```bash
 EXP9_INSUFFICIENT_POLICY=exclude_pair \
