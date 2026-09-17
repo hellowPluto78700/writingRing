@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import warnings
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -21,6 +22,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import KFold, StratifiedKFold
 
 from snn.accel_reconstruction_eval.datasets import load_acceleration_data
 from scripts import experiment_0_1_general_comparison as exp01
@@ -32,13 +34,18 @@ from scripts import experiment_8_0_local_backbone_tau_sweep as exp80
 
 
 EXPERIMENT_ID = "experiment_9_0_within_user_generalization"
-PROTOCOL_VERSION = "within_user_segment_generalization_v1"
+PROTOCOL_VERSION = "rotating_grouped_cv_v2"
 METHOD_RAW250 = "raw250_linear"
 METHOD_A2 = "a2_234x234"
 METHODS = (METHOD_RAW250, METHOD_A2)
-SPLIT_SEEDS = (11, 23, 37, 53, 71)
-EXPECTED_RUNS = len(METHODS) * len(SPLIT_SEEDS)
-INSUFFICIENT_POLICIES = ("keep_all", "error", "exclude_pair", "exclude_user", "exclude_class")
+CV_WITHIN = "within_user"
+CV_CROSS = "cross_user"
+CV_MODES = (CV_WITHIN, CV_CROSS)
+N_FOLDS = 5
+ROTATIONS = tuple(range(N_FOLDS))
+MODEL_SEEDS = (11, 23, 37, 53, 71)
+FOLD_ASSIGNMENT_SEED = 11
+EXPECTED_RUNS = len(CV_MODES) * len(METHODS) * len(ROTATIONS)
 TARGET_FRACTIONS = {"train": 0.60, "val": 0.20, "test": 0.20}
 SPLITS = ("train", "val", "test")
 ARCHITECTURE = "234x234"
@@ -47,17 +54,18 @@ MAX_EPOCHS = exp73.MAX_EPOCHS
 MIN_EPOCHS = exp73.MIN_EPOCHS
 PATIENCE = exp73.PATIENCE
 BATCH_SIZE = exp72.BATCH_SIZE
-TRIAL_SEARCH_ATTEMPTS = 20000
 
 
 @dataclass(frozen=True)
 class RunSpec:
+    cv_mode: str
     method: str
-    split_seed: int
+    rotation: int
+    seed: int
 
     @property
     def key(self) -> str:
-        return f"{self.method}__splitseed{self.split_seed}"
+        return f"{self.cv_mode}__{self.method}__rotation{self.rotation}__seed{self.seed}"
 
 
 @dataclass(frozen=True)
@@ -68,17 +76,18 @@ class Config:
     threads: int = 1
     batch_size: int = BATCH_SIZE
     max_epochs: int = MAX_EPOCHS
-    insufficient_policy: str = "keep_all"
 
 
 @dataclass
 class PreparedSplit:
+    cv_mode: str
+    rotation: int
     data: exp3.Data
     frames: dict[str, pd.DataFrame]
     full_manifest: pd.DataFrame
-    pair_summary: pd.DataFrame
-    trial_summary: pd.DataFrame
-    excluded: dict[str, list[str]]
+    coverage_summary: pd.DataFrame
+    coverage_metrics: dict[str, float]
+
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -90,7 +99,12 @@ def results_dir(repo_root: Path) -> Path:
 
 
 def run_specs() -> list[RunSpec]:
-    return [RunSpec(method, seed) for method in METHODS for seed in SPLIT_SEEDS]
+    specs: list[RunSpec] = []
+    for cv_mode in CV_MODES:
+        for method in METHODS:
+            for rotation in ROTATIONS:
+                specs.append(RunSpec(cv_mode, method, rotation, MODEL_SEEDS[rotation]))
+    return specs
 
 
 def _path(root: Path, kind: str, key: str, suffix: str) -> Path:
@@ -105,31 +119,6 @@ def _save_json(path: Path, payload: object) -> None:
 def _stable_seed(seed: int, *parts: object) -> int:
     text = "|".join(map(str, (seed, *parts)))
     return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:4], "little")
-
-
-def _allocate_counts(n: int, seed: int = 0) -> dict[str, int]:
-    """Largest-remainder 60/20/20 allocation with >=1 item per split when n>=3."""
-    if n < 3:
-        return {"train": max(n, 0), "val": 0, "test": 0}
-    ideal = {split: TARGET_FRACTIONS[split] * n for split in SPLITS}
-    counts = {split: int(math.floor(ideal[split])) for split in SPLITS}
-    counts["train"] = max(counts["train"], 1)
-    counts["val"] = max(counts["val"], 1)
-    counts["test"] = max(counts["test"], 1)
-    while sum(counts.values()) > n:
-        candidates = [s for s in SPLITS if counts[s] > 1]
-        if not candidates:
-            raise RuntimeError(f"Could not allocate {n} samples across three splits")
-        split = max(candidates, key=lambda s: counts[s] - ideal[s])
-        counts[split] -= 1
-    rng = np.random.default_rng(seed)
-    while sum(counts.values()) < n:
-        deficits = {split: ideal[split] - counts[split] for split in SPLITS}
-        best = max(deficits.values())
-        tied = [split for split in SPLITS if abs(deficits[split] - best) <= 1e-12]
-        split = tied[int(rng.integers(len(tied)))]
-        counts[split] += 1
-    return counts
 
 
 def _dataset_roots(repo_root: Path) -> list[Path]:
@@ -185,206 +174,139 @@ def _load_manifest(repo_root: Path):
     labels = tuple(sorted(manifest.label.unique().tolist()))
     class_to_idx = {label: idx for idx, label in enumerate(labels)}
     manifest["y"] = manifest.label.map(class_to_idx).astype(int)
+    if manifest.sample_id.duplicated().any():
+        raise RuntimeError("Exp9.0 sample_id values must be unique")
     return loaded, manifest, labels
 
 
-def _initial_pair_summary(manifest: pd.DataFrame) -> pd.DataFrame:
-    all_users = sorted(manifest.user.unique().tolist())
-    all_labels = sorted(manifest.label.unique().tolist())
-    index = pd.MultiIndex.from_product([all_users, all_labels], names=["user", "label"])
-    counts = manifest.groupby(["user", "label"]).size().reindex(index, fill_value=0)
-    rows = []
-    for (user, label), total in counts.items():
-        total = int(total)
-        target = _allocate_counts(total, _stable_seed(0, user, label))
-        rows.append(
-            {
-                "user": user,
-                "label": label,
-                "total": total,
-                "target_train": target["train"],
-                "target_val": target["val"],
-                "target_test": target["test"],
-                "strict_three_way_eligible": bool(total >= 3),
-                "status": "eligible" if total >= 3 else "insufficient",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _present_pair_summary(manifest: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for (user, label), frame in manifest.groupby(["user", "label"], sort=True):
-        total = int(len(frame))
-        target = _allocate_counts(total, _stable_seed(0, user, label))
-        rows.append(
-            {
-                "user": str(user),
-                "label": str(label),
-                "total": total,
-                "target_train": target["train"],
-                "target_val": target["val"],
-                "target_test": target["test"],
-                "strict_three_way_eligible": bool(total >= 3),
-                "status": "eligible" if total >= 3 else "insufficient",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _apply_insufficient_policy(
-    manifest: pd.DataFrame,
-    pair_summary: pd.DataFrame,
-    policy: str,
-) -> tuple[pd.DataFrame, dict[str, list[str]]]:
-    if policy not in INSUFFICIENT_POLICIES:
-        raise ValueError(policy)
-    bad = pair_summary[~pair_summary.strict_three_way_eligible]
-    excluded = {"users": [], "classes": [], "pairs": []}
-    if bad.empty or policy == "keep_all":
-        return manifest.copy(), excluded
-    excluded["pairs"] = [f"{r.user}:{r.label}" for r in bad.itertuples(index=False)]
-    if policy == "error":
-        raise RuntimeError(
-            "Exp9.0 has (user,class) pairs with fewer than 3 samples. "
-            "Inspect manifests/insufficient_user_class_pairs.csv, then rerun with "
-            "--insufficient-policy keep_all, exclude_pair, exclude_user, or exclude_class."
-        )
-    if policy == "exclude_pair":
-        bad_pairs = {(str(r.user), str(r.label)) for r in bad.itertuples(index=False)}
-        keep_mask = [
-            (str(row.user), str(row.label)) not in bad_pairs
-            for row in manifest.itertuples(index=False)
-        ]
-        return manifest.loc[keep_mask].reset_index(drop=True), excluded
-    if policy == "exclude_user":
-        users = sorted(bad.user.astype(str).unique().tolist())
-        excluded["users"] = users
-        return manifest[~manifest.user.isin(users)].reset_index(drop=True), excluded
-    classes = sorted(bad.label.astype(str).unique().tolist())
-    excluded["classes"] = classes
-    return manifest[~manifest.label.isin(classes)].reset_index(drop=True), excluded
-
-
-def _assignment_score(
-    frame: pd.DataFrame,
-    trial_assignment: dict[str, str],
-    target: dict[tuple[str, str], int],
-) -> tuple[float, bool]:
-    split = frame.source_trial.map(trial_assignment)
-    if split.isna().any():
-        return float("inf"), False
-    work = frame.assign(_split=split.to_numpy())
-    counts = work.groupby(["label", "_split"]).size()
-    labels = sorted(frame.label.unique().tolist())
-    feasible = True
-    score = 0.0
-    for label in labels:
-        label_total = int((frame.label == label).sum())
-        for part in SPLITS:
-            actual = int(counts.get((label, part), 0))
-            wanted = int(target[(label, part)])
-            score += abs(actual - wanted) / max(wanted, 1)
-            # Three-way per-(user,class) coverage is impossible when fewer than
-            # three samples exist. For eligible pairs, treat missing coverage as
-            # a strong preference rather than a hard feasibility constraint,
-            # because source-trial isolation can still make exact coverage
-            # impossible (e.g. all samples from one trial).
-            if label_total >= 3 and actual < 1:
-                score += 10.0
-    total = len(frame)
-    split_counts = work._split.value_counts()
-    for part in SPLITS:
-        actual_fraction = float(split_counts.get(part, 0)) / max(total, 1)
-        score += 0.25 * abs(actual_fraction - TARGET_FRACTIONS[part])
-    return score, feasible
-
-
-def _assign_user_trials(frame: pd.DataFrame, seed: int) -> dict[str, str]:
-    trials = sorted(frame.source_trial.unique().tolist())
-    if len(trials) < 3:
-        raise RuntimeError(
-            f"User {frame.user.iloc[0]} has only {len(trials)} source trials; "
-            "source-trial-isolated train/val/test is impossible."
-        )
-    targets: dict[tuple[str, str], int] = {}
-    for label, group in frame.groupby("label", sort=True):
-        alloc = _allocate_counts(len(group), _stable_seed(seed, frame.user.iloc[0], label))
-        for part in SPLITS:
-            targets[(str(label), part)] = int(alloc[part])
-
-    trial_alloc = _allocate_counts(len(trials), _stable_seed(seed, frame.user.iloc[0], "trials"))
-    counts = [trial_alloc["train"], trial_alloc["val"], trial_alloc["test"]]
-    rng = np.random.default_rng(_stable_seed(seed, frame.user.iloc[0], "assignment_search"))
-    best_score = float("inf")
-    best: dict[str, str] | None = None
-    trial_array = np.asarray(trials, dtype=object)
-    for _ in range(TRIAL_SEARCH_ATTEMPTS):
-        perm = rng.permutation(trial_array)
-        candidate: dict[str, str] = {}
-        cursor = 0
-        for part, n_part in zip(SPLITS, counts, strict=True):
-            for trial in perm[cursor : cursor + n_part]:
-                candidate[str(trial)] = part
-            cursor += n_part
-        score, feasible = _assignment_score(frame, candidate, targets)
-        if feasible and score < best_score - 1e-12:
-            best_score = score
-            best = candidate
-            if score <= 1e-12:
-                break
-    if best is None:
-        raise RuntimeError(
-            f"Could not find a source-trial-isolated 60/20/20 split for user "
-            f"{frame.user.iloc[0]}."
-        )
-    return best
-
-
-def _build_split_manifest(
-    manifest: pd.DataFrame,
-    split_seed: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    pieces = []
-    trial_rows = []
+def _assign_within_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
+    """5-fold segment-level stratification performed independently inside each user."""
+    pieces: list[pd.DataFrame] = []
     for user, frame in manifest.groupby("user", sort=True):
-        assignment = _assign_user_trials(frame.reset_index(drop=True), split_seed)
-        part = frame.copy()
-        part["split"] = part.source_trial.map(assignment)
-        if part.split.isna().any():
-            raise RuntimeError(f"Unassigned source trial for {user}")
-        pieces.append(part)
-        for trial, split in sorted(assignment.items()):
-            trial_rows.append({"split_seed": split_seed, "user": user, "source_trial": trial, "split": split})
+        frame = frame.copy().reset_index(drop=True)
+        if len(frame) < N_FOLDS:
+            raise RuntimeError(f"{user} has only {len(frame)} segments; {N_FOLDS}-fold CV is impossible")
+        splitter = StratifiedKFold(
+            n_splits=N_FOLDS,
+            shuffle=True,
+            random_state=_stable_seed(FOLD_ASSIGNMENT_SEED, CV_WITHIN, user),
+        )
+        fold = np.full(len(frame), -1, dtype=np.int64)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="The least populated class in y has only")
+            for fold_id, (_, held_out) in enumerate(
+                splitter.split(np.zeros(len(frame), dtype=np.int8), frame.label.to_numpy())
+            ):
+                fold[held_out] = fold_id
+        if np.any(fold < 0):
+            raise RuntimeError(f"Unassigned within-user fold for {user}")
+        frame["cv_fold"] = fold
+        pieces.append(frame)
     out = pd.concat(pieces, ignore_index=True)
-    by_trial = out.groupby("source_trial").split.nunique()
-    if int(by_trial.max()) != 1:
-        raise AssertionError("A source trial appears in more than one split")
+    user_fold_counts = out.groupby(["user", "cv_fold"]).size().unstack(fill_value=0)
+    if user_fold_counts.shape[1] != N_FOLDS or (user_fold_counts == 0).any().any():
+        raise RuntimeError("Every user must contribute at least one segment to every within-user fold")
+    return out
+
+
+def _assign_cross_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
+    """5-fold user-grouped assignment: every user appears in exactly one fold."""
+    users = np.asarray(sorted(manifest.user.unique().tolist()), dtype=object)
+    if len(users) < N_FOLDS:
+        raise RuntimeError(f"Need at least {N_FOLDS} users for cross-user CV")
+    splitter = KFold(n_splits=N_FOLDS, shuffle=True, random_state=FOLD_ASSIGNMENT_SEED)
+    user_to_fold: dict[str, int] = {}
+    for fold_id, (_, held_out) in enumerate(splitter.split(users)):
+        for index in held_out:
+            user_to_fold[str(users[index])] = fold_id
+    out = manifest.copy()
+    out["cv_fold"] = out.user.map(user_to_fold).astype(int)
+    if out.groupby("user").cv_fold.nunique().max() != 1:
+        raise AssertionError("A user appeared in more than one cross-user fold")
+    return out
+
+
+def _build_fold_assignment(manifest: pd.DataFrame, cv_mode: str) -> pd.DataFrame:
+    if cv_mode == CV_WITHIN:
+        return _assign_within_user_folds(manifest)
+    if cv_mode == CV_CROSS:
+        return _assign_cross_user_folds(manifest)
+    raise ValueError(cv_mode)
+
+
+def _rotation_fold_roles(rotation: int) -> dict[int, str]:
+    if rotation not in ROTATIONS:
+        raise ValueError(rotation)
+    test_fold = rotation
+    val_fold = (rotation + 1) % N_FOLDS
+    return {
+        fold: ("test" if fold == test_fold else "val" if fold == val_fold else "train")
+        for fold in range(N_FOLDS)
+    }
+
+
+def _apply_rotation(fold_manifest: pd.DataFrame, rotation: int) -> pd.DataFrame:
+    roles = _rotation_fold_roles(rotation)
+    out = fold_manifest.copy()
+    out["split"] = out.cv_fold.map(roles)
+    if out.split.isna().any():
+        raise RuntimeError("Unassigned rotation split")
     for split in SPLITS:
         if not (out.split == split).any():
-            raise RuntimeError(f"Empty split: {split}")
-    return out, pd.DataFrame(trial_rows)
+            raise RuntimeError(f"Empty {split} split for rotation {rotation}")
+    return out
 
 
-def _pair_actual_summary(split_manifest: pd.DataFrame, pair_summary: pd.DataFrame) -> pd.DataFrame:
-    actual = (
+def _coverage_summary(split_manifest: pd.DataFrame) -> pd.DataFrame:
+    total = split_manifest.groupby(["user", "label"]).size().rename("total")
+    counts = (
         split_manifest.groupby(["user", "label", "split"])
         .size()
         .unstack(fill_value=0)
-        .reset_index()
+        .reindex(columns=SPLITS, fill_value=0)
     )
-    for part in SPLITS:
-        if part not in actual.columns:
-            actual[part] = 0
-    merged = pair_summary.merge(actual, on=["user", "label"], how="left")
-    for part in SPLITS:
-        merged[part] = merged[part].fillna(0).astype(int)
-        merged[f"actual_{part}"] = merged[part]
-        merged[f"delta_{part}"] = merged[f"actual_{part}"] - merged[f"target_{part}"]
-    merged["actual_three_way_coverage"] = (
-        (merged.actual_train >= 1) & (merged.actual_val >= 1) & (merged.actual_test >= 1)
-    )
-    return merged.drop(columns=list(SPLITS))
+    out = pd.concat([total, counts], axis=1).reset_index()
+    out["pair_present_in_train"] = out.train > 0
+    out["pair_present_in_val"] = out.val > 0
+    out["pair_present_in_test"] = out.test > 0
+    out["test_pair_seen_in_train"] = (~out.pair_present_in_test) | out.pair_present_in_train
+    return out
+
+
+def _coverage_metrics(split_manifest: pd.DataFrame) -> dict[str, float]:
+    train = split_manifest[split_manifest.split == "train"]
+    test = split_manifest[split_manifest.split == "test"]
+    train_users = set(train.user.astype(str))
+    train_pairs = set(zip(train.user.astype(str), train.label.astype(str)))
+    if test.empty:
+        raise RuntimeError("Empty test split")
+    same_user = [str(row.user) in train_users for row in test.itertuples(index=False)]
+    same_pair = [
+        (str(row.user), str(row.label)) in train_pairs
+        for row in test.itertuples(index=False)
+    ]
+    return {
+        "test_same_user_seen_fraction": float(np.mean(same_user)),
+        "test_same_user_class_seen_fraction": float(np.mean(same_pair)),
+        "test_samples": float(len(test)),
+    }
+
+
+def _fold_summary(fold_manifest: pd.DataFrame, cv_mode: str) -> pd.DataFrame:
+    rows = []
+    for fold in range(N_FOLDS):
+        frame = fold_manifest[fold_manifest.cv_fold == fold]
+        rows.append(
+            {
+                "cv_mode": cv_mode,
+                "cv_fold": fold,
+                "n_samples": int(len(frame)),
+                "n_users": int(frame.user.nunique()),
+                "n_classes": int(frame.label.nunique()),
+                "users": "|".join(sorted(frame.user.astype(str).unique().tolist())),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _build_events(loaded, frame: pd.DataFrame, T: int) -> np.ndarray:
