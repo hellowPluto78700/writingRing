@@ -1,11 +1,13 @@
-# Exp9.0 — Within-user unseen-segment generalization
+# Exp9.0 — Rotating within-user vs cross-user generalization
 
 ## Question
 
-Exp9.0 isolates ordinary segment generalization from unseen-user domain shift.
-It asks: **if a user is represented in training, how well do the same models classify new, never-trained segments from that user?**
+Exp9.0 separates two sources of error:
 
-The experiment deliberately does not change the classifier family, SNN architecture, tau values, or training objective.
+1. **within-user unseen-segment generalization** — the model has seen the user, but never the held-out segment;
+2. **cross-user generalization** — validation/test users are completely absent from training.
+
+The model family is held fixed. Only the evaluation split changes.
 
 ## Methods
 
@@ -13,73 +15,86 @@ Only two methods are run:
 
 1. `raw250_linear` — **Raw250 + Linear**
    - Raw64 30-channel unsigned events.
-   - Ordered 250 ms counts (`16` samples/bin at 64 Hz).
-   - Flatten -> train-only `StandardScaler` -> LogisticRegression.
-   - `C` selected on validation balanced accuracy.
+   - Ordered 250 ms counts.
+   - Train-only StandardScaler.
+   - LogisticRegression with C selected by validation balanced accuracy.
 
 2. `a2_234x234`
-   - Exp7.3 A2-compatible network: `30 -> 128 -> 128 -> 12`.
+   - Exp7.3 A2-compatible `30 -> 128 -> 128 -> 12`.
    - L1 shifts `(2,3,4)`, L2 shifts `(2,3,4)`.
    - Binary hidden LIF neurons.
-   - Shared bias-free `128 -> 12` linear head.
-   - Valid-time mean evidence + whole-sequence CE (WCCE).
-   - Checkpoint selection by validation BA, with validation CE tie-break.
+   - Shared bias-free Linear head.
+   - Whole-sequence CE/WCCE-compatible valid-time mean evidence.
+   - Validation BA checkpoint selection with validation loss tie-break.
 
-No MM, RSNN, new regularizer, augmentation, or tau sweep is included.
+No MM, RSNN, tau sweep, new loss, or augmentation is included.
 
-## Split protocol
+## Five-fold rotating protocol
 
-The target split is `60/20/20` train/val/test within each user. For `(user,class)` pairs with at least three samples, three-way class coverage is strongly preferred; pairs with only one or two samples are retained with deterministic best-effort placement because strict train/val/test coverage is mathematically impossible.
+There are five folds. For rotation k:
 
-A source trial is defined as:
+- fold k = test;
+- fold (k+1) mod 5 = validation;
+- the other three folds = training.
+
+Thus every sample is test exactly once and validation exactly once, while the train/val/test fold ratio is 3/1/1 = 60/20/20.
+
+### A — within-user CV
+
+Split unit: **segment**.
+
+A StratifiedKFold is built independently inside every user. Therefore every user contributes segments to every fold. Sparse `(user,class)` pairs are retained; a class with fewer than five samples cannot appear in all five folds, which is reported rather than treated as an error.
+
+The dataset has only 1–2 source trials per user, so source-trial grouping would make 5-fold within-user evaluation impossible. Sharing a recording session across folds is intentional here: this benchmark measures new segments from an already-seen user/session domain.
+
+### B — cross-user CV
+
+Split unit: **user**.
+
+Twenty users are assigned to five user folds. Each rotation uses about:
+
+- 12 users for training;
+- 4 users for validation;
+- 4 completely unseen users for test.
+
+A user never appears in more than one fold, so the test-user condition is strict.
+
+## Out-of-fold metrics
+
+Fold mean/std is reported, but the primary result is **pooled out-of-fold test performance**.
+
+Across five rotations every segment is test exactly once for each CV mode and method. The finalizer concatenates those predictions and reports:
+
+- Accuracy;
+- Balanced Accuracy — primary;
+- Macro-F1;
+- per-user OOF metrics;
+- per-class OOF metrics;
+- pooled confusion matrices.
+
+The primary domain-shift diagnostic is:
+
+[
+G_{user}=BA_{within,OOF}-BA_{cross,OOF}.
+]
+
+## Multi-CPU strategy
+
+`2 CV modes x 2 methods x 5 rotations = 20 independent jobs`.
+
+Submission graph:
 
 ```text
-<user>/action_<action>/<package.stem>
-```
-
-All segments from one source trial must remain in one split. The assignment optimizer targets the per-`(user,class)` 60/20/20 counts and strongly penalizes missing train/val/test coverage for pairs where three-way coverage is possible.
-
-Five repeated split seeds are used:
-
-```text
-11 23 37 53 71
-```
-
-### Insufficient `(user,class)` pairs
-
-Pairs with fewer than 3 samples cannot satisfy strict train/val/test coverage. The prepare stage always writes:
-
-- `manifests/initial_pair_summary.csv`
-- `manifests/insufficient_user_class_pairs.csv`
-- `manifests/audit.json`
-
-The default policy is `error`: the audit job stops before training, leaving the summary for inspection.
-Rerun with one explicit policy if needed:
-
-```bash
-export EXP9_INSUFFICIENT_POLICY=exclude_pair
-# or: exclude_user
-# or: exclude_class
-bash scripts/bash_script/SNN_Bash/submit_exp_9_0_cpu.bash
-```
-
-The selected policy and excluded coverage are recorded in all artifacts.
-
-## Multi-CPU Slurm strategy
-
-Submission is a three-stage dependency chain:
-
-```text
-manifest/audit job
-      |
-      v
-10-way CPU array = 2 methods x 5 split seeds
-      |
-      v
+prepare fold assignments
+        |
+        v
+20-way CPU array
+        |
+        v
 finalizer
 ```
 
-Each array task uses one CPU and forces BLAS/OpenMP thread counts to 1, so tasks scale across CPU nodes without nested oversubscription.
+Each array task requests one CPU and forces BLAS/OpenMP thread counts to one.
 
 Run:
 
@@ -87,32 +102,36 @@ Run:
 bash scripts/bash_script/SNN_Bash/submit_exp_9_0_cpu.bash
 ```
 
-List task identities locally:
+List array task identities:
 
 ```bash
 python -m scripts.experiment_9_0_within_user_generalization list-runs
 ```
 
-## Primary outputs
+## Main outputs
 
 Artifacts are written under:
 
 ```text
 notebooks/artifacts/experiment_9_0_within_user_generalization/
-  within_user_segment_generalization_v1/
+  rotating_grouped_cv_v2/
 ```
 
-Important files:
+Key files:
 
+- `audit.json`
+- `fold_summary.csv`
+- `rotation_summary.csv`
+- `within_user_fold_counts.csv`
+- `cross_user_fold_users.csv`
 - `metric_runs.csv`
 - `metric_summary.csv`
-- `per_user_runs.csv`, `per_user_summary.csv`
-- `per_class_runs.csv`, `per_class_summary.csv`
+- `prediction_runs.csv`
+- `oof_test_predictions.csv`
+- `oof_test_metrics.csv`
+- `oof_per_user_test.csv`
+- `oof_per_class_test.csv`
 - `confusion_summary.csv`
 - `within_vs_cross_user.csv`
-- `manifest.json`
-- `manifests/*.csv`
 
-Primary metric: balanced accuracy. Secondary metrics: accuracy and macro-F1.
-
-The final notebook is aggregation-only; it never retrains or refits a model.
+The notebook is aggregation-only and never trains or refits a model.

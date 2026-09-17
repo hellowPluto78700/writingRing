@@ -32,13 +32,18 @@ from scripts import experiment_8_0_local_backbone_tau_sweep as exp80
 
 
 EXPERIMENT_ID = "experiment_9_0_within_user_generalization"
-PROTOCOL_VERSION = "within_user_segment_generalization_v1"
+PROTOCOL_VERSION = "rotating_grouped_cv_v2"
 METHOD_RAW250 = "raw250_linear"
 METHOD_A2 = "a2_234x234"
 METHODS = (METHOD_RAW250, METHOD_A2)
-SPLIT_SEEDS = (11, 23, 37, 53, 71)
-EXPECTED_RUNS = len(METHODS) * len(SPLIT_SEEDS)
-INSUFFICIENT_POLICIES = ("keep_all", "error", "exclude_pair", "exclude_user", "exclude_class")
+CV_WITHIN = "within_user"
+CV_CROSS = "cross_user"
+CV_MODES = (CV_WITHIN, CV_CROSS)
+N_FOLDS = 5
+ROTATIONS = tuple(range(N_FOLDS))
+MODEL_SEEDS = (11, 23, 37, 53, 71)
+FOLD_ASSIGNMENT_SEED = 11
+EXPECTED_RUNS = len(CV_MODES) * len(METHODS) * len(ROTATIONS)
 TARGET_FRACTIONS = {"train": 0.60, "val": 0.20, "test": 0.20}
 SPLITS = ("train", "val", "test")
 ARCHITECTURE = "234x234"
@@ -47,17 +52,18 @@ MAX_EPOCHS = exp73.MAX_EPOCHS
 MIN_EPOCHS = exp73.MIN_EPOCHS
 PATIENCE = exp73.PATIENCE
 BATCH_SIZE = exp72.BATCH_SIZE
-TRIAL_SEARCH_ATTEMPTS = 20000
 
 
 @dataclass(frozen=True)
 class RunSpec:
+    cv_mode: str
     method: str
-    split_seed: int
+    rotation: int
+    seed: int
 
     @property
     def key(self) -> str:
-        return f"{self.method}__splitseed{self.split_seed}"
+        return f"{self.cv_mode}__{self.method}__rotation{self.rotation}__seed{self.seed}"
 
 
 @dataclass(frozen=True)
@@ -68,17 +74,18 @@ class Config:
     threads: int = 1
     batch_size: int = BATCH_SIZE
     max_epochs: int = MAX_EPOCHS
-    insufficient_policy: str = "keep_all"
 
 
 @dataclass
 class PreparedSplit:
+    cv_mode: str
+    rotation: int
     data: exp3.Data
     frames: dict[str, pd.DataFrame]
     full_manifest: pd.DataFrame
-    pair_summary: pd.DataFrame
-    trial_summary: pd.DataFrame
-    excluded: dict[str, list[str]]
+    coverage_summary: pd.DataFrame
+    coverage_metrics: dict[str, float]
+
 
 
 def find_repo_root(start: Path | None = None) -> Path:
@@ -90,7 +97,12 @@ def results_dir(repo_root: Path) -> Path:
 
 
 def run_specs() -> list[RunSpec]:
-    return [RunSpec(method, seed) for method in METHODS for seed in SPLIT_SEEDS]
+    specs: list[RunSpec] = []
+    for cv_mode in CV_MODES:
+        for method in METHODS:
+            for rotation in ROTATIONS:
+                specs.append(RunSpec(cv_mode, method, rotation, MODEL_SEEDS[rotation]))
+    return specs
 
 
 def _path(root: Path, kind: str, key: str, suffix: str) -> Path:
@@ -105,31 +117,6 @@ def _save_json(path: Path, payload: object) -> None:
 def _stable_seed(seed: int, *parts: object) -> int:
     text = "|".join(map(str, (seed, *parts)))
     return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:4], "little")
-
-
-def _allocate_counts(n: int, seed: int = 0) -> dict[str, int]:
-    """Largest-remainder 60/20/20 allocation with >=1 item per split when n>=3."""
-    if n < 3:
-        return {"train": max(n, 0), "val": 0, "test": 0}
-    ideal = {split: TARGET_FRACTIONS[split] * n for split in SPLITS}
-    counts = {split: int(math.floor(ideal[split])) for split in SPLITS}
-    counts["train"] = max(counts["train"], 1)
-    counts["val"] = max(counts["val"], 1)
-    counts["test"] = max(counts["test"], 1)
-    while sum(counts.values()) > n:
-        candidates = [s for s in SPLITS if counts[s] > 1]
-        if not candidates:
-            raise RuntimeError(f"Could not allocate {n} samples across three splits")
-        split = max(candidates, key=lambda s: counts[s] - ideal[s])
-        counts[split] -= 1
-    rng = np.random.default_rng(seed)
-    while sum(counts.values()) < n:
-        deficits = {split: ideal[split] - counts[split] for split in SPLITS}
-        best = max(deficits.values())
-        tied = [split for split in SPLITS if abs(deficits[split] - best) <= 1e-12]
-        split = tied[int(rng.integers(len(tied)))]
-        counts[split] += 1
-    return counts
 
 
 def _dataset_roots(repo_root: Path) -> list[Path]:
@@ -185,206 +172,215 @@ def _load_manifest(repo_root: Path):
     labels = tuple(sorted(manifest.label.unique().tolist()))
     class_to_idx = {label: idx for idx, label in enumerate(labels)}
     manifest["y"] = manifest.label.map(class_to_idx).astype(int)
+    if manifest.sample_id.duplicated().any():
+        raise RuntimeError("Exp9.0 sample_id values must be unique")
     return loaded, manifest, labels
 
 
-def _initial_pair_summary(manifest: pd.DataFrame) -> pd.DataFrame:
-    all_users = sorted(manifest.user.unique().tolist())
-    all_labels = sorted(manifest.label.unique().tolist())
-    index = pd.MultiIndex.from_product([all_users, all_labels], names=["user", "label"])
-    counts = manifest.groupby(["user", "label"]).size().reindex(index, fill_value=0)
-    rows = []
-    for (user, label), total in counts.items():
-        total = int(total)
-        target = _allocate_counts(total, _stable_seed(0, user, label))
-        rows.append(
-            {
-                "user": user,
-                "label": label,
-                "total": total,
-                "target_train": target["train"],
-                "target_val": target["val"],
-                "target_test": target["test"],
-                "strict_three_way_eligible": bool(total >= 3),
-                "status": "eligible" if total >= 3 else "insufficient",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _present_pair_summary(manifest: pd.DataFrame) -> pd.DataFrame:
-    rows = []
-    for (user, label), frame in manifest.groupby(["user", "label"], sort=True):
-        total = int(len(frame))
-        target = _allocate_counts(total, _stable_seed(0, user, label))
-        rows.append(
-            {
-                "user": str(user),
-                "label": str(label),
-                "total": total,
-                "target_train": target["train"],
-                "target_val": target["val"],
-                "target_test": target["test"],
-                "strict_three_way_eligible": bool(total >= 3),
-                "status": "eligible" if total >= 3 else "insufficient",
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def _apply_insufficient_policy(
-    manifest: pd.DataFrame,
-    pair_summary: pd.DataFrame,
-    policy: str,
-) -> tuple[pd.DataFrame, dict[str, list[str]]]:
-    if policy not in INSUFFICIENT_POLICIES:
-        raise ValueError(policy)
-    bad = pair_summary[~pair_summary.strict_three_way_eligible]
-    excluded = {"users": [], "classes": [], "pairs": []}
-    if bad.empty or policy == "keep_all":
-        return manifest.copy(), excluded
-    excluded["pairs"] = [f"{r.user}:{r.label}" for r in bad.itertuples(index=False)]
-    if policy == "error":
-        raise RuntimeError(
-            "Exp9.0 has (user,class) pairs with fewer than 3 samples. "
-            "Inspect manifests/insufficient_user_class_pairs.csv, then rerun with "
-            "--insufficient-policy keep_all, exclude_pair, exclude_user, or exclude_class."
-        )
-    if policy == "exclude_pair":
-        bad_pairs = {(str(r.user), str(r.label)) for r in bad.itertuples(index=False)}
-        keep_mask = [
-            (str(row.user), str(row.label)) not in bad_pairs
-            for row in manifest.itertuples(index=False)
-        ]
-        return manifest.loc[keep_mask].reset_index(drop=True), excluded
-    if policy == "exclude_user":
-        users = sorted(bad.user.astype(str).unique().tolist())
-        excluded["users"] = users
-        return manifest[~manifest.user.isin(users)].reset_index(drop=True), excluded
-    classes = sorted(bad.label.astype(str).unique().tolist())
-    excluded["classes"] = classes
-    return manifest[~manifest.label.isin(classes)].reset_index(drop=True), excluded
-
-
-def _assignment_score(
-    frame: pd.DataFrame,
-    trial_assignment: dict[str, str],
-    target: dict[tuple[str, str], int],
-) -> tuple[float, bool]:
-    split = frame.source_trial.map(trial_assignment)
-    if split.isna().any():
-        return float("inf"), False
-    work = frame.assign(_split=split.to_numpy())
-    counts = work.groupby(["label", "_split"]).size()
-    labels = sorted(frame.label.unique().tolist())
-    feasible = True
-    score = 0.0
-    for label in labels:
-        label_total = int((frame.label == label).sum())
-        for part in SPLITS:
-            actual = int(counts.get((label, part), 0))
-            wanted = int(target[(label, part)])
-            score += abs(actual - wanted) / max(wanted, 1)
-            # Three-way per-(user,class) coverage is impossible when fewer than
-            # three samples exist. For eligible pairs, treat missing coverage as
-            # a strong preference rather than a hard feasibility constraint,
-            # because source-trial isolation can still make exact coverage
-            # impossible (e.g. all samples from one trial).
-            if label_total >= 3 and actual < 1:
-                score += 10.0
-    total = len(frame)
-    split_counts = work._split.value_counts()
-    for part in SPLITS:
-        actual_fraction = float(split_counts.get(part, 0)) / max(total, 1)
-        score += 0.25 * abs(actual_fraction - TARGET_FRACTIONS[part])
-    return score, feasible
-
-
-def _assign_user_trials(frame: pd.DataFrame, seed: int) -> dict[str, str]:
-    trials = sorted(frame.source_trial.unique().tolist())
-    if len(trials) < 3:
-        raise RuntimeError(
-            f"User {frame.user.iloc[0]} has only {len(trials)} source trials; "
-            "source-trial-isolated train/val/test is impossible."
-        )
-    targets: dict[tuple[str, str], int] = {}
-    for label, group in frame.groupby("label", sort=True):
-        alloc = _allocate_counts(len(group), _stable_seed(seed, frame.user.iloc[0], label))
-        for part in SPLITS:
-            targets[(str(label), part)] = int(alloc[part])
-
-    trial_alloc = _allocate_counts(len(trials), _stable_seed(seed, frame.user.iloc[0], "trials"))
-    counts = [trial_alloc["train"], trial_alloc["val"], trial_alloc["test"]]
-    rng = np.random.default_rng(_stable_seed(seed, frame.user.iloc[0], "assignment_search"))
-    best_score = float("inf")
-    best: dict[str, str] | None = None
-    trial_array = np.asarray(trials, dtype=object)
-    for _ in range(TRIAL_SEARCH_ATTEMPTS):
-        perm = rng.permutation(trial_array)
-        candidate: dict[str, str] = {}
-        cursor = 0
-        for part, n_part in zip(SPLITS, counts, strict=True):
-            for trial in perm[cursor : cursor + n_part]:
-                candidate[str(trial)] = part
-            cursor += n_part
-        score, feasible = _assignment_score(frame, candidate, targets)
-        if feasible and score < best_score - 1e-12:
-            best_score = score
-            best = candidate
-            if score <= 1e-12:
-                break
-    if best is None:
-        raise RuntimeError(
-            f"Could not find a source-trial-isolated 60/20/20 split for user "
-            f"{frame.user.iloc[0]}."
-        )
-    return best
-
-
-def _build_split_manifest(
-    manifest: pd.DataFrame,
-    split_seed: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    pieces = []
-    trial_rows = []
+def _assign_within_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
+    """Sparse-safe 5-fold segment stratification performed inside each user."""
+    pieces: list[pd.DataFrame] = []
     for user, frame in manifest.groupby("user", sort=True):
-        assignment = _assign_user_trials(frame.reset_index(drop=True), split_seed)
-        part = frame.copy()
-        part["split"] = part.source_trial.map(assignment)
-        if part.split.isna().any():
-            raise RuntimeError(f"Unassigned source trial for {user}")
-        pieces.append(part)
-        for trial, split in sorted(assignment.items()):
-            trial_rows.append({"split_seed": split_seed, "user": user, "source_trial": trial, "split": split})
+        frame = frame.copy()
+        if len(frame) < N_FOLDS:
+            raise RuntimeError(
+                f"{user} has only {len(frame)} segments; {N_FOLDS}-fold CV is impossible"
+            )
+
+        fold_total = np.zeros(N_FOLDS, dtype=np.int64)
+        fold_by_label: dict[str, np.ndarray] = {}
+        assigned: dict[int, int] = {}
+
+        label_groups = sorted(
+            frame.groupby("label", sort=True),
+            key=lambda item: (-len(item[1]), str(item[0])),
+        )
+        for label, group in label_groups:
+            label = str(label)
+            label_counts = fold_by_label.setdefault(
+                label, np.zeros(N_FOLDS, dtype=np.int64)
+            )
+            indices = group.index.to_numpy(dtype=np.int64, copy=True)
+            rng = np.random.default_rng(
+                _stable_seed(FOLD_ASSIGNMENT_SEED, CV_WITHIN, user, label)
+            )
+            rng.shuffle(indices)
+            for row_index in indices:
+                sample_id = str(frame.loc[row_index, "sample_id"])
+                fold = min(
+                    range(N_FOLDS),
+                    key=lambda candidate: (
+                        int(label_counts[candidate]),
+                        int(fold_total[candidate]),
+                        _stable_seed(
+                            FOLD_ASSIGNMENT_SEED,
+                            CV_WITHIN,
+                            user,
+                            label,
+                            sample_id,
+                            candidate,
+                        ),
+                    ),
+                )
+                assigned[int(row_index)] = int(fold)
+                label_counts[fold] += 1
+                fold_total[fold] += 1
+
+        frame["cv_fold"] = [assigned[int(index)] for index in frame.index]
+        pieces.append(frame)
+
     out = pd.concat(pieces, ignore_index=True)
-    by_trial = out.groupby("source_trial").split.nunique()
-    if int(by_trial.max()) != 1:
-        raise AssertionError("A source trial appears in more than one split")
+    user_fold_counts = out.groupby(["user", "cv_fold"]).size().unstack(fill_value=0)
+    expected_columns = set(range(N_FOLDS))
+    if set(user_fold_counts.columns) != expected_columns:
+        raise RuntimeError("Within-user fold assignment did not create all five folds")
+    if (user_fold_counts == 0).any().any():
+        raise RuntimeError(
+            "Every user must contribute at least one segment to every within-user fold"
+        )
+    return out
+
+
+
+def _assign_cross_user_folds(manifest: pd.DataFrame) -> pd.DataFrame:
+    """Balanced 5-fold user grouping with exactly four users/fold for 20 users."""
+    user_sizes = (
+        manifest.groupby("user")
+        .size()
+        .rename("n")
+        .reset_index()
+    )
+    if len(user_sizes) < N_FOLDS:
+        raise RuntimeError(f"Need at least {N_FOLDS} users for cross-user CV")
+
+    max_users_per_fold = int(math.ceil(len(user_sizes) / N_FOLDS))
+    fold_totals = np.zeros(N_FOLDS, dtype=np.int64)
+    fold_users: list[list[str]] = [[] for _ in range(N_FOLDS)]
+    user_to_fold: dict[str, int] = {}
+
+    ordered = sorted(
+        user_sizes.itertuples(index=False),
+        key=lambda row: (
+            -int(row.n),
+            _stable_seed(FOLD_ASSIGNMENT_SEED, CV_CROSS, str(row.user)),
+        ),
+    )
+    for row in ordered:
+        user = str(row.user)
+        n = int(row.n)
+        candidates = [
+            fold
+            for fold in range(N_FOLDS)
+            if len(fold_users[fold]) < max_users_per_fold
+        ]
+        if not candidates:
+            raise RuntimeError("No cross-user fold has remaining capacity")
+        fold = min(
+            candidates,
+            key=lambda candidate: (
+                int(fold_totals[candidate]),
+                len(fold_users[candidate]),
+                _stable_seed(FOLD_ASSIGNMENT_SEED, CV_CROSS, user, candidate),
+            ),
+        )
+        user_to_fold[user] = fold
+        fold_users[fold].append(user)
+        fold_totals[fold] += n
+
+    out = manifest.copy()
+    out["cv_fold"] = out.user.map(user_to_fold).astype(int)
+    if out.groupby("user").cv_fold.nunique().max() != 1:
+        raise AssertionError("A user appeared in more than one cross-user fold")
+    if len(user_sizes) % N_FOLDS == 0:
+        counts = out[["user", "cv_fold"]].drop_duplicates().groupby("cv_fold").size()
+        expected = len(user_sizes) // N_FOLDS
+        if set(counts.index) != set(range(N_FOLDS)) or not (counts == expected).all():
+            raise RuntimeError("Balanced cross-user assignment did not preserve equal user counts")
+    return out
+
+
+
+def _build_fold_assignment(manifest: pd.DataFrame, cv_mode: str) -> pd.DataFrame:
+    if cv_mode == CV_WITHIN:
+        return _assign_within_user_folds(manifest)
+    if cv_mode == CV_CROSS:
+        return _assign_cross_user_folds(manifest)
+    raise ValueError(cv_mode)
+
+
+def _rotation_fold_roles(rotation: int) -> dict[int, str]:
+    if rotation not in ROTATIONS:
+        raise ValueError(rotation)
+    test_fold = rotation
+    val_fold = (rotation + 1) % N_FOLDS
+    return {
+        fold: ("test" if fold == test_fold else "val" if fold == val_fold else "train")
+        for fold in range(N_FOLDS)
+    }
+
+
+def _apply_rotation(fold_manifest: pd.DataFrame, rotation: int) -> pd.DataFrame:
+    roles = _rotation_fold_roles(rotation)
+    out = fold_manifest.copy()
+    out["split"] = out.cv_fold.map(roles)
+    if out.split.isna().any():
+        raise RuntimeError("Unassigned rotation split")
     for split in SPLITS:
         if not (out.split == split).any():
-            raise RuntimeError(f"Empty split: {split}")
-    return out, pd.DataFrame(trial_rows)
+            raise RuntimeError(f"Empty {split} split for rotation {rotation}")
+    return out
 
 
-def _pair_actual_summary(split_manifest: pd.DataFrame, pair_summary: pd.DataFrame) -> pd.DataFrame:
-    actual = (
+def _coverage_summary(split_manifest: pd.DataFrame) -> pd.DataFrame:
+    total = split_manifest.groupby(["user", "label"]).size().rename("total")
+    counts = (
         split_manifest.groupby(["user", "label", "split"])
         .size()
         .unstack(fill_value=0)
-        .reset_index()
+        .reindex(columns=SPLITS, fill_value=0)
     )
-    for part in SPLITS:
-        if part not in actual.columns:
-            actual[part] = 0
-    merged = pair_summary.merge(actual, on=["user", "label"], how="left")
-    for part in SPLITS:
-        merged[part] = merged[part].fillna(0).astype(int)
-        merged[f"actual_{part}"] = merged[part]
-        merged[f"delta_{part}"] = merged[f"actual_{part}"] - merged[f"target_{part}"]
-    merged["actual_three_way_coverage"] = (
-        (merged.actual_train >= 1) & (merged.actual_val >= 1) & (merged.actual_test >= 1)
-    )
-    return merged.drop(columns=list(SPLITS))
+    out = pd.concat([total, counts], axis=1).reset_index()
+    out["pair_present_in_train"] = out.train > 0
+    out["pair_present_in_val"] = out.val > 0
+    out["pair_present_in_test"] = out.test > 0
+    out["test_pair_seen_in_train"] = (~out.pair_present_in_test) | out.pair_present_in_train
+    return out
+
+
+def _coverage_metrics(split_manifest: pd.DataFrame) -> dict[str, float]:
+    train = split_manifest[split_manifest.split == "train"]
+    test = split_manifest[split_manifest.split == "test"]
+    train_users = set(train.user.astype(str))
+    train_pairs = set(zip(train.user.astype(str), train.label.astype(str)))
+    if test.empty:
+        raise RuntimeError("Empty test split")
+    same_user = [str(row.user) in train_users for row in test.itertuples(index=False)]
+    same_pair = [
+        (str(row.user), str(row.label)) in train_pairs
+        for row in test.itertuples(index=False)
+    ]
+    return {
+        "test_same_user_seen_fraction": float(np.mean(same_user)),
+        "test_same_user_class_seen_fraction": float(np.mean(same_pair)),
+        "test_samples": float(len(test)),
+    }
+
+
+def _fold_summary(fold_manifest: pd.DataFrame, cv_mode: str) -> pd.DataFrame:
+    rows = []
+    for fold in range(N_FOLDS):
+        frame = fold_manifest[fold_manifest.cv_fold == fold]
+        rows.append(
+            {
+                "cv_mode": cv_mode,
+                "cv_fold": fold,
+                "n_samples": int(len(frame)),
+                "n_users": int(frame.user.nunique()),
+                "n_classes": int(frame.label.nunique()),
+                "users": "|".join(sorted(frame.user.astype(str).unique().tolist())),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _build_events(loaded, frame: pd.DataFrame, T: int) -> np.ndarray:
@@ -399,7 +395,11 @@ def _build_events(loaded, frame: pd.DataFrame, T: int) -> np.ndarray:
     return out
 
 
-def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> tuple[exp3.Data, dict[str, pd.DataFrame]]:
+def _to_data(
+    loaded,
+    split_manifest: pd.DataFrame,
+    labels: tuple[str, ...],
+) -> tuple[exp3.Data, dict[str, pd.DataFrame]]:
     fs = float(loaded.producer_metadatas[0].sampling_rate_hz)
     original_T = int(split_manifest.pad.max())
     bin_steps = int(np.rint(exp3.FIXED_MS * fs / 1000.0))
@@ -408,7 +408,9 @@ def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> t
     if bin_steps != 16:
         raise ValueError(f"Exp9.0 requires 250 ms = 16 samples, got {bin_steps}")
     frames = {
-        split: split_manifest[split_manifest.split == split].sort_values("sample_id").reset_index(drop=True)
+        split: split_manifest[split_manifest.split == split]
+        .sort_values("sample_id")
+        .reset_index(drop=True)
         for split in SPLITS
     }
     arrays: list[np.ndarray] = []
@@ -421,93 +423,171 @@ def _to_data(loaded, split_manifest: pd.DataFrame, labels: tuple[str, ...]) -> t
                 np.minimum(frame.valid.to_numpy(dtype=np.int64, copy=True), T).copy(),
             ]
         )
-    all_users = tuple(sorted(split_manifest.user.unique().tolist()))
-    split_info = {"train_users": all_users, "val_users": all_users, "test_users": all_users}
+    split_info = {
+        f"{split}_users": tuple(sorted(frames[split].user.astype(str).unique().tolist()))
+        for split in SPLITS
+    }
     return exp3.Data(*arrays, labels, fs, T, bin_steps, n_bins, split_info), frames
 
 
-def _audit_paths(root: Path, split_seed: int) -> dict[str, Path]:
-    base = root / "manifests"
-    return {
-        "manifest": base / f"split_seed{split_seed}.csv",
-        "summary": base / f"manifest_summary_seed{split_seed}.csv",
-        "trials": base / f"source_trial_summary_seed{split_seed}.csv",
-    }
+def _assignment_path(root: Path, cv_mode: str) -> Path:
+    return root / "fold_assignments" / f"{cv_mode}.csv"
 
 
-def prepare_split(config: Config, split_seed: int, write_artifacts: bool = True) -> PreparedSplit:
-    loaded, raw_manifest, _ = _load_manifest(config.repo_root)
-    initial_summary = _initial_pair_summary(raw_manifest)
-    insufficient = initial_summary[~initial_summary.strict_three_way_eligible].copy()
+def _rotation_manifest_path(root: Path, cv_mode: str, rotation: int) -> Path:
+    return root / "manifests" / f"{cv_mode}__rotation{rotation}.csv"
+
+
+def _coverage_path(root: Path, cv_mode: str, rotation: int) -> Path:
+    return root / "manifests" / f"{cv_mode}__rotation{rotation}__coverage.csv"
+
+
+def _load_or_build_assignment(
+    config: Config,
+    raw_manifest: pd.DataFrame,
+    cv_mode: str,
+) -> pd.DataFrame:
+    path = _assignment_path(config.results_dir, cv_mode)
+    if path.exists():
+        saved = pd.read_csv(path, usecols=["sample_id", "cv_fold"])
+        if saved.sample_id.duplicated().any():
+            raise RuntimeError(f"Duplicate sample_id in {path}")
+        merged = raw_manifest.merge(saved, on="sample_id", how="inner", validate="one_to_one")
+        if len(merged) != len(raw_manifest):
+            raise RuntimeError(
+                f"Saved fold assignment {path} does not match current dataset: "
+                f"{len(merged)} vs {len(raw_manifest)} samples"
+            )
+        merged["cv_fold"] = merged.cv_fold.astype(int)
+        return merged
+    return _build_fold_assignment(raw_manifest, cv_mode)
+
+
+def prepare_rotation(
+    config: Config,
+    cv_mode: str,
+    rotation: int,
+    write_artifacts: bool = False,
+) -> PreparedSplit:
+    loaded, raw_manifest, labels = _load_manifest(config.repo_root)
+    assignment = _load_or_build_assignment(config, raw_manifest, cv_mode)
+    split_manifest = _apply_rotation(assignment, rotation)
+    coverage = _coverage_summary(split_manifest)
+    coverage_metrics = _coverage_metrics(split_manifest)
+    data, frames = _to_data(loaded, split_manifest, labels)
     if write_artifacts:
-        manifest_dir = config.results_dir / "manifests"
-        manifest_dir.mkdir(parents=True, exist_ok=True)
-        insufficient.to_csv(manifest_dir / "insufficient_user_class_pairs.csv", index=False)
-        initial_summary.to_csv(manifest_dir / "initial_pair_summary.csv", index=False)
-    filtered, excluded = _apply_insufficient_policy(raw_manifest, initial_summary, config.insufficient_policy)
-    if filtered.empty:
-        raise RuntimeError("Insufficient-data policy removed all samples")
-    active_summary = (
-        _present_pair_summary(filtered)
-        if config.insufficient_policy == "exclude_pair"
-        else _initial_pair_summary(filtered)
+        manifest_path = _rotation_manifest_path(config.results_dir, cv_mode, rotation)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        split_manifest.to_csv(manifest_path, index=False)
+        coverage.to_csv(_coverage_path(config.results_dir, cv_mode, rotation), index=False)
+    return PreparedSplit(
+        cv_mode=cv_mode,
+        rotation=rotation,
+        data=data,
+        frames=frames,
+        full_manifest=split_manifest,
+        coverage_summary=coverage,
+        coverage_metrics=coverage_metrics,
     )
-    split_manifest, trial_summary = _build_split_manifest(filtered, split_seed)
-    actual_summary = _pair_actual_summary(split_manifest, active_summary)
-    actual_summary["coverage_expected"] = actual_summary.strict_three_way_eligible
-    actual_summary["coverage_met_when_expected"] = (
-        (~actual_summary.coverage_expected) | actual_summary.actual_three_way_coverage
-    )
-    data, frames = _to_data(loaded, split_manifest, tuple(sorted(filtered.label.unique())))
-    if write_artifacts:
-        paths = _audit_paths(config.results_dir, split_seed)
-        paths["manifest"].parent.mkdir(parents=True, exist_ok=True)
-        split_manifest.to_csv(paths["manifest"], index=False)
-        actual_summary.to_csv(paths["summary"], index=False)
-        trial_summary.to_csv(paths["trials"], index=False)
-    return PreparedSplit(data, frames, split_manifest, actual_summary, trial_summary, excluded)
 
 
 def prepare_all(config: Config) -> dict[str, Any]:
     loaded, raw_manifest, _ = _load_manifest(config.repo_root)
     del loaded
-    initial = _initial_pair_summary(raw_manifest)
+    config.results_dir.mkdir(parents=True, exist_ok=True)
+    assignment_dir = config.results_dir / "fold_assignments"
     manifest_dir = config.results_dir / "manifests"
+    assignment_dir.mkdir(parents=True, exist_ok=True)
     manifest_dir.mkdir(parents=True, exist_ok=True)
-    initial.to_csv(manifest_dir / "initial_pair_summary.csv", index=False)
-    insufficient = initial[~initial.strict_three_way_eligible].copy()
-    insufficient.to_csv(manifest_dir / "insufficient_user_class_pairs.csv", index=False)
+
+    fold_frames: list[pd.DataFrame] = []
+    rotation_rows: list[dict[str, Any]] = []
+    for cv_mode in CV_MODES:
+        assignment = _build_fold_assignment(raw_manifest, cv_mode)
+        assignment.to_csv(_assignment_path(config.results_dir, cv_mode), index=False)
+        fold_frames.append(_fold_summary(assignment, cv_mode))
+        for rotation in ROTATIONS:
+            split_manifest = _apply_rotation(assignment, rotation)
+            split_manifest.to_csv(
+                _rotation_manifest_path(config.results_dir, cv_mode, rotation),
+                index=False,
+            )
+            coverage = _coverage_summary(split_manifest)
+            coverage.to_csv(
+                _coverage_path(config.results_dir, cv_mode, rotation),
+                index=False,
+            )
+            metrics = _coverage_metrics(split_manifest)
+            counts = split_manifest.split.value_counts()
+            users = {
+                split: int(split_manifest.loc[split_manifest.split == split, "user"].nunique())
+                for split in SPLITS
+            }
+            rotation_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "rotation": rotation,
+                    "test_fold": rotation,
+                    "val_fold": (rotation + 1) % N_FOLDS,
+                    "train_samples": int(counts.get("train", 0)),
+                    "val_samples": int(counts.get("val", 0)),
+                    "test_samples": int(counts.get("test", 0)),
+                    "train_users": users["train"],
+                    "val_users": users["val"],
+                    "test_users": users["test"],
+                    **metrics,
+                }
+            )
+
+    fold_summary = pd.concat(fold_frames, ignore_index=True)
+    fold_summary.to_csv(config.results_dir / "fold_summary.csv", index=False)
+    rotation_summary = pd.DataFrame(rotation_rows)
+    rotation_summary.to_csv(config.results_dir / "rotation_summary.csv", index=False)
+
+    within_assignment = pd.read_csv(_assignment_path(config.results_dir, CV_WITHIN))
+    within_user_fold = (
+        within_assignment.groupby(["user", "cv_fold"])
+        .size()
+        .rename("n")
+        .reset_index()
+    )
+    within_user_fold.to_csv(
+        config.results_dir / "within_user_fold_counts.csv",
+        index=False,
+    )
+
+    cross_assignment = pd.read_csv(_assignment_path(config.results_dir, CV_CROSS))
+    cross_users = (
+        cross_assignment[["user", "cv_fold"]]
+        .drop_duplicates()
+        .sort_values(["cv_fold", "user"])
+        .reset_index(drop=True)
+    )
+    cross_users.to_csv(config.results_dir / "cross_user_fold_users.csv", index=False)
+
     audit = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
-        "insufficient_policy": config.insufficient_policy,
         "total_samples": int(len(raw_manifest)),
         "total_users": int(raw_manifest.user.nunique()),
         "total_classes": int(raw_manifest.label.nunique()),
-        "total_user_class_pairs": int(len(initial)),
-        "insufficient_user_class_pairs": int(len(insufficient)),
-        "affected_users": sorted(insufficient.user.astype(str).unique().tolist()),
-        "affected_classes": sorted(insufficient.label.astype(str).unique().tolist()),
+        "source_trials": int(raw_manifest.source_trial.nunique()),
+        "n_folds": N_FOLDS,
+        "rotations": list(ROTATIONS),
+        "model_seeds": list(MODEL_SEEDS),
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
+        "within_user_split_unit": "segment",
+        "within_user_source_trial_grouping": False,
+        "cross_user_split_unit": "user",
+        "cross_user_user_grouping": True,
+        "within_user_note": (
+            "Segments are split within each user because the dataset has only 1-2 "
+            "source trials per user; grouping source trials would make within-user "
+            "5-fold CV impossible."
+        ),
+        "expected_runs": EXPECTED_RUNS,
     }
-    _save_json(manifest_dir / "audit.json", audit)
-    prepared = []
-    for seed in SPLIT_SEEDS:
-        try:
-            prepared.append(prepare_split(config, seed, write_artifacts=True))
-        except Exception as error:
-            _save_json(
-                manifest_dir / f"split_failure_seed{seed}.json",
-                {"split_seed": int(seed), "error_type": type(error).__name__, "error": str(error)},
-            )
-            raise
-    audit["prepared_split_seeds"] = list(SPLIT_SEEDS)
-    audit["active_samples_per_seed"] = {
-        str(seed): int(len(prep.full_manifest)) for seed, prep in zip(SPLIT_SEEDS, prepared, strict=True)
-    }
-    audit["excluded"] = prepared[0].excluded if prepared else {}
-    _save_json(manifest_dir / "audit.json", audit)
+    _save_json(config.results_dir / "audit.json", audit)
     return audit
 
 
@@ -544,7 +624,7 @@ def _per_user_rows(spec: RunSpec, split: str, frame: pd.DataFrame, y_true: np.nd
     for user in sorted(frame.user.unique().tolist()):
         mask = users == user
         metrics = _classification_metrics(y_true[mask], pred[mask])
-        rows.append({"method": spec.method, "split_seed": spec.split_seed, "split": split, "user": user, "n": int(mask.sum()), **metrics})
+        rows.append({"cv_mode": spec.cv_mode, "method": spec.method, "rotation": spec.rotation, "seed": spec.seed, "split": split, "user": user, "n": int(mask.sum()), **metrics})
     return rows
 
 
@@ -554,8 +634,10 @@ def _per_class_rows(spec: RunSpec, split: str, labels: tuple[str, ...], y_true: 
     )
     return [
         {
+            "cv_mode": spec.cv_mode,
             "method": spec.method,
-            "split_seed": spec.split_seed,
+            "rotation": spec.rotation,
+            "seed": spec.seed,
             "split": split,
             "class_index": idx,
             "class_label": labels[idx],
@@ -602,7 +684,7 @@ def _fit_raw250(prepared: PreparedSplit, spec: RunSpec):
             C=C,
             max_iter=5000,
             solver="lbfgs",
-            random_state=_stable_seed(spec.split_seed, EXPERIMENT_ID, "raw250", C),
+            random_state=_stable_seed(spec.seed, EXPERIMENT_ID, spec.cv_mode, spec.rotation, "raw250", C),
         ).fit(z["train"], built["train"][1])
         val_pred = classifier.predict(z["val"])
         val_ba = float(balanced_accuracy_score(built["val"][1], val_pred))
@@ -641,11 +723,11 @@ def _evaluate_a2(model: exp80.Exp80Net, loader: Iterable, device: torch.device):
 def _train_a2(prepared: PreparedSplit, spec: RunSpec, config: Config):
     data = prepared.data
     device = torch.device(config.device)
-    exp3.seed_all(_stable_seed(spec.split_seed, EXPERIMENT_ID, "a2_model_init"))
+    exp3.seed_all(_stable_seed(spec.seed, EXPERIMENT_ID, spec.cv_mode, spec.rotation, "a2_model_init"))
     model = exp80.Exp80Net(ARCHITECTURE_SHIFTS, len(data.labels), data.fs).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=exp72.LR, weight_decay=exp72.WEIGHT_DECAY)
-    train_loader = _make_loaders(data, spec.split_seed, config.batch_size, True)["train"]
-    eval_loaders = _make_loaders(data, spec.split_seed, config.batch_size, False)
+    train_loader = _make_loaders(data, spec.seed, config.batch_size, True)["train"]
+    eval_loaders = _make_loaders(data, spec.seed, config.batch_size, False)
     best_state: dict[str, torch.Tensor] | None = None
     best_epoch, best_ba, best_loss = -1, -1.0, float("inf")
     stopped_epoch = config.max_epochs
@@ -691,39 +773,60 @@ def _train_a2(prepared: PreparedSplit, spec: RunSpec, config: Config):
 
 
 def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any]:
-    if spec.method not in METHODS or spec.split_seed not in SPLIT_SEEDS:
+    if (
+        spec.cv_mode not in CV_MODES
+        or spec.method not in METHODS
+        or spec.rotation not in ROTATIONS
+        or spec.seed != MODEL_SEEDS[spec.rotation]
+    ):
         raise ValueError(spec)
     eval_path = _path(config.results_dir, "evaluations", spec.key, ".json")
     if eval_path.exists() and not force:
         return json.loads(eval_path.read_text(encoding="utf-8"))
     torch.set_num_threads(config.threads)
-    prepared = prepare_split(config, spec.split_seed, write_artifacts=False)
+    prepared = prepare_rotation(config, spec.cv_mode, spec.rotation, write_artifacts=False)
     best_epoch = None
     stopped_epoch = None
     selected_C = None
     if spec.method == METHOD_RAW250:
         selected_C, metrics, predictions = _fit_raw250(prepared, spec)
-        parameter_count = int(prepared.data.n_bins * exp3.EVENT_CHANNELS * len(prepared.data.labels))
+        parameter_count = int(
+            prepared.data.n_bins * exp3.EVENT_CHANNELS * len(prepared.data.labels)
+        )
     else:
-        model, best_state, best_epoch, stopped_epoch, best_ba, best_loss, history, metrics, predictions = _train_a2(prepared, spec, config)
+        (
+            model,
+            best_state,
+            best_epoch,
+            stopped_epoch,
+            best_ba,
+            best_loss,
+            history,
+            metrics,
+            predictions,
+        ) = _train_a2(prepared, spec, config)
         parameter_count = int(sum(p.numel() for p in model.parameters()))
         ckpt = _path(config.results_dir, "checkpoints", spec.key, ".pt")
         ckpt.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({
-            "experiment_id": EXPERIMENT_ID,
-            "protocol_version": PROTOCOL_VERSION,
-            "spec": asdict(spec),
-            "architecture": ARCHITECTURE,
-            "architecture_shifts": ARCHITECTURE_SHIFTS,
-            "best_epoch": best_epoch,
-            "stopped_epoch": stopped_epoch,
-            "best_val_ba": best_ba,
-            "best_val_objective_loss": best_loss,
-            "model_state_dict": best_state,
-        }, ckpt)
+        torch.save(
+            {
+                "experiment_id": EXPERIMENT_ID,
+                "protocol_version": PROTOCOL_VERSION,
+                "spec": asdict(spec),
+                "architecture": ARCHITECTURE,
+                "architecture_shifts": ARCHITECTURE_SHIFTS,
+                "best_epoch": best_epoch,
+                "stopped_epoch": stopped_epoch,
+                "best_val_ba": best_ba,
+                "best_val_objective_loss": best_loss,
+                "model_state_dict": best_state,
+            },
+            ckpt,
+        )
         hist_path = _path(config.results_dir, "histories", spec.key, ".csv")
         hist_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(history).to_csv(hist_path, index=False)
+
     per_user, per_class, confusions = _diagnostic_tables(spec, prepared, predictions)
     per_user_path = _path(config.results_dir, "per_user", spec.key, ".csv")
     per_user_path.parent.mkdir(parents=True, exist_ok=True)
@@ -731,13 +834,36 @@ def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any
     per_class_path = _path(config.results_dir, "per_class", spec.key, ".csv")
     per_class_path.parent.mkdir(parents=True, exist_ok=True)
     per_class.to_csv(per_class_path, index=False)
+
+    prediction_rows: list[dict[str, Any]] = []
+    for split in SPLITS:
+        y_true, pred = predictions[split]
+        frame = prepared.frames[split]
+        for index, row in enumerate(frame.itertuples(index=False)):
+            prediction_rows.append(
+                {
+                    "cv_mode": spec.cv_mode,
+                    "method": spec.method,
+                    "rotation": spec.rotation,
+                    "seed": spec.seed,
+                    "split": split,
+                    "sample_id": str(row.sample_id),
+                    "user": str(row.user),
+                    "class_label": str(row.label),
+                    "y_true": int(y_true[index]),
+                    "y_pred": int(pred[index]),
+                }
+            )
+    prediction_path = _path(config.results_dir, "predictions", spec.key, ".csv")
+    prediction_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(prediction_rows).to_csv(prediction_path, index=False)
+
     payload = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "spec": asdict(spec),
-        "insufficient_policy": config.insufficient_policy,
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
+        "split_unit": "segment" if spec.cv_mode == CV_WITHIN else "user",
         "architecture": ARCHITECTURE if spec.method == METHOD_A2 else None,
         "architecture_shifts": ARCHITECTURE_SHIFTS if spec.method == METHOD_A2 else None,
         "selected_probe_C": selected_C,
@@ -748,11 +874,15 @@ def run_one(spec: RunSpec, config: Config, force: bool = False) -> dict[str, Any
         "confusion_matrices": confusions,
         "labels": list(prepared.data.labels),
         "counts": {split: int(len(prepared.frames[split])) for split in SPLITS},
-        "users": sorted(prepared.full_manifest.user.unique().tolist()),
-        "excluded": prepared.excluded,
+        "split_users": {
+            split: sorted(prepared.frames[split].user.astype(str).unique().tolist())
+            for split in SPLITS
+        },
+        "coverage_metrics": prepared.coverage_metrics,
     }
     _save_json(eval_path, payload)
     return payload
+
 
 
 def _summary_frame(frame: pd.DataFrame, groups: list[str], metrics: list[str]) -> pd.DataFrame:
@@ -766,115 +896,253 @@ def _summary_frame(frame: pd.DataFrame, groups: list[str], metrics: list[str]) -
     return out
 
 
-def _cross_user_reference(repo_root: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    raw_path = repo_root / "notebooks/artifacts/experiment_0_1_general_comparison/general_comparison_v1/raw_baselines.json"
-    if raw_path.exists():
-        payload = json.loads(raw_path.read_text(encoding="utf-8"))
-        raw = payload.get("representations", {}).get("fixed250", {})
-        if isinstance(raw, dict) and isinstance(raw.get("test"), dict):
-            rows.append({
-                "method": METHOD_RAW250,
-                "source": str(raw_path.relative_to(repo_root)),
-                "cross_user_test_ba": float(raw["test"]["balanced_accuracy"]),
-                "cross_user_test_accuracy": float(raw["test"]["accuracy"]),
-                "cross_user_test_macro_f1": float(raw["test"]["macro_f1"]),
-            })
-    exp80_root = repo_root / "notebooks/artifacts/experiment_8_0_local_backbone_tau_sweep/local_backbone_tau_sweep_v1/evaluations"
-    a2_values = []
-    if exp80_root.exists():
-        for path in sorted(exp80_root.glob("234x234__a2_wcce__*__seed*.json")):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            test = payload.get("linear_metrics", {}).get("test", {})
-            if isinstance(test, dict) and "balanced_accuracy" in test:
-                a2_values.append(test)
-    if a2_values:
-        rows.append({
-            "method": METHOD_A2,
-            "source": str(exp80_root.relative_to(repo_root)),
-            "cross_user_test_ba": float(np.mean([v["balanced_accuracy"] for v in a2_values])),
-            "cross_user_test_accuracy": float(np.mean([v["accuracy"] for v in a2_values])),
-            "cross_user_test_macro_f1": float(np.mean([v["macro_f1"] for v in a2_values])),
-        })
-    return rows
+def _pooled_oof_tables(predictions: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    test = predictions[predictions.split == "test"].copy()
+    metric_rows: list[dict[str, Any]] = []
+    user_rows: list[dict[str, Any]] = []
+    class_rows: list[dict[str, Any]] = []
+    confusion_rows: list[dict[str, Any]] = []
+
+    for (cv_mode, method), frame in test.groupby(["cv_mode", "method"], sort=False):
+        if frame.sample_id.duplicated().any():
+            duplicated = frame.loc[frame.sample_id.duplicated(), "sample_id"].head().tolist()
+            raise RuntimeError(
+                f"OOF test samples repeated for {cv_mode}/{method}: {duplicated}"
+            )
+        metrics = _classification_metrics(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+        )
+        metric_rows.append(
+            {
+                "cv_mode": cv_mode,
+                "method": method,
+                "n": int(len(frame)),
+                **metrics,
+            }
+        )
+
+        for user, user_frame in frame.groupby("user", sort=True):
+            user_metrics = _classification_metrics(
+                user_frame.y_true.to_numpy(dtype=np.int64),
+                user_frame.y_pred.to_numpy(dtype=np.int64),
+            )
+            user_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "method": method,
+                    "user": user,
+                    "n": int(len(user_frame)),
+                    **user_metrics,
+                }
+            )
+
+        labels = sorted(frame.class_label.unique().tolist())
+        label_to_y = (
+            frame[["class_label", "y_true"]]
+            .drop_duplicates()
+            .set_index("class_label")
+            .y_true.to_dict()
+        )
+        y_indices = [int(label_to_y[label]) for label in labels]
+        precision, recall, f1, support = precision_recall_fscore_support(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+            labels=y_indices,
+            zero_division=0,
+        )
+        for idx, label in enumerate(labels):
+            class_rows.append(
+                {
+                    "cv_mode": cv_mode,
+                    "method": method,
+                    "class_label": label,
+                    "class_index": y_indices[idx],
+                    "precision": float(precision[idx]),
+                    "recall": float(recall[idx]),
+                    "f1": float(f1[idx]),
+                    "support": int(support[idx]),
+                }
+            )
+
+        matrix = confusion_matrix(
+            frame.y_true.to_numpy(dtype=np.int64),
+            frame.y_pred.to_numpy(dtype=np.int64),
+            labels=y_indices,
+        )
+        for i, true_label in enumerate(labels):
+            for j, pred_label in enumerate(labels):
+                confusion_rows.append(
+                    {
+                        "cv_mode": cv_mode,
+                        "method": method,
+                        "true_label": true_label,
+                        "pred_label": pred_label,
+                        "count": int(matrix[i, j]),
+                    }
+                )
+
+    return (
+        pd.DataFrame(metric_rows),
+        pd.DataFrame(user_rows),
+        pd.DataFrame(class_rows),
+        pd.DataFrame(confusion_rows),
+    )
 
 
 def finalize(config: Config) -> dict[str, Any]:
+    specs = run_specs()
     payloads = []
-    for spec in run_specs():
+    for spec in specs:
         path = _path(config.results_dir, "evaluations", spec.key, ".json")
         if not path.exists():
             raise FileNotFoundError(f"Missing Exp9.0 evaluation: {path}")
         payloads.append(json.loads(path.read_text(encoding="utf-8")))
     if len(payloads) != EXPECTED_RUNS:
         raise RuntimeError(f"Expected {EXPECTED_RUNS} runs, got {len(payloads)}")
+
     run_rows = []
     for payload in payloads:
+        spec = payload["spec"]
         for split in SPLITS:
             metrics = payload["metrics"][split]
-            run_rows.append({
-                "method": payload["spec"]["method"],
-                "split_seed": int(payload["spec"]["split_seed"]),
-                "split": split,
-                "accuracy": float(metrics["accuracy"]),
-                "balanced_accuracy": float(metrics["balanced_accuracy"]),
-                "macro_f1": float(metrics["macro_f1"]),
-                "objective_loss": float(metrics.get("objective_loss", np.nan)),
-                "n": int(payload["counts"][split]),
-                "best_epoch": payload.get("best_epoch"),
-                "parameter_count": int(payload["parameter_count"]),
-            })
+            run_rows.append(
+                {
+                    "cv_mode": spec["cv_mode"],
+                    "method": spec["method"],
+                    "rotation": int(spec["rotation"]),
+                    "seed": int(spec["seed"]),
+                    "split": split,
+                    "accuracy": float(metrics["accuracy"]),
+                    "balanced_accuracy": float(metrics["balanced_accuracy"]),
+                    "macro_f1": float(metrics["macro_f1"]),
+                    "objective_loss": float(metrics.get("objective_loss", np.nan)),
+                    "n": int(payload["counts"][split]),
+                    "best_epoch": payload.get("best_epoch"),
+                    "parameter_count": int(payload["parameter_count"]),
+                    "test_same_user_seen_fraction": float(
+                        payload["coverage_metrics"]["test_same_user_seen_fraction"]
+                    ),
+                    "test_same_user_class_seen_fraction": float(
+                        payload["coverage_metrics"]["test_same_user_class_seen_fraction"]
+                    ),
+                }
+            )
     runs = pd.DataFrame(run_rows)
     config.results_dir.mkdir(parents=True, exist_ok=True)
     runs.to_csv(config.results_dir / "metric_runs.csv", index=False)
-    _summary_frame(runs, ["method", "split"], ["accuracy", "balanced_accuracy", "macro_f1", "objective_loss", "n"]).to_csv(config.results_dir / "metric_summary.csv", index=False)
-    users = pd.concat([pd.read_csv(_path(config.results_dir, "per_user", spec.key, ".csv")) for spec in run_specs()], ignore_index=True)
+    _summary_frame(
+        runs,
+        ["cv_mode", "method", "split"],
+        ["accuracy", "balanced_accuracy", "macro_f1", "objective_loss", "n"],
+    ).to_csv(config.results_dir / "metric_summary.csv", index=False)
+
+    users = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "per_user", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
     users.to_csv(config.results_dir / "per_user_runs.csv", index=False)
-    _summary_frame(users, ["method", "split", "user"], ["accuracy", "balanced_accuracy", "macro_f1", "n"]).to_csv(config.results_dir / "per_user_summary.csv", index=False)
-    classes = pd.concat([pd.read_csv(_path(config.results_dir, "per_class", spec.key, ".csv")) for spec in run_specs()], ignore_index=True)
+    _summary_frame(
+        users,
+        ["cv_mode", "method", "split", "user"],
+        ["accuracy", "balanced_accuracy", "macro_f1", "n"],
+    ).to_csv(config.results_dir / "per_user_summary.csv", index=False)
+
+    classes = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "per_class", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
     classes.to_csv(config.results_dir / "per_class_runs.csv", index=False)
-    _summary_frame(classes, ["method", "split", "class_index", "class_label"], ["precision", "recall", "f1", "support"]).to_csv(config.results_dir / "per_class_summary.csv", index=False)
-    confusion_rows = []
-    for method in METHODS:
-        method_payloads = [p for p in payloads if p["spec"]["method"] == method]
-        labels = method_payloads[0]["labels"]
-        for split in SPLITS:
-            matrices = np.asarray([p["confusion_matrices"][split] for p in method_payloads], dtype=float)
-            mean_matrix = matrices.mean(axis=0)
-            for i, true_label in enumerate(labels):
-                for j, pred_label in enumerate(labels):
-                    confusion_rows.append({"method": method, "split": split, "true_label": true_label, "pred_label": pred_label, "mean_count": float(mean_matrix[i, j])})
-    pd.DataFrame(confusion_rows).to_csv(config.results_dir / "confusion_summary.csv", index=False)
-    within_test = runs[runs.split == "test"].groupby("method")[["balanced_accuracy", "accuracy", "macro_f1"]].agg(["mean", "std"])
+    _summary_frame(
+        classes,
+        ["cv_mode", "method", "split", "class_index", "class_label"],
+        ["precision", "recall", "f1", "support"],
+    ).to_csv(config.results_dir / "per_class_summary.csv", index=False)
+
+    predictions = pd.concat(
+        [pd.read_csv(_path(config.results_dir, "predictions", spec.key, ".csv")) for spec in specs],
+        ignore_index=True,
+    )
+    predictions.to_csv(config.results_dir / "prediction_runs.csv", index=False)
+    oof_test = predictions[predictions.split == "test"].copy()
+    oof_test.to_csv(config.results_dir / "oof_test_predictions.csv", index=False)
+
+    expected_samples = int(
+        pd.read_csv(_assignment_path(config.results_dir, CV_WITHIN)).sample_id.nunique()
+    )
+    for (cv_mode, method), frame in oof_test.groupby(["cv_mode", "method"], sort=False):
+        if len(frame) != expected_samples or frame.sample_id.nunique() != expected_samples:
+            raise RuntimeError(
+                f"Incomplete OOF coverage for {cv_mode}/{method}: "
+                f"{len(frame)} rows, {frame.sample_id.nunique()} unique, "
+                f"expected {expected_samples}"
+            )
+
+    oof_metrics, oof_users, oof_classes, oof_confusion = _pooled_oof_tables(predictions)
+    oof_metrics.to_csv(config.results_dir / "oof_test_metrics.csv", index=False)
+    oof_users.to_csv(config.results_dir / "oof_per_user_test.csv", index=False)
+    oof_classes.to_csv(config.results_dir / "oof_per_class_test.csv", index=False)
+    oof_confusion.to_csv(config.results_dir / "confusion_summary.csv", index=False)
+
     gap_rows = []
-    refs = {row["method"]: row for row in _cross_user_reference(config.repo_root)}
     for method in METHODS:
-        row: dict[str, Any] = {"method": method}
-        if method in within_test.index:
-            row["within_user_test_ba_mean"] = float(within_test.loc[method, ("balanced_accuracy", "mean")])
-            row["within_user_test_ba_std"] = float(within_test.loc[method, ("balanced_accuracy", "std")])
-            row["within_user_test_macro_f1_mean"] = float(within_test.loc[method, ("macro_f1", "mean")])
-        ref = refs.get(method)
-        if ref:
-            row.update(ref)
-            row["user_gap_ba"] = row["within_user_test_ba_mean"] - row["cross_user_test_ba"]
-        gap_rows.append(row)
-    pd.DataFrame(gap_rows).to_csv(config.results_dir / "within_vs_cross_user.csv", index=False)
+        within = oof_metrics[
+            (oof_metrics.cv_mode == CV_WITHIN) & (oof_metrics.method == method)
+        ].iloc[0]
+        cross = oof_metrics[
+            (oof_metrics.cv_mode == CV_CROSS) & (oof_metrics.method == method)
+        ].iloc[0]
+        gap_rows.append(
+            {
+                "method": method,
+                "within_user_oof_accuracy": float(within.accuracy),
+                "within_user_oof_ba": float(within.balanced_accuracy),
+                "within_user_oof_macro_f1": float(within.macro_f1),
+                "cross_user_oof_accuracy": float(cross.accuracy),
+                "cross_user_oof_ba": float(cross.balanced_accuracy),
+                "cross_user_oof_macro_f1": float(cross.macro_f1),
+                "user_gap_accuracy": float(within.accuracy - cross.accuracy),
+                "user_gap_ba": float(within.balanced_accuracy - cross.balanced_accuracy),
+                "user_gap_macro_f1": float(within.macro_f1 - cross.macro_f1),
+            }
+        )
+    pd.DataFrame(gap_rows).to_csv(
+        config.results_dir / "within_vs_cross_user.csv",
+        index=False,
+    )
+
     manifest = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
+        "cv_modes": list(CV_MODES),
         "methods": list(METHODS),
-        "split_seeds": list(SPLIT_SEEDS),
+        "n_folds": N_FOLDS,
+        "rotations": list(ROTATIONS),
+        "model_seeds": list(MODEL_SEEDS),
         "parallel_runs": EXPECTED_RUNS,
         "target_split": TARGET_FRACTIONS,
-        "source_trial_isolation": True,
-        "insufficient_policy": config.insufficient_policy,
+        "within_user": {
+            "split_unit": "segment",
+            "stratified_within_each_user": True,
+            "source_trial_grouping": False,
+        },
+        "cross_user": {
+            "split_unit": "user",
+            "user_grouping": True,
+            "test_users_unseen": True,
+        },
+        "primary_metric": "pooled out-of-fold balanced_accuracy",
+        "secondary_metrics": ["accuracy", "macro_f1", "fold mean/std"],
         "a2_architecture": ARCHITECTURE,
         "a2_architecture_shifts": [list(v) for v in ARCHITECTURE_SHIFTS],
-        "primary_metric": "balanced_accuracy",
-        "secondary_metrics": ["accuracy", "macro_f1"],
-        "raw250": "Raw64 events -> ordered 250-ms counts -> StandardScaler(train only) -> validation-selected LogisticRegression C",
-        "a2": "Exp7.3 A2-compatible 30->128->128->12, shifts (234)(234), shared Linear/WCCE, validation BA checkpoint selection",
+        "raw250": (
+            "Raw64 events -> ordered 250-ms counts -> StandardScaler(train only) -> "
+            "validation-selected LogisticRegression C"
+        ),
+        "a2": (
+            "Exp7.3 A2-compatible 30->128->128->12, shifts (234)(234), "
+            "shared Linear/WCCE, validation BA checkpoint selection"
+        ),
     }
     _save_json(config.results_dir / "manifest.json", manifest)
     return manifest
@@ -890,19 +1158,17 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         threads=args.threads,
         batch_size=args.batch_size,
         max_epochs=args.max_epochs,
-        insufficient_policy=args.insufficient_policy,
     )
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Exp9.0 within-user unseen-segment generalization")
+    parser = argparse.ArgumentParser(description="Exp9.0 rotating within-user and cross-user CV")
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--results-dir", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-epochs", type=int, default=MAX_EPOCHS)
-    parser.add_argument("--insufficient-policy", choices=INSUFFICIENT_POLICIES, default="keep_all")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prepare")
     sub.add_parser("list-runs")
