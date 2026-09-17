@@ -1,0 +1,65 @@
+name: Exp8.0.4 CI
+
+on:
+  push:
+    paths:
+      - 'scripts/experiment_8_0_4_phase_aware_hierarchical_readout_mean.py'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_4*'
+      - 'tests/test_experiment_8_0_4_phase_aware_mean_contract.py'
+      - 'docs/plans/EXP8_0_4_PHASE_AWARE_MEAN_NORMALIZED_READOUT.md'
+      - 'notebooks/experiment_8_0_4_phase_aware_hierarchical_readout_mean.ipynb'
+      - '.github/workflows/ci-exp8-0-4.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_8_0_4_phase_aware_hierarchical_readout_mean.py'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_4*'
+      - 'tests/test_experiment_8_0_4_phase_aware_mean_contract.py'
+      - 'docs/plans/EXP8_0_4_PHASE_AWARE_MEAN_NORMALIZED_READOUT.md'
+      - 'notebooks/experiment_8_0_4_phase_aware_hierarchical_readout_mean.ipynb'
+      - '.github/workflows/ci-exp8-0-4.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp804-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install CPU test dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[test,snn]'
+
+      - name: Validate Exp8.0.4 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/submit_exp_8_0_4_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_8_0_4_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_8_0_4_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
+      - name: Run Exp8.0.4 contract tests
+        run: |
+          python -m pytest -q \
+            tests/test_repository_source_syntax.py \
+            tests/test_experiment_8_0_4_phase_aware_mean_contract.py
