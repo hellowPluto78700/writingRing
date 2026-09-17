@@ -6,10 +6,11 @@
 #SBATCH --output=exp7_4_finalize_%j.out
 #SBATCH --error=exp7_4_finalize_%j.err
 
-set -euo pipefail
+set -eo pipefail
+source /etc/profile
+set -u
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 cd "$REPO_ROOT"
-source /etc/profile
 module load conda/latest
 eval "$(conda shell.bash hook)"
 if conda env list | awk '{print $1}' | grep -qx writingring-gpu; then conda activate writingring-gpu; else conda activate writingring-viz; fi
