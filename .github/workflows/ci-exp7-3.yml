@@ -1,10 +1,36 @@
 name: Exp7.3 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_3_training_strategy_decomposition/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3*'
+      - 'tests/test_experiment_7_3_training_strategy_contract.py'
+      - 'notebooks/experiment_7_3_training_strategy_decomposition.ipynb'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - '.github/workflows/ci-exp7-3.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_3_training_strategy_decomposition/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3*'
+      - 'tests/test_experiment_7_3_training_strategy_contract.py'
+      - 'notebooks/experiment_7_3_training_strategy_decomposition.ipynb'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - '.github/workflows/ci-exp7-3.yml'
 
 permissions:
   contents: read
