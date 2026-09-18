@@ -1,0 +1,181 @@
+{
+  "activity": {
+    "l1": [
+      {
+        "cap_hit_fraction": 0.0,
+        "communication_cap": 31,
+        "count": 43,
+        "dead_neuron_fraction": 0.04651162773370743,
+        "large_event_fraction_ge_4": 0.0,
+        "mean_count_per_neuron_step": 0.016350634522619378,
+        "mean_events_per_neuron_s": 1.0464406094476402,
+        "multi_event_fraction_ge_2": 7.101845933646906e-05,
+        "nonzero_communication_fraction": 0.01627961606328291,
+        "shift": 2,
+        "start": 0,
+        "stop": 43
+      },
+      {
+        "cap_hit_fraction": 0.0,
+        "communication_cap": 31,
+        "count": 43,
+        "dead_neuron_fraction": 0.023255813866853714,
+        "large_event_fraction_ge_4": 0.0,
+        "mean_count_per_neuron_step": 0.05608136530256595,
+        "mean_events_per_neuron_s": 3.589207379364221,
+        "multi_event_fraction_ge_2": 0.0004124533599925704,
+        "nonzero_communication_fraction": 0.055664814723765506,
+        "shift": 3,
+        "start": 43,
+        "stop": 86
+      },
+      {
+        "cap_hit_fraction": 0.0,
+        "communication_cap": 31,
+        "count": 42,
+        "dead_neuron_fraction": 0.0,
+        "large_event_fraction_ge_4": 4.194771636632102e-06,
+        "mean_count_per_neuron_step": 0.20436647762229157,
+        "mean_events_per_neuron_s": 13.07945456782666,
+        "multi_event_fraction_ge_2": 0.00724437061646364,
+        "nonzero_communication_fraction": 0.19678652527489737,
+        "shift": 4,
+        "start": 86,
+        "stop": 128
+      }
+    ],
+    "l2": [
+      {
+        "cap_hit_fraction": 3.960644847610775e-05,
+        "communication_cap": 31,
+        "count": 43,
+        "dead_neuron_fraction": 0.0,
+        "large_event_fraction_ge_4": 0.22334212869637424,
+        "mean_count_per_neuron_step": 2.1354171788190177,
+        "mean_events_per_neuron_s": 136.66669944441713,
+        "multi_event_fraction_ge_2": 0.457718067642351,
+        "nonzero_communication_fraction": 0.6083127106653337,
+        "shift": 2,
+        "start": 0,
+        "stop": 43
+      },
+      {
+        "cap_hit_fraction": 0.0005913652479363675,
+        "communication_cap": 31,
+        "count": 43,
+        "dead_neuron_fraction": 0.0,
+        "large_event_fraction_ge_4": 0.4006110318982142,
+        "mean_count_per_neuron_step": 3.528238032023862,
+        "mean_events_per_neuron_s": 225.80723404952718,
+        "multi_event_fraction_ge_2": 0.5905826791440637,
+        "nonzero_communication_fraction": 0.6744950860689097,
+        "shift": 3,
+        "start": 43,
+        "stop": 86
+      },
+      {
+        "cap_hit_fraction": 0.01708111010436592,
+        "communication_cap": 31,
+        "count": 42,
+        "dead_neuron_fraction": 0.0,
+        "large_event_fraction_ge_4": 0.5429544615591128,
+        "mean_count_per_neuron_step": 6.4681379129053544,
+        "mean_events_per_neuron_s": 413.9608264259427,
+        "multi_event_fraction_ge_2": 0.648306151213128,
+        "nonzero_communication_fraction": 0.6951533608510353,
+        "shift": 4,
+        "start": 86,
+        "stop": 128
+      }
+    ]
+  },
+  "best_epoch": 96,
+  "contract": {
+    "architecture": "30->128->128->12",
+    "coding": "weighted31",
+    "dataset": "postencode_mask",
+    "l1_beta": 0.75,
+    "l1_communication_cap": 31,
+    "l1_mem_shift": 2,
+    "l1_tau_mem_ms": 54.31342963722199,
+    "l2_beta": 0.75,
+    "l2_communication_cap": 31,
+    "l2_mem_shift": 2,
+    "l2_tau_mem_ms": 54.31342963722199,
+    "objective": "l2_wcce",
+    "readout": "time_shared",
+    "synaptic_shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "weighted_count_normalization": "none"
+  },
+  "experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+  "lif_transfer_metrics": {
+    "test": {
+      "accuracy": 0.40229885057471265,
+      "balanced_accuracy": 0.3914439930984049,
+      "macro_f1": 0.39659805110306406
+    },
+    "train": {
+      "accuracy": 0.7607843137254902,
+      "balanced_accuracy": 0.7621162802361233,
+      "macro_f1": 0.759174083499189
+    },
+    "val": {
+      "accuracy": 0.47337278106508873,
+      "balanced_accuracy": 0.47020826395826393,
+      "macro_f1": 0.46728686979574396
+    }
+  },
+  "model_init_seed": 3218771927,
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.4942528735632184,
+      "balanced_accuracy": 0.48020404840257785,
+      "macro_f1": 0.47935595639062417,
+      "objective_loss": 2.4896114064359116
+    },
+    "train": {
+      "accuracy": 0.9431372549019608,
+      "balanced_accuracy": 0.9452114102748178,
+      "macro_f1": 0.9451534431174418,
+      "objective_loss": 0.2731374093130523
+    },
+    "val": {
+      "accuracy": 0.5266272189349113,
+      "balanced_accuracy": 0.5288891663891664,
+      "macro_f1": 0.509814281080785,
+      "objective_loss": 2.1212104312061557
+    }
+  },
+  "parameter_count": 21760,
+  "probe_count": 22,
+  "protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+  "scale_metrics": {
+    "mean_abs_evidence_per_valid_step": 9.744052993598778,
+    "mean_l2_evidence_norm_per_valid_step": 41.27198034120273,
+    "mean_native_score_l2_norm": 31.407316361350574,
+    "output_weight_fro_norm": 4.5794830322265625,
+    "output_weight_mean_abs": 0.09746476262807846
+  },
+  "spec": {
+    "coding": "weighted31",
+    "l2_mem_shift": 2,
+    "seed": 11
+  },
+  "split_sample_hashes": {
+    "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+    "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+    "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+  },
+  "stopped_epoch": 100
+}

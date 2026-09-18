@@ -1,0 +1,121 @@
+{
+  "architecture": "30->128->128->12",
+  "codings": {
+    "binary": {
+      "communication": "binary event count in {0,1}",
+      "l1_cap": 1,
+      "l2_cap": 1
+    },
+    "weighted31": {
+      "communication": "integer macro-step event count clip(floor(max(U_pre,0)/theta),0,31); reset subtracts count*theta",
+      "l1_cap": 31,
+      "l2_cap": 31
+    }
+  },
+  "dataset": "D1 postencode_mask only",
+  "expected_runs": 18,
+  "experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+  "fold_roles": {
+    "0": "test",
+    "1": "val",
+    "2": "train",
+    "3": "train",
+    "4": "train"
+  },
+  "l1_beta": 0.75,
+  "l1_mem_shift": 2,
+  "l1_tau_mem_ms": 54.31342963722199,
+  "l2_beta": {
+    "1": 0.4999675576146916,
+    "2": 0.75,
+    "3": 0.875
+  },
+  "l2_mem_shifts": [
+    1,
+    2,
+    3
+  ],
+  "l2_tau_mem_ms": {
+    "1": 22.54,
+    "2": 54.31342963722199,
+    "3": 117.0136826471659
+  },
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "objective": "L2 valid-mean time-shared WCCE",
+  "paired_randomness": "For a fixed seed, model initialization and DataLoader ordering are identical across coding and L2 membrane conditions.",
+  "primary_contrasts": [
+    "binary: L2 shift2-shift1 and shift3-shift1",
+    "weighted31: L2 shift2-shift1 and shift3-shift1",
+    "weighted31-binary at each L2 shift",
+    "coding x L2-memory interactions"
+  ],
+  "protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+  "question": "With the Exp10.2 best L1 membrane shift fixed at 2, test whether L2 also benefits from longer membrane memory and whether integer weighted hidden communication preserves more analog evidence than binary communication.",
+  "readout": "time-shared only; no phase-aware readout",
+  "rotation": 0,
+  "split_samples": {
+    "test": 174,
+    "train": 510,
+    "val": 169
+  },
+  "split_users": {
+    "test": [
+      "user_1",
+      "user_15",
+      "user_18",
+      "user_20"
+    ],
+    "train": [
+      "user_0",
+      "user_11",
+      "user_13",
+      "user_14",
+      "user_16",
+      "user_19",
+      "user_3",
+      "user_4",
+      "user_5",
+      "user_7",
+      "user_8",
+      "user_9"
+    ],
+    "val": [
+      "user_10",
+      "user_12",
+      "user_2",
+      "user_6"
+    ]
+  },
+  "synaptic_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "variant": "postencode_mask",
+  "weighted_normalization": "none; raw integer communication counts enter downstream weights"
+}
