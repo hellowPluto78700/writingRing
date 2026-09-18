@@ -70,6 +70,94 @@ The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
 `python -m snn.train_action0` is a separate optional training entry point that
 consumes those padded packages.
 
+
+## Probe temporal-support convention
+
+For probe-based representation analysis, every probe definition should be
+evaluated in **two temporal-support modes**. The feature/state being probed,
+classifier protocol, train/validation/test split, regularization search, and
+all other settings should remain identical; only the temporal support changes.
+
+### 1. Valid-length masked probe
+
+This is the existing/default probe behavior.
+
+For a sample with valid length (T_{valid}), timesteps after the valid region
+are masked out before aggregation:
+
+[
+m_t = mathbf{1}[t < T_{valid}].
+]
+
+Examples:
+
+[
+mathrm{WholeCount}_{valid}
+=
+sum_{t<T_{valid}} z_t,
+]
+
+and for an absolute 250 ms bin (b),
+
+[
+mathrm{Fixed250Count}_{valid,b}
+=
+sum_{tin b, t<T_{valid}} z_t.
+]
+
+For mean-valued hidden-state probes, the denominator is the number of valid
+timesteps contributing to that whole-sequence or Fixed250 region.
+
+### 2. Whole-window unmasked probe
+
+The same probe must also be evaluated over the complete padded SNN window
+(T_{window}), **without clearing or masking hidden states/spikes after
+`valid_length`**.
+
+Examples:
+
+[
+mathrm{WholeCount}_{window}
+=
+sum_{t<T_{window}} z_t,
+]
+
+and
+
+[
+mathrm{Fixed250Count}_{window,b}
+=
+sum_{tin b} z_t.
+]
+
+For mean-valued probes, use the full whole-window or full-bin timestep count as
+the denominator. Do not replace post-`valid_length` SNN state, membrane,
+synaptic current, or spike activity with zeros before aggregation.
+
+This mode intentionally preserves any network dynamics that continue after the
+last valid input sample, including residual synaptic current, membrane decay,
+reset dynamics, and resulting spikes. The padded input itself may already be
+zero after `valid_length`; the requirement is that probe extraction must not
+apply an additional valid-length mask to the SNN trajectory.
+
+The two modes answer different questions:
+
+```text
+valid-length masked
+    -> information available only during the observed sample
+
+whole-window unmasked
+    -> information available from the complete fixed inference window,
+       including post-valid residual SNN dynamics
+```
+
+For ordered Fixed250 probes, both modes use the same absolute bins anchored at
+the start of the padded window. This is not relative-time binning.
+
+Existing finalized probe artifacts created before this convention may contain
+only the valid-length-masked version. Do not relabel those historical results;
+new or re-run probe evaluations should publish both variants explicitly.
+
 ## Writing-only motion preprocessing: removing airborne/repositioning acceleration
 
 For experiments that separate **stroke-related writing motion** from
