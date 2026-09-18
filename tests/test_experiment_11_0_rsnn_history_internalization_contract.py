@@ -36,6 +36,13 @@ def test_factorial_contract() -> None:
     assert len({spec.key for spec in specs}) == 72
     assert {spec.variant for spec in specs} == set(exp110.VARIANTS)
     assert {spec.fusion for spec in specs} == set(exp110.FUSION_MODES)
+    for index in range(0, len(specs), 2):
+        left, right = specs[index], specs[index + 1]
+        assert (left.variant, right.variant) == exp110.VARIANTS
+        assert left.l1_init == right.l1_init
+        assert left.topology == right.topology
+        assert left.fusion == right.fusion
+        assert left.seed == right.seed
 
 
 def test_architecture_case_mapping() -> None:
