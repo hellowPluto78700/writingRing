@@ -1283,6 +1283,11 @@ def finalize_stage_a(config: Config) -> dict[str, Any]:
 
 
 def finalize(config: Config) -> dict[str, Any]:
+    # Full finalization also materializes the Stage-A-only artifacts so the
+    # artifact contract is identical whether the user runs Stage A first or
+    # submits the complete experiment directly.
+    finalize_stage_a(config)
+
     replay_payloads, replay_probes = _load_stage(
         config, STAGE_REPLAY
     )
