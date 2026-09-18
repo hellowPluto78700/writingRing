@@ -284,15 +284,13 @@ def _rotation_manifest_path(config: Config, rotation: int) -> Path:
 
 
 def prepare_all(config: Config) -> dict[str, Any]:
-    loaded_by_variant: dict[str, Any] = {}
     manifests: dict[str, pd.DataFrame] = {}
     labels_by_variant: dict[str, tuple[str, ...]] = {}
     for variant in VARIANTS:
         loaded, manifest, labels = _load_variant_manifest(config.repo_root, variant)
-        loaded_by_variant[variant] = loaded
         manifests[variant] = manifest
         labels_by_variant[variant] = labels
-    del loaded_by_variant
+        del loaded
 
     reference = manifests[VARIANT_ORIGINAL]
     for variant in VARIANTS[1:]:
@@ -411,12 +409,32 @@ def _load_saved_assignment(config: Config, manifest: pd.DataFrame) -> pd.DataFra
     return merged
 
 
+def _validate_current_geometry_against_prepare(
+    config: Config,
+    manifest: pd.DataFrame,
+    variant: str,
+) -> None:
+    canonical_path = config.results_dir / "canonical_sample_manifest.csv"
+    if not canonical_path.exists():
+        raise FileNotFoundError(
+            f"Missing Exp10.0 canonical manifest {canonical_path}; run prepare first"
+        )
+    canonical = pd.read_csv(canonical_path)
+    _assert_paired_geometry(
+        canonical,
+        manifest,
+        reference_name="prepared_canonical",
+        candidate_name=variant,
+    )
+
+
 def _prepare_run_data(
     config: Config,
     variant: str,
     rotation: int,
 ) -> tuple[exp3.Data, dict[str, pd.DataFrame], pd.DataFrame]:
     loaded, manifest, labels = _load_variant_manifest(config.repo_root, variant)
+    _validate_current_geometry_against_prepare(config, manifest, variant)
     assignment = _load_saved_assignment(config, manifest)
     split_manifest = exp90._apply_rotation(assignment, rotation)
     data, frames = exp90._to_data(loaded, split_manifest, labels)
@@ -437,6 +455,31 @@ def _classification_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str,
         "macro_f1": float(
             f1_score(y_true, y_pred, average="macro", zero_division=0)
         ),
+    }
+
+
+def _detailed_classification_diagnostics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    labels: tuple[str, ...],
+) -> dict[str, Any]:
+    from sklearn.metrics import confusion_matrix, recall_score
+
+    label_ids = np.arange(len(labels), dtype=np.int64)
+    matrix = confusion_matrix(y_true, y_pred, labels=label_ids)
+    recalls = recall_score(
+        y_true,
+        y_pred,
+        labels=label_ids,
+        average=None,
+        zero_division=0,
+    )
+    return {
+        "labels": list(labels),
+        "confusion_matrix": matrix.astype(int).tolist(),
+        "per_class_recall": {
+            label: float(value) for label, value in zip(labels, recalls, strict=True)
+        },
     }
 
 
@@ -872,6 +915,16 @@ def run_one(
         lif_predictions["test"],
         test_actions,
     )
+    native_test_diagnostics = _detailed_classification_diagnostics(
+        native_arrays["test"][0],
+        native_arrays["test"][1],
+        data.labels,
+    )
+    lif_test_diagnostics = _detailed_classification_diagnostics(
+        probe_labels["test"],
+        lif_predictions["test"],
+        data.labels,
+    )
     probe_frame = _fit_all_probes(
         spec,
         features,
@@ -929,8 +982,10 @@ def run_one(
         "best_val_objective_loss": best_loss,
         "native_metrics": native_metrics,
         "native_test_by_action": native_test_by_action,
+        "native_test_diagnostics": native_test_diagnostics,
         "same_w_lif_metrics": lif_metrics,
         "same_w_lif_test_by_action": lif_test_by_action,
+        "same_w_lif_test_diagnostics": lif_test_diagnostics,
         "probe_count": int(len(probe_frame)),
         "probe_names": list(probe_names()),
         "probe_feature_shapes": feature_shapes,
