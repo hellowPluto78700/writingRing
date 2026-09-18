@@ -29,7 +29,7 @@ from scripts import experiment_10_2_2_valid_window_probes as exp1022
 
 
 EXPERIMENT_ID = "experiment_11_0_rsnn_history_internalization"
-PROTOCOL_VERSION = "d0_d1_l1mem2_context_fusion_factorial_v3"
+PROTOCOL_VERSION = "d0_d1_l1mem2_context_fusion_frozen_l1_v4"
 
 VARIANT_ORIGINAL = exp10.VARIANT_ORIGINAL
 VARIANT_POSTENCODE = exp10.VARIANT_POSTENCODE
@@ -41,8 +41,13 @@ L1_MEM_SHIFT = exp1021.L1_MEM_SHIFT
 L1_SYN_SHIFTS = exp1021.SYN_SHIFTS
 
 L1_INIT_DYNAMICS_ONLY = "dynamics_only"
-L1_INIT_PRETRAINED = "pretrained_input"
-L1_INIT_MODES = (L1_INIT_DYNAMICS_ONLY, L1_INIT_PRETRAINED)
+L1_INIT_PRETRAINED_TRAINABLE = "pretrained_trainable"
+L1_INIT_PRETRAINED_FROZEN = "pretrained_frozen"
+L1_INIT_MODES = (
+    L1_INIT_DYNAMICS_ONLY,
+    L1_INIT_PRETRAINED_TRAINABLE,
+    L1_INIT_PRETRAINED_FROZEN,
+)
 
 TOPOLOGY_FF = "ff"
 TOPOLOGY_DIAGONAL = "diagonal"
@@ -444,9 +449,10 @@ def prepare_all(config: Config) -> dict[str, Any]:
         ),
         "l1_init_modes": list(L1_INIT_MODES),
         "pretrained_input_contract": (
-            "D0 copies input->L1 weight from an Exp11.0-trained D0 source; "
-            "D1 copies input->L1 weight from the seed-matched Exp10.2.1 "
-            "binary/l1mem2/l2mem1 best checkpoint; copied weights remain trainable."
+            "D0 and D1 both use seed-matched source input->L1 weights. "
+            "pretrained_trainable keeps the copied L1 weight trainable; "
+            "pretrained_frozen sets requires_grad=False and excludes it from "
+            "the optimizer."
         ),
         "l1_mem_shift": L1_MEM_SHIFT,
         "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(L1_MEM_SHIFT),
@@ -486,7 +492,9 @@ def prepare_all(config: Config) -> dict[str, Any]:
             "diagonal minus ff within each dataset/init/fusion",
             "dense minus ff within each dataset/init/fusion",
             "fusion on minus off within each dataset/init/topology",
-            "pretrained_input minus dynamics_only within dataset/topology/fusion",
+            "pretrained_trainable minus dynamics_only within dataset/topology/fusion",
+            "pretrained_frozen minus dynamics_only within dataset/topology/fusion",
+            "pretrained_trainable minus pretrained_frozen within dataset/topology/fusion",
             "recurrence x fusion interaction: (D-C) minus (B-A)",
         ],
     }
@@ -772,6 +780,18 @@ def _source_weight_and_meta(
     }
 
 
+def _is_pretrained_l1_mode(spec: RunSpec) -> bool:
+    return spec.l1_init in (
+        L1_INIT_PRETRAINED_TRAINABLE,
+        L1_INIT_PRETRAINED_FROZEN,
+    )
+
+
+def _configure_l1_trainability(model: Exp110Net, spec: RunSpec) -> None:
+    frozen = spec.l1_init == L1_INIT_PRETRAINED_FROZEN
+    model.l1_input.weight.requires_grad_(not frozen)
+
+
 def _load_pretrained_l1(
     model: Exp110Net,
     spec: RunSpec,
@@ -779,7 +799,10 @@ def _load_pretrained_l1(
     config: Config,
 ) -> dict[str, Any] | None:
     if spec.l1_init == L1_INIT_DYNAMICS_ONLY:
+        _configure_l1_trainability(model, spec)
         return None
+    if not _is_pretrained_l1_mode(spec):
+        raise ValueError(spec.l1_init)
 
     source_weight, source_meta = _source_weight_and_meta(
         spec, frames, config
@@ -793,10 +816,47 @@ def _load_pretrained_l1(
         model.l1_input.weight.copy_(
             source_weight.to(dtype=model.l1_input.weight.dtype)
         )
-    if not model.l1_input.weight.requires_grad:
-        raise RuntimeError("Pretrained L1 input weight must remain trainable")
-    return source_meta
+    _configure_l1_trainability(model, spec)
+    expected_trainable = spec.l1_init == L1_INIT_PRETRAINED_TRAINABLE
+    if model.l1_input.weight.requires_grad != expected_trainable:
+        raise RuntimeError(
+            f"{spec.key}: L1 trainability does not match {spec.l1_init}"
+        )
+    return {
+        **source_meta,
+        "l1_trainable": expected_trainable,
+    }
 
+
+def _l1_drift_diagnostics(
+    model: Exp110Net,
+    spec: RunSpec,
+    frames: Mapping[str, pd.DataFrame],
+    config: Config,
+) -> dict[str, float | bool | None]:
+    if not _is_pretrained_l1_mode(spec):
+        return {
+            "source_available": False,
+            "relative_frobenius_drift": None,
+            "cosine_similarity_to_source": None,
+        }
+
+    source_weight, _ = _source_weight_and_meta(spec, frames, config)
+    source = source_weight.detach().cpu().to(torch.float64).reshape(-1)
+    final = model.l1_input.weight.detach().cpu().to(torch.float64).reshape(-1)
+    delta = final - source
+    source_norm = float(torch.linalg.vector_norm(source).item())
+    final_norm = float(torch.linalg.vector_norm(final).item())
+    denom = max(source_norm * final_norm, 1e-30)
+    cosine = float(torch.dot(source, final).item() / denom)
+    relative = float(
+        torch.linalg.vector_norm(delta).item() / max(source_norm, 1e-30)
+    )
+    return {
+        "source_available": True,
+        "relative_frobenius_drift": relative,
+        "cosine_similarity_to_source": cosine,
+    }
 
 def _valid_mean(values: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
     return exp1021._valid_mean(values, lengths)
@@ -899,8 +959,13 @@ def _train_source_one(
         data.fs,
     ).to(device)
 
+    trainable_parameters = [
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    ]
+    if not trainable_parameters:
+        raise RuntimeError(f"{spec.key}: no trainable parameters")
     optimizer = torch.optim.Adam(
-        model.parameters(),
+        trainable_parameters,
         lr=exp72.LR,
         weight_decay=exp72.WEIGHT_DECAY,
     )
@@ -1378,7 +1443,7 @@ def run_one(
             loss = F.cross_entropy(scores, yd)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                model.parameters(), GRAD_CLIP_NORM
+                trainable_parameters, GRAD_CLIP_NORM
             )
             optimizer.step()
             train_loss_sum += float(loss.detach()) * len(y)
@@ -1446,6 +1511,12 @@ def run_one(
     pd.DataFrame(history).to_csv(artifacts["history"], index=False)
 
     model.load_state_dict(best_state, strict=True)
+    l1_drift = _l1_drift_diagnostics(model, spec, frames, config)
+    if spec.l1_init == L1_INIT_PRETRAINED_FROZEN:
+        if float(l1_drift["relative_frobenius_drift"] or 0.0) > 1e-12:
+            raise RuntimeError(
+                f"{spec.key}: frozen L1 drifted from the source checkpoint"
+            )
     native_metrics: dict[str, dict[str, float]] = {}
     window_metrics: dict[str, dict[str, float]] = {}
     lif_metrics: dict[str, dict[str, float]] = {}
@@ -1503,6 +1574,7 @@ def run_one(
             ),
             "architecture_case": spec.architecture_case,
             "l1_init": spec.l1_init,
+            "l1_trainable": model.l1_input.weight.requires_grad,
             "fusion": spec.fusion,
             "l1_mem_shift": L1_MEM_SHIFT,
             "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(
@@ -1528,6 +1600,7 @@ def run_one(
             "gradient_clip_norm": GRAD_CLIP_NORM,
         },
         "source_l1": source_l1,
+        "l1_drift": l1_drift,
         "split_sample_hashes": split_hashes,
         "best_epoch": best_epoch,
         "stopped_epoch": stopped_epoch,
@@ -1589,6 +1662,19 @@ def _run_row(
             payload["trainable_parameter_count"]
         ),
         "recurrent_param_count": recurrent_param_count(spec["topology"]),
+        "l1_source_available": bool(
+            payload["l1_drift"]["source_available"]
+        ),
+        "l1_relative_frobenius_drift": (
+            np.nan
+            if payload["l1_drift"]["relative_frobenius_drift"] is None
+            else float(payload["l1_drift"]["relative_frobenius_drift"])
+        ),
+        "l1_cosine_similarity_to_source": (
+            np.nan
+            if payload["l1_drift"]["cosine_similarity_to_source"] is None
+            else float(payload["l1_drift"]["cosine_similarity_to_source"])
+        ),
         **{
             key: float(value)
             for key, value in payload["recurrent_diagnostics"].items()
@@ -1680,7 +1766,7 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
             "l1_init": (
                 left[1]
                 if left[1] == right[1]
-                else "pretrained_vs_dynamics"
+                else f"{left[1]}_vs_{right[1]}"
             ),
             "topology": (
                 left[2]
@@ -1703,10 +1789,10 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
             for fusion in FUSION_MODES:
                 for topology in TOPOLOGIES:
                     emit(
-                        "pretrained_minus_dynamics_only",
+                        "pretrained_trainable_minus_dynamics_only",
                         (
                             variant,
-                            L1_INIT_PRETRAINED,
+                            L1_INIT_PRETRAINED_TRAINABLE,
                             topology,
                             fusion,
                             seed,
@@ -1714,6 +1800,40 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
                         (
                             variant,
                             L1_INIT_DYNAMICS_ONLY,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                    )
+                    emit(
+                        "pretrained_frozen_minus_dynamics_only",
+                        (
+                            variant,
+                            L1_INIT_PRETRAINED_FROZEN,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            L1_INIT_DYNAMICS_ONLY,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                    )
+                    emit(
+                        "pretrained_trainable_minus_frozen",
+                        (
+                            variant,
+                            L1_INIT_PRETRAINED_TRAINABLE,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            L1_INIT_PRETRAINED_FROZEN,
                             topology,
                             fusion,
                             seed,
@@ -1815,7 +1935,6 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-
 def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
     indexed = runs.set_index(
         ["variant", "l1_init", "topology", "fusion", "seed"]
@@ -1885,7 +2004,7 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
             for fusion in FUSION_MODES:
                 for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
                     row = {
-                        "interaction": "pretrain_x_recurrence",
+                        "interaction": "pretrained_trainable_x_recurrence",
                         "variant": variant,
                         "l1_init": "pretrained_vs_dynamics",
                         "topology": topology,
@@ -1897,7 +2016,7 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
                             indexed.loc[
                                 (
                                     variant,
-                                    L1_INIT_PRETRAINED,
+                                    L1_INIT_PRETRAINED_TRAINABLE,
                                     topology,
                                     fusion,
                                     seed,
@@ -1907,7 +2026,7 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
                             - indexed.loc[
                                 (
                                     variant,
-                                    L1_INIT_PRETRAINED,
+                                    L1_INIT_PRETRAINED_TRAINABLE,
                                     TOPOLOGY_FF,
                                     fusion,
                                     seed,
@@ -2399,6 +2518,7 @@ def finalize(config: Config) -> dict[str, Any]:
         "fusion_tau_syn_ms": FUSION_TAU_MS,
         "fusion_tau_mem_ms": FUSION_TAU_MS,
         "objective": "valid-length mean time-shared WCCE",
+        "l1_init_modes": list(L1_INIT_MODES),
         "primary_outputs": [
             "d0_source_metrics.csv",
             "run_metrics.csv",
