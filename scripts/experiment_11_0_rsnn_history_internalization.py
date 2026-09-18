@@ -21,16 +21,20 @@ from scripts import experiment_7_2_two_layer_tau_training as exp72
 from scripts import experiment_7_3_training_strategy_decomposition as exp73
 from scripts import experiment_8_1_hidden_quantization_ablation as exp81
 from scripts import experiment_8_1_1_two_layer_mt_factorial as exp811
+from scripts import experiment_9_0_within_user_generalization as exp90
 from scripts import experiment_10_0_airborne_motion_ablation as exp10
+from scripts import experiment_10_1_a2_backbone_coding_supervision as exp101
 from scripts import experiment_10_2_1_l2_membrane_weighted as exp1021
 from scripts import experiment_10_2_2_valid_window_probes as exp1022
 
 
 EXPERIMENT_ID = "experiment_11_0_rsnn_history_internalization"
-PROTOCOL_VERSION = "d1_l1mem2_rsnn_fusion_internalization_v1"
+PROTOCOL_VERSION = "d0_d1_l1mem2_rsnn_fusion_internalization_v2"
 
-VARIANT = exp1021.VARIANT
-ROTATION = exp1021.ROTATION
+VARIANT_ORIGINAL = exp10.VARIANT_ORIGINAL
+VARIANT_POSTENCODE = exp10.VARIANT_POSTENCODE
+VARIANTS = (VARIANT_ORIGINAL, VARIANT_POSTENCODE)
+ROTATION = 0
 MODEL_SEEDS = exp1021.MODEL_SEEDS
 WIDTH = exp1021.WIDTH
 L1_MEM_SHIFT = exp1021.L1_MEM_SHIFT
@@ -65,7 +69,10 @@ COMMUNICATION_AGGREGATIONS = exp1022.COMMUNICATION_AGGREGATIONS
 C_GRID = exp1022.C_GRID
 PROBE_MAX_ITER = exp1022.PROBE_MAX_ITER
 
-EXPECTED_RUNS = len(L1_INIT_MODES) * len(TOPOLOGIES) * len(MODEL_SEEDS)
+EXPECTED_SOURCE_RUNS = len(MODEL_SEEDS)
+EXPECTED_RUNS = (
+    len(VARIANTS) * len(L1_INIT_MODES) * len(TOPOLOGIES) * len(MODEL_SEEDS)
+)
 EXPECTED_PROBES_PER_RUN = len(LAYERS) * (
     len(SUPPORTS) * len(ANALOG_AGGREGATIONS)
     + len(SUPPORTS) * len(COMMUNICATION_AGGREGATIONS)
@@ -73,18 +80,25 @@ EXPECTED_PROBES_PER_RUN = len(LAYERS) * (
 
 
 @dataclass(frozen=True)
+class SourceSpec:
+    variant: str
+    seed: int
+
+    @property
+    def key(self) -> str:
+        return f"{self.variant}__l1mem2__l2mem1__seed{self.seed}"
+
+
+@dataclass(frozen=True)
 class RunSpec:
+    variant: str
     l1_init: str
     topology: str
     seed: int
 
     @property
     def key(self) -> str:
-        return f"{self.l1_init}__{self.topology}__seed{self.seed}"
-
-    @property
-    def variant(self) -> str:
-        return VARIANT
+        return f"{self.variant}__{self.l1_init}__{self.topology}__seed{self.seed}"
 
     @property
     def rotation(self) -> int:
@@ -115,7 +129,7 @@ def results_dir(repo_root: Path) -> Path:
     )
 
 
-def source_results_dir(repo_root: Path) -> Path:
+def d1_source_results_dir(repo_root: Path) -> Path:
     return exp1021.results_dir(repo_root)
 
 
@@ -123,35 +137,30 @@ def source_probe_results_dir(repo_root: Path) -> Path:
     return exp1022.results_dir(repo_root)
 
 
-def source_config(config: Config) -> exp1021.Config:
-    return exp1021.Config(
-        repo_root=config.repo_root,
-        results_dir=source_results_dir(config.repo_root),
-        device=config.device,
-        threads=config.threads,
-        batch_size=config.batch_size,
-        max_epochs=exp1021.MAX_EPOCHS,
-    )
-
-
-def source_spec(seed: int) -> exp1021.RunSpec:
-    return exp1021.RunSpec(exp1021.CODING_BINARY, 1, seed)
-
-
-def source_checkpoint_path(config: Config, seed: int) -> Path:
-    return exp1021._run_artifacts(source_config(config), source_spec(seed))["checkpoint"]
+def source_specs() -> list[SourceSpec]:
+    return [SourceSpec(VARIANT_ORIGINAL, seed) for seed in MODEL_SEEDS]
 
 
 def run_specs() -> list[RunSpec]:
     return [
-        RunSpec(l1_init, topology, seed)
+        RunSpec(variant, l1_init, topology, seed)
+        for variant in VARIANTS
         for l1_init in L1_INIT_MODES
         for topology in TOPOLOGIES
         for seed in MODEL_SEEDS
     ]
 
 
+def validate_source_spec(spec: SourceSpec) -> None:
+    if spec.variant != VARIANT_ORIGINAL:
+        raise ValueError(spec.variant)
+    if spec.seed not in MODEL_SEEDS:
+        raise ValueError(spec.seed)
+
+
 def validate_spec(spec: RunSpec) -> None:
+    if spec.variant not in VARIANTS:
+        raise ValueError(spec.variant)
     if spec.l1_init not in L1_INIT_MODES:
         raise ValueError(spec.l1_init)
     if spec.topology not in TOPOLOGIES:
@@ -185,6 +194,18 @@ def _path(root: Path, kind: str, key: str, suffix: str) -> Path:
     return root / kind / f"{key}{suffix}"
 
 
+def _fold_assignment_path(config: Config) -> Path:
+    return config.results_dir / "split" / "cross_user_fold_assignment.csv"
+
+
+def _rotation_manifest_path(config: Config) -> Path:
+    return config.results_dir / "split" / f"rotation{ROTATION}.csv"
+
+
+def _source_artifact(config: Config, spec: SourceSpec) -> Path:
+    return _path(config.results_dir, "source_checkpoints", spec.key, ".pt")
+
+
 def _run_artifacts(config: Config, spec: RunSpec) -> dict[str, Path]:
     return {
         "checkpoint": _path(config.results_dir, "checkpoints", spec.key, ".pt"),
@@ -194,7 +215,11 @@ def _run_artifacts(config: Config, spec: RunSpec) -> dict[str, Path]:
     }
 
 
-def _load_manifest(path: Path, experiment_id: str, protocol_version: str) -> dict[str, Any]:
+def _load_manifest(
+    path: Path,
+    experiment_id: str,
+    protocol_version: str,
+) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(path)
     manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -212,15 +237,100 @@ def _load_manifest(path: Path, experiment_id: str, protocol_version: str) -> dic
     return manifest
 
 
-def _prepare_data(
+def _prepare_variant_data(
     config: Config,
+    variant: str,
 ) -> tuple[exp3.Data, dict[str, pd.DataFrame], pd.DataFrame]:
-    return exp1021._prepare_data(source_config(config))
+    if variant not in VARIANTS:
+        raise ValueError(variant)
+    loaded, manifest, labels = exp101._load_variant_manifest(
+        config.repo_root, variant
+    )
+    if not _fold_assignment_path(config).exists():
+        raise FileNotFoundError(
+            f"Missing {_fold_assignment_path(config)}; run prepare first"
+        )
+    saved = pd.read_csv(
+        _fold_assignment_path(config),
+        usecols=["sample_id", "cv_fold"],
+    )
+    assignment = manifest.merge(
+        saved,
+        on="sample_id",
+        how="inner",
+        validate="one_to_one",
+    )
+    if len(assignment) != len(manifest):
+        raise RuntimeError(
+            f"{variant}: prepared fold assignment does not match dataset"
+        )
+    assignment["cv_fold"] = assignment.cv_fold.astype(int)
+    split_manifest = exp90._apply_rotation(assignment, ROTATION)
+    data, frames = exp90._to_data(loaded, split_manifest, labels)
+    return data, frames, split_manifest
+
+
+def _d1_source_checkpoint_path(config: Config, seed: int) -> Path:
+    source_cfg = exp1021.Config(
+        repo_root=config.repo_root,
+        results_dir=d1_source_results_dir(config.repo_root),
+        device=config.device,
+        threads=config.threads,
+        batch_size=config.batch_size,
+        max_epochs=exp1021.MAX_EPOCHS,
+    )
+    spec = exp1021.RunSpec(exp1021.CODING_BINARY, 1, seed)
+    return exp1021._run_artifacts(source_cfg, spec)["checkpoint"]
+
+
+def _d1_source_spec(seed: int) -> exp1021.RunSpec:
+    return exp1021.RunSpec(exp1021.CODING_BINARY, 1, seed)
 
 
 def prepare_all(config: Config) -> dict[str, Any]:
-    source_manifest = _load_manifest(
-        source_results_dir(config.repo_root) / "manifest.json",
+    manifests: dict[str, pd.DataFrame] = {}
+    labels_by_variant: dict[str, tuple[str, ...]] = {}
+    for variant in VARIANTS:
+        loaded, manifest, labels = exp101._load_variant_manifest(
+            config.repo_root, variant
+        )
+        manifests[variant] = manifest
+        labels_by_variant[variant] = labels
+        del loaded
+
+    exp10._assert_paired_geometry(
+        manifests[VARIANT_ORIGINAL],
+        manifests[VARIANT_POSTENCODE],
+        reference_name=VARIANT_ORIGINAL,
+        candidate_name=VARIANT_POSTENCODE,
+    )
+    if labels_by_variant[VARIANT_ORIGINAL] != labels_by_variant[VARIANT_POSTENCODE]:
+        raise RuntimeError("D0/D1 class mapping mismatch")
+
+    config.results_dir.mkdir(parents=True, exist_ok=True)
+    (config.results_dir / "split").mkdir(parents=True, exist_ok=True)
+
+    reference = manifests[VARIANT_ORIGINAL]
+    canonical = (
+        reference.drop(columns=["pi", "si"])
+        .sort_values("sample_id")
+        .reset_index(drop=True)
+    )
+    canonical.to_csv(
+        config.results_dir / "canonical_sample_manifest.csv",
+        index=False,
+    )
+
+    assignment = exp90._assign_cross_user_folds(reference)
+    assignment.to_csv(_fold_assignment_path(config), index=False)
+    split_manifest = exp90._apply_rotation(assignment, ROTATION)
+    split_manifest.drop(columns=["pi", "si"]).to_csv(
+        _rotation_manifest_path(config),
+        index=False,
+    )
+
+    d1_source_manifest = _load_manifest(
+        d1_source_results_dir(config.repo_root) / "manifest.json",
         exp1021.EXPERIMENT_ID,
         exp1021.PROTOCOL_VERSION,
     )
@@ -230,68 +340,92 @@ def prepare_all(config: Config) -> dict[str, Any]:
         exp1022.PROTOCOL_VERSION,
     )
 
-    data, frames, split_manifest = _prepare_data(config)
-    split_hashes = exp1021._split_hashes(frames)
+    split_hashes_by_variant: dict[str, dict[str, str]] = {}
+    split_users_by_variant: dict[str, dict[str, list[str]]] = {}
+    split_samples_by_variant: dict[str, dict[str, int]] = {}
+    for variant in VARIANTS:
+        _, frames, _ = _prepare_variant_data(config, variant)
+        split_hashes_by_variant[variant] = exp1021._split_hashes(frames)
+        split_users_by_variant[variant] = {
+            split: sorted(frames[split].user.astype(str).unique().tolist())
+            for split in SPLITS
+        }
+        split_samples_by_variant[variant] = {
+            split: int(len(frames[split])) for split in SPLITS
+        }
 
-    source_checkpoints: dict[str, str] = {}
+    if (
+        split_hashes_by_variant[VARIANT_ORIGINAL]
+        != split_hashes_by_variant[VARIANT_POSTENCODE]
+    ):
+        raise RuntimeError("D0/D1 split geometry hashes are not paired")
+
+    d1_sources: dict[str, str] = {}
     for seed in MODEL_SEEDS:
-        path = source_checkpoint_path(config, seed)
+        path = _d1_source_checkpoint_path(config, seed)
         if not path.exists():
             raise FileNotFoundError(
-                f"Missing seed-matched Exp10.2.1 source checkpoint: {path}"
+                f"Missing seed-matched D1 Exp10.2.1 source checkpoint: {path}"
             )
         checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        expected_spec = asdict(source_spec(seed))
         if checkpoint.get("experiment_id") != exp1021.EXPERIMENT_ID:
             raise RuntimeError(f"{path}: source experiment mismatch")
         if checkpoint.get("protocol_version") != exp1021.PROTOCOL_VERSION:
             raise RuntimeError(f"{path}: source protocol mismatch")
-        if checkpoint.get("spec") != expected_spec:
+        if checkpoint.get("spec") != asdict(_d1_source_spec(seed)):
             raise RuntimeError(f"{path}: source spec mismatch")
-        if checkpoint.get("split_sample_hashes") != split_hashes:
-            raise RuntimeError(f"{path}: split geometry mismatch")
-        source_checkpoints[str(seed)] = str(path.relative_to(config.repo_root))
+        if (
+            checkpoint.get("split_sample_hashes")
+            != split_hashes_by_variant[VARIANT_POSTENCODE]
+        ):
+            raise RuntimeError(f"{path}: source split geometry mismatch")
+        d1_sources[str(seed)] = str(path.relative_to(config.repo_root))
 
     audit = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "question": (
-            "Can recurrent SNN state internalize the temporal ordering exposed by "
-            "external Fixed250 probes so that one time-shared 128x12 weight matrix "
-            "can decode a history-aware fusion representation?"
+            "Can RSNN context internalize the Fixed250 temporal information for "
+            "both D0 original and D1 post-encode-mask inputs, and does the D1 "
+            "preprocessing advantage remain after recurrent history modeling?"
         ),
-        "dataset": VARIANT,
-        "rotation": ROTATION,
-        "source_exp10_2_1_manifest": source_manifest,
-        "source_exp10_2_2_manifest": probe_manifest,
-        "source_checkpoints": source_checkpoints,
-        "source_condition": "binary__l1mem2__l2mem1, seed matched",
-        "split_sample_hashes": split_hashes,
-        "split_users": {
-            split: sorted(frames[split].user.astype(str).unique().tolist())
-            for split in SPLITS
+        "variants": list(VARIANTS),
+        "variant_definitions": {
+            VARIANT_ORIGINAL: "D0 = Encoder(a)",
+            VARIANT_POSTENCODE: "D1 = m * Encoder(a)",
         },
-        "split_samples": {split: int(len(frames[split])) for split in SPLITS},
-        "labels": list(data.labels),
+        "rotation": ROTATION,
+        "d1_source_manifest": d1_source_manifest,
+        "exp10_2_2_probe_manifest": probe_manifest,
+        "d1_source_checkpoints": d1_sources,
+        "d0_source_training": {
+            "required_runs": EXPECTED_SOURCE_RUNS,
+            "model": "Exp10.2.1 binary, L1 mem2, L2 mem1, WCCE",
+            "reason": (
+                "No existing D0 checkpoint matches the D1 pretrained-source "
+                "dynamics, so Exp11.0 trains seed-matched D0 sources first."
+            ),
+        },
+        "split_hashes_by_variant": split_hashes_by_variant,
+        "split_users_by_variant": split_users_by_variant,
+        "split_samples_by_variant": split_samples_by_variant,
+        "labels": list(labels_by_variant[VARIANT_ORIGINAL]),
         "architecture": "30 -> L1(128) -> RSNN(128) -> Fusion(128) -> Linear(12)",
         "l1_init_modes": list(L1_INIT_MODES),
-        "l1_pretrained_contract": (
-            "pretrained_input copies only hidden_linears.0.weight from the "
-            "seed-matched Exp10.2.1 binary/l1mem2/l2mem1 best checkpoint; "
-            "the copied weight remains trainable"
+        "pretrained_input_contract": (
+            "D0 copies input->L1 weight from an Exp11.0-trained D0 source; "
+            "D1 copies input->L1 weight from the seed-matched Exp10.2.1 "
+            "binary/l1mem2/l2mem1 best checkpoint; copied weights remain trainable."
         ),
         "l1_mem_shift": L1_MEM_SHIFT,
-        "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(L1_MEM_SHIFT, data.fs),
+        "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(L1_MEM_SHIFT),
         "l1_synaptic_shifts": list(L1_SYN_SHIFTS),
-        "rsnn_width": WIDTH,
         "rsnn_topologies": list(TOPOLOGIES),
         "rsnn_tau_syn_ms": CONTEXT_TAU_MS,
         "rsnn_tau_mem_ms": CONTEXT_TAU_MS,
-        "fusion_width": WIDTH,
-        "fusion_recurrent": False,
         "fusion_tau_syn_ms": FUSION_TAU_MS,
         "fusion_tau_mem_ms": FUSION_TAU_MS,
-        "fusion_inputs": ["L1 binary local spikes", "RSNN binary context spikes"],
+        "fusion_recurrent": False,
         "objective": "valid-length mean time-shared WCCE only",
         "output": "single shared bias-free 128x12 Linear",
         "communication": "binary spikes in L1, RSNN, and Fusion",
@@ -301,21 +435,20 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "probe_states": [PROBE_ANALOG_STATE, PROBE_COMMUNICATION_STATE],
         "probe_count_per_run": EXPECTED_PROBES_PER_RUN,
         "model_seeds": list(MODEL_SEEDS),
-        "expected_runs": EXPECTED_RUNS,
+        "expected_source_runs": EXPECTED_SOURCE_RUNS,
+        "expected_main_runs": EXPECTED_RUNS,
         "statistical_scope": (
             "one locked cross-user split; seeds 11/23/37 are paired optimization "
             "replicates, not independent user splits"
         ),
-        "primary_mechanism_endpoint": (
-            "communication Fixed250-minus-whole probe gap should shrink from L1 "
-            "to Fusion while Fusion whole/native BA rises"
-        ),
+        "primary_contrasts": [
+            "D1 minus D0 at identical L1-init/topology/seed",
+            "diagonal minus ff within each dataset/init",
+            "dense minus ff within each dataset/init",
+            "pretrained_input minus dynamics_only within each dataset/topology",
+        ],
     }
-    config.results_dir.mkdir(parents=True, exist_ok=True)
     _save_json(config.results_dir / "audit.json", audit)
-    split_manifest.drop(columns=["pi", "si"], errors="ignore").to_csv(
-        config.results_dir / "rotation0_sample_manifest.csv", index=False
-    )
     return audit
 
 
@@ -325,7 +458,7 @@ class ZeroRecurrent(nn.Module):
 
 
 class DiagonalRecurrent(nn.Module):
-    """Trainable self recurrence with no cross-neuron mixing."""
+    """Trainable self recurrence without cross-neuron mixing."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -336,7 +469,7 @@ class DiagonalRecurrent(nn.Module):
 
 
 class Exp110Net(nn.Module):
-    """Local L1 -> recurrent context -> feed-forward fusion -> shared Linear."""
+    """L1 local representation -> recurrent context -> feed-forward fusion."""
 
     def __init__(
         self,
@@ -476,7 +609,7 @@ def _reset_linear(module: nn.Linear, seed: int, role: str) -> None:
 
 
 def _initialize_paired(model: Exp110Net, spec: RunSpec) -> None:
-    """Match all shared initial weights across the six conditions of one seed."""
+    """Common random layers are paired across D0/D1 and L1-init conditions."""
     for module, role in (
         (model.l1_input, "exp11_l1_input_init"),
         (model.rsnn_input, "exp11_rsnn_input_init"),
@@ -499,6 +632,58 @@ def _initialize_paired(model: Exp110Net, spec: RunSpec) -> None:
             model.recurrent.weight.copy_(torch.diagonal(paired_weight))
 
 
+def _source_weight_and_meta(
+    spec: RunSpec,
+    frames: Mapping[str, pd.DataFrame],
+    config: Config,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    split_hashes = exp1021._split_hashes(frames)
+
+    if spec.variant == VARIANT_POSTENCODE:
+        path = _d1_source_checkpoint_path(config, spec.seed)
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        if checkpoint.get("experiment_id") != exp1021.EXPERIMENT_ID:
+            raise RuntimeError(f"{path}: D1 source experiment mismatch")
+        if checkpoint.get("protocol_version") != exp1021.PROTOCOL_VERSION:
+            raise RuntimeError(f"{path}: D1 source protocol mismatch")
+        if checkpoint.get("spec") != asdict(_d1_source_spec(spec.seed)):
+            raise RuntimeError(f"{path}: D1 source spec mismatch")
+        if checkpoint.get("split_sample_hashes") != split_hashes:
+            raise RuntimeError(f"{path}: D1 source split mismatch")
+        source_kind = "existing_exp10_2_1"
+    elif spec.variant == VARIANT_ORIGINAL:
+        source_spec = SourceSpec(VARIANT_ORIGINAL, spec.seed)
+        path = _source_artifact(config, source_spec)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Missing matched D0 source checkpoint: {path}"
+            )
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+        if checkpoint.get("experiment_id") != EXPERIMENT_ID:
+            raise RuntimeError(f"{path}: D0 source experiment mismatch")
+        if checkpoint.get("protocol_version") != PROTOCOL_VERSION:
+            raise RuntimeError(f"{path}: D0 source protocol mismatch")
+        if checkpoint.get("source_spec") != asdict(source_spec):
+            raise RuntimeError(f"{path}: D0 source spec mismatch")
+        if checkpoint.get("split_sample_hashes") != split_hashes:
+            raise RuntimeError(f"{path}: D0 source split mismatch")
+        source_kind = "exp11_matched_d0_source"
+    else:
+        raise ValueError(spec.variant)
+
+    state = checkpoint.get("model_state_dict")
+    if not isinstance(state, dict):
+        raise RuntimeError(f"{path}: missing model_state_dict")
+    source_weight = state.get("hidden_linears.0.weight")
+    if source_weight is None:
+        raise RuntimeError(f"{path}: missing hidden_linears.0.weight")
+    return source_weight, {
+        "source_kind": source_kind,
+        "checkpoint": str(path.relative_to(config.repo_root)),
+        "best_epoch": int(checkpoint.get("best_epoch", -1)),
+    }
+
+
 def _load_pretrained_l1(
     model: Exp110Net,
     spec: RunSpec,
@@ -508,29 +693,13 @@ def _load_pretrained_l1(
     if spec.l1_init == L1_INIT_DYNAMICS_ONLY:
         return None
 
-    path = source_checkpoint_path(config, spec.seed)
-    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    expected_spec = asdict(source_spec(spec.seed))
-    if checkpoint.get("experiment_id") != exp1021.EXPERIMENT_ID:
-        raise RuntimeError(f"{path}: source experiment mismatch")
-    if checkpoint.get("protocol_version") != exp1021.PROTOCOL_VERSION:
-        raise RuntimeError(f"{path}: source protocol mismatch")
-    if checkpoint.get("spec") != expected_spec:
-        raise RuntimeError(f"{path}: source spec mismatch")
-    split_hashes = exp1021._split_hashes(frames)
-    if checkpoint.get("split_sample_hashes") != split_hashes:
-        raise RuntimeError(f"{path}: source split geometry mismatch")
-
-    state = checkpoint.get("model_state_dict")
-    if not isinstance(state, dict):
-        raise RuntimeError(f"{path}: missing model_state_dict")
-    source_weight = state.get("hidden_linears.0.weight")
-    if source_weight is None:
-        raise RuntimeError(f"{path}: missing hidden_linears.0.weight")
+    source_weight, source_meta = _source_weight_and_meta(
+        spec, frames, config
+    )
     if tuple(source_weight.shape) != tuple(model.l1_input.weight.shape):
         raise RuntimeError(
-            f"{path}: L1 weight shape {tuple(source_weight.shape)} does not match "
-            f"{tuple(model.l1_input.weight.shape)}"
+            f"{spec.key}: source L1 shape {tuple(source_weight.shape)} "
+            f"does not match {tuple(model.l1_input.weight.shape)}"
         )
     with torch.no_grad():
         model.l1_input.weight.copy_(
@@ -538,11 +707,7 @@ def _load_pretrained_l1(
         )
     if not model.l1_input.weight.requires_grad:
         raise RuntimeError("Pretrained L1 input weight must remain trainable")
-    return {
-        "checkpoint": str(path.relative_to(config.repo_root)),
-        "best_epoch": int(checkpoint.get("best_epoch", -1)),
-        "source_spec": expected_spec,
-    }
+    return source_meta
 
 
 def _valid_mean(values: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
@@ -554,13 +719,11 @@ def _native_scores(
     X: torch.Tensor,
     lengths: torch.Tensor,
 ) -> torch.Tensor:
-    evidence = model.forward_trajectory(X)["fusion_evidence"]
-    return _valid_mean(evidence, lengths)
+    return _valid_mean(model.forward_trajectory(X)["fusion_evidence"], lengths)
 
 
 def _window_scores(model: Exp110Net, X: torch.Tensor) -> torch.Tensor:
-    evidence = model.forward_trajectory(X)["fusion_evidence"]
-    return evidence.mean(dim=1)
+    return model.forward_trajectory(X)["fusion_evidence"].mean(dim=1)
 
 
 def _evaluate_scores(
@@ -622,6 +785,132 @@ def _evaluate_lif_transfer(
     return exp10._classification_metrics(
         np.concatenate(ys), np.concatenate(preds)
     )
+
+
+def _train_source_one(
+    spec: SourceSpec,
+    config: Config,
+    force: bool = False,
+) -> dict[str, Any]:
+    validate_source_spec(spec)
+    destination = _source_artifact(config, spec)
+    if destination.exists() and not force:
+        return torch.load(destination, map_location="cpu", weights_only=False)
+
+    data, frames, _ = _prepare_variant_data(config, spec.variant)
+    split_hashes = exp1021._split_hashes(frames)
+    torch.set_num_threads(config.threads)
+    device = torch.device(config.device)
+
+    source_run_spec = _d1_source_spec(spec.seed)
+    model_init_seed = exp73._e2e_pair_seed(spec.seed, "model_init")
+    exp3.seed_all(model_init_seed)
+    model = exp1021.Exp1021Net(
+        source_run_spec,
+        len(data.labels),
+        data.fs,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=exp72.LR,
+        weight_decay=exp72.WEIGHT_DECAY,
+    )
+    train_loader = exp73._raw_loaders(
+        data, spec.seed, config.batch_size, True
+    )["train"]
+    eval_loaders = exp73._raw_loaders(
+        data, spec.seed, config.batch_size, False
+    )
+
+    best_state: dict[str, torch.Tensor] | None = None
+    best_epoch = -1
+    best_ba = -1.0
+    best_loss = float("inf")
+    stopped_epoch = config.max_epochs
+    history: list[dict[str, float]] = []
+
+    for epoch in range(1, config.max_epochs + 1):
+        model.train()
+        train_loss_sum = 0.0
+        n_total = 0
+        for X, y, lengths in train_loader:
+            Xd = X.to(device=device, dtype=torch.float32)
+            yd = y.to(device)
+            ld = lengths.to(device=device, dtype=torch.long)
+            optimizer.zero_grad(set_to_none=True)
+            scores = exp1021._native_scores(model, Xd, ld)
+            loss = F.cross_entropy(scores, yd)
+            loss.backward()
+            optimizer.step()
+            train_loss_sum += float(loss.detach()) * len(y)
+            n_total += len(y)
+
+        train_metrics, _, _ = exp1021._evaluate_native(
+            model, eval_loaders["train"], device
+        )
+        val_metrics, _, _ = exp1021._evaluate_native(
+            model, eval_loaders["val"], device
+        )
+        history.append(
+            {
+                "epoch": float(epoch),
+                "train_ba": float(train_metrics["balanced_accuracy"]),
+                "val_ba": float(val_metrics["balanced_accuracy"]),
+                "train_loss": train_loss_sum / max(n_total, 1),
+                "val_loss": float(val_metrics["objective_loss"]),
+            }
+        )
+        if exp73._checkpoint_improved(val_metrics, best_ba, best_loss):
+            best_ba = float(val_metrics["balanced_accuracy"])
+            best_loss = float(val_metrics["objective_loss"])
+            best_epoch = epoch
+            best_state = {
+                key: value.detach().cpu().clone()
+                for key, value in model.state_dict().items()
+            }
+        if (
+            epoch >= MIN_EPOCHS
+            and best_epoch > 0
+            and epoch - best_epoch >= PATIENCE
+        ):
+            stopped_epoch = epoch
+            break
+
+    if best_state is None:
+        raise RuntimeError(f"No D0 source checkpoint selected for {spec.key}")
+
+    model.load_state_dict(best_state, strict=True)
+    source_metrics: dict[str, dict[str, float]] = {}
+    for split in SPLITS:
+        metrics, _, _ = exp1021._evaluate_native(
+            model, eval_loaders[split], device
+        )
+        source_metrics[split] = metrics
+
+    payload = {
+        "experiment_id": EXPERIMENT_ID,
+        "protocol_version": PROTOCOL_VERSION,
+        "source_stage": True,
+        "source_spec": asdict(spec),
+        "matched_d1_source_spec": asdict(source_run_spec),
+        "model_init_seed": int(model_init_seed),
+        "split_sample_hashes": split_hashes,
+        "best_epoch": best_epoch,
+        "stopped_epoch": stopped_epoch,
+        "best_val_ba": best_ba,
+        "best_val_objective_loss": best_loss,
+        "source_metrics": source_metrics,
+        "model_state_dict": best_state,
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(payload, destination)
+    history_path = _path(
+        config.results_dir, "source_histories", spec.key, ".csv"
+    )
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(history).to_csv(history_path, index=False)
+    return payload
 
 
 def probe_names() -> tuple[str, ...]:
@@ -843,6 +1132,7 @@ def _collect_probe_features_and_activity(
 
 
 def _probe_seed(spec: RunSpec, name: str) -> int:
+    # Exclude variant so D0/D1 probes share paired solver randomness.
     return int(
         exp3.dseed(
             spec.seed,
@@ -861,7 +1151,6 @@ def _fit_probes(
     labels: dict[str, np.ndarray],
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-
     for name in probe_names():
         train_x = features["train"][name].astype(np.float64, copy=False)
         val_x = features["val"][name].astype(np.float64, copy=False)
@@ -900,7 +1189,7 @@ def _fit_probes(
                 best = (val_ba, float(C), classifier)
 
         if best is None:
-            raise RuntimeError(f"No probe candidate selected for {spec.key}/{name}")
+            raise RuntimeError(f"No probe candidate for {spec.key}/{name}")
 
         selected_val_ba, selected_C, classifier = best
         metrics = {
@@ -914,6 +1203,7 @@ def _fit_probes(
         rows.append(
             {
                 "probe": name,
+                "variant": spec.variant,
                 "l1_init": spec.l1_init,
                 "topology": spec.topology,
                 "seed": spec.seed,
@@ -956,7 +1246,7 @@ def run_one(
     if not force and all(path.exists() for path in artifacts.values()):
         return json.loads(artifacts["evaluation"].read_text(encoding="utf-8"))
 
-    data, frames, _ = _prepare_data(config)
+    data, frames, _ = _prepare_variant_data(config, spec.variant)
     split_hashes = exp1021._split_hashes(frames)
     torch.set_num_threads(config.threads)
     device = torch.device(config.device)
@@ -1026,9 +1316,7 @@ def run_one(
             }
         )
 
-        if exp73._checkpoint_improved(
-            val_metrics, best_ba, best_loss
-        ):
+        if exp73._checkpoint_improved(val_metrics, best_ba, best_loss):
             best_ba = float(val_metrics["balanced_accuracy"])
             best_loss = float(val_metrics["objective_loss"])
             best_epoch = epoch
@@ -1113,7 +1401,7 @@ def run_one(
         "protocol_version": PROTOCOL_VERSION,
         "spec": asdict(spec),
         "contract": {
-            "dataset": VARIANT,
+            "dataset": spec.variant,
             "rotation": ROTATION,
             "architecture": (
                 "30->L1(128)->RSNN(128)->Fusion(128)->Linear(12)"
@@ -1162,6 +1450,7 @@ def _run_row(
 ) -> dict[str, Any]:
     spec = payload["spec"]
     row: dict[str, Any] = {
+        "variant": spec["variant"],
         "l1_init": spec["l1_init"],
         "topology": spec["topology"],
         "seed": int(spec["seed"]),
@@ -1258,85 +1547,169 @@ def _contrast_metrics() -> list[str]:
 
 
 def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
-    indexed = runs.set_index(["l1_init", "topology", "seed"])
+    indexed = runs.set_index(["variant", "l1_init", "topology", "seed"])
     rows: list[dict[str, Any]] = []
 
     def emit(
         contrast: str,
-        left: tuple[str, str, int],
-        right: tuple[str, str, int],
+        left: tuple[str, str, str, int],
+        right: tuple[str, str, str, int],
     ) -> None:
         lrow = indexed.loc[left]
         rrow = indexed.loc[right]
         row: dict[str, Any] = {
             "contrast": contrast,
+            "variant": (
+                left[0] if left[0] == right[0] else "d1_vs_d0"
+            ),
             "l1_init": (
-                left[0] if left[0] == right[0] else "pretrained_vs_dynamics"
+                left[1] if left[1] == right[1] else "pretrained_vs_dynamics"
             ),
             "topology": (
-                left[1] if left[1] == right[1] else f"{left[1]}_vs_{right[1]}"
+                left[2] if left[2] == right[2] else f"{left[2]}_vs_{right[2]}"
             ),
-            "seed": left[2],
+            "seed": left[3],
         }
         for metric in _contrast_metrics():
             row[f"delta_{metric}"] = float(lrow[metric] - rrow[metric])
         rows.append(row)
 
     for seed in MODEL_SEEDS:
-        for topology in TOPOLOGIES:
-            emit(
-                "pretrained_minus_dynamics_only",
-                (L1_INIT_PRETRAINED, topology, seed),
-                (L1_INIT_DYNAMICS_ONLY, topology, seed),
-            )
+        for variant in VARIANTS:
+            for topology in TOPOLOGIES:
+                emit(
+                    "pretrained_minus_dynamics_only",
+                    (variant, L1_INIT_PRETRAINED, topology, seed),
+                    (variant, L1_INIT_DYNAMICS_ONLY, topology, seed),
+                )
+            for l1_init in L1_INIT_MODES:
+                emit(
+                    "diagonal_minus_ff",
+                    (variant, l1_init, TOPOLOGY_DIAGONAL, seed),
+                    (variant, l1_init, TOPOLOGY_FF, seed),
+                )
+                emit(
+                    "dense_minus_ff",
+                    (variant, l1_init, TOPOLOGY_DENSE, seed),
+                    (variant, l1_init, TOPOLOGY_FF, seed),
+                )
+                emit(
+                    "dense_minus_diagonal",
+                    (variant, l1_init, TOPOLOGY_DENSE, seed),
+                    (variant, l1_init, TOPOLOGY_DIAGONAL, seed),
+                )
+
         for l1_init in L1_INIT_MODES:
-            emit(
-                "diagonal_minus_ff",
-                (l1_init, TOPOLOGY_DIAGONAL, seed),
-                (l1_init, TOPOLOGY_FF, seed),
-            )
-            emit(
-                "dense_minus_ff",
-                (l1_init, TOPOLOGY_DENSE, seed),
-                (l1_init, TOPOLOGY_FF, seed),
-            )
-            emit(
-                "dense_minus_diagonal",
-                (l1_init, TOPOLOGY_DENSE, seed),
-                (l1_init, TOPOLOGY_DIAGONAL, seed),
-            )
+            for topology in TOPOLOGIES:
+                emit(
+                    "d1_minus_d0",
+                    (
+                        VARIANT_POSTENCODE,
+                        l1_init,
+                        topology,
+                        seed,
+                    ),
+                    (
+                        VARIANT_ORIGINAL,
+                        l1_init,
+                        topology,
+                        seed,
+                    ),
+                )
+
     return pd.DataFrame(rows)
 
 
 def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
-    indexed = runs.set_index(["l1_init", "topology", "seed"])
+    indexed = runs.set_index(["variant", "l1_init", "topology", "seed"])
     rows: list[dict[str, Any]] = []
+
     for seed in MODEL_SEEDS:
-        for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
-            row: dict[str, Any] = {
-                "interaction": f"pretrain_x_{topology}_vs_ff",
-                "topology": topology,
-                "seed": seed,
-            }
-            for metric in _contrast_metrics():
-                pretrain_rec = float(
-                    indexed.loc[
-                        (L1_INIT_PRETRAINED, topology, seed), metric
-                    ]
-                    - indexed.loc[
-                        (L1_INIT_PRETRAINED, TOPOLOGY_FF, seed), metric
-                    ]
-                )
-                random_rec = float(
-                    indexed.loc[
-                        (L1_INIT_DYNAMICS_ONLY, topology, seed), metric
-                    ]
-                    - indexed.loc[
-                        (L1_INIT_DYNAMICS_ONLY, TOPOLOGY_FF, seed), metric
-                    ]
-                )
-                row[f"interaction_{metric}"] = pretrain_rec - random_rec
-            rows.append(row)
+        for variant in VARIANTS:
+            for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+                row: dict[str, Any] = {
+                    "interaction": f"pretrain_x_{topology}_vs_ff",
+                    "variant": variant,
+                    "l1_init": "interaction",
+                    "topology": topology,
+                    "seed": seed,
+                }
+                for metric in _contrast_metrics():
+                    pretrain_rec = float(
+                        indexed.loc[
+                            (variant, L1_INIT_PRETRAINED, topology, seed), metric
+                        ]
+                        - indexed.loc[
+                            (variant, L1_INIT_PRETRAINED, TOPOLOGY_FF, seed),
+                            metric,
+                        ]
+                    )
+                    random_rec = float(
+                        indexed.loc[
+                            (variant, L1_INIT_DYNAMICS_ONLY, topology, seed),
+                            metric,
+                        ]
+                        - indexed.loc[
+                            (variant, L1_INIT_DYNAMICS_ONLY, TOPOLOGY_FF, seed),
+                            metric,
+                        ]
+                    )
+                    row[f"interaction_{metric}"] = pretrain_rec - random_rec
+                rows.append(row)
+
+        for l1_init in L1_INIT_MODES:
+            for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+                row = {
+                    "interaction": f"d1_x_{topology}_vs_ff",
+                    "variant": "d1_vs_d0",
+                    "l1_init": l1_init,
+                    "topology": topology,
+                    "seed": seed,
+                }
+                for metric in _contrast_metrics():
+                    d1_rec = float(
+                        indexed.loc[
+                            (
+                                VARIANT_POSTENCODE,
+                                l1_init,
+                                topology,
+                                seed,
+                            ),
+                            metric,
+                        ]
+                        - indexed.loc[
+                            (
+                                VARIANT_POSTENCODE,
+                                l1_init,
+                                TOPOLOGY_FF,
+                                seed,
+                            ),
+                            metric,
+                        ]
+                    )
+                    d0_rec = float(
+                        indexed.loc[
+                            (
+                                VARIANT_ORIGINAL,
+                                l1_init,
+                                topology,
+                                seed,
+                            ),
+                            metric,
+                        ]
+                        - indexed.loc[
+                            (
+                                VARIANT_ORIGINAL,
+                                l1_init,
+                                TOPOLOGY_FF,
+                                seed,
+                            ),
+                            metric,
+                        ]
+                    )
+                    row[f"interaction_{metric}"] = d1_rec - d0_rec
+                rows.append(row)
+
     return pd.DataFrame(rows)
 
 
@@ -1348,6 +1721,7 @@ def _temporal_gap_rows(runs: pd.DataFrame) -> pd.DataFrame:
                 prefix = f"{layer}_comm_{support}"
                 rows.append(
                     {
+                        "variant": source["variant"],
                         "l1_init": source["l1_init"],
                         "topology": source["topology"],
                         "seed": source["seed"],
@@ -1355,15 +1729,24 @@ def _temporal_gap_rows(runs: pd.DataFrame) -> pd.DataFrame:
                         "support": support,
                         "fixed250_ba": source[f"{prefix}_fixed250_ba"],
                         "whole_ba": source[f"{prefix}_whole_ba"],
-                        "temporal_gap": source[
-                            f"{prefix}_temporal_gap"
-                        ],
+                        "temporal_gap": source[f"{prefix}_temporal_gap"],
                     }
                 )
     return pd.DataFrame(rows)
 
 
 def finalize(config: Config) -> dict[str, Any]:
+    missing_sources = [
+        str(_source_artifact(config, spec))
+        for spec in source_specs()
+        if not _source_artifact(config, spec).exists()
+    ]
+    if missing_sources:
+        raise FileNotFoundError(
+            "Exp11.0 missing D0 source checkpoints:\n"
+            + "\n".join(missing_sources)
+        )
+
     payloads: list[dict[str, Any]] = []
     probe_frames: list[pd.DataFrame] = []
     missing: list[str] = []
@@ -1385,7 +1768,7 @@ def finalize(config: Config) -> dict[str, Any]:
     if missing:
         raise FileNotFoundError(
             f"Exp11.0 incomplete; missing {len(missing)} artifacts:\n"
-            + "\n".join(missing[:50])
+            + "\n".join(missing[:80])
         )
     if len(payloads) != EXPECTED_RUNS or len(probe_frames) != EXPECTED_RUNS:
         raise RuntimeError(
@@ -1393,13 +1776,12 @@ def finalize(config: Config) -> dict[str, Any]:
             f"and {len(probe_frames)} probe files"
         )
 
-    rows = [
-        _run_row(payload, probes)
-        for payload, probes in zip(payloads, probe_frames, strict=True)
-    ]
-    runs = pd.DataFrame(rows).sort_values(
-        ["l1_init", "topology", "seed"]
-    )
+    runs = pd.DataFrame(
+        [
+            _run_row(payload, probes)
+            for payload, probes in zip(payloads, probe_frames, strict=True)
+        ]
+    ).sort_values(["variant", "l1_init", "topology", "seed"])
     runs.to_csv(config.results_dir / "run_metrics.csv", index=False)
 
     metric_cols = [
@@ -1407,6 +1789,7 @@ def finalize(config: Config) -> dict[str, Any]:
         for column in runs.columns
         if column
         not in {
+            "variant",
             "l1_init",
             "topology",
             "seed",
@@ -1418,7 +1801,9 @@ def finalize(config: Config) -> dict[str, Any]:
         }
     ]
     summary = (
-        runs.groupby(["l1_init", "topology"], sort=False)[metric_cols]
+        runs.groupby(
+            ["variant", "l1_init", "topology"], sort=False
+        )[metric_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
     )
@@ -1437,7 +1822,7 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     contrast_summary = (
         contrasts.groupby(
-            ["contrast", "l1_init", "topology"], sort=False
+            ["contrast", "variant", "l1_init", "topology"], sort=False
         )[delta_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1463,9 +1848,9 @@ def finalize(config: Config) -> dict[str, Any]:
         if column.startswith("interaction_")
     ]
     interaction_summary = (
-        interactions.groupby(["interaction", "topology"], sort=False)[
-            interaction_cols
-        ]
+        interactions.groupby(
+            ["interaction", "variant", "l1_init", "topology"], sort=False
+        )[interaction_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
     )
@@ -1485,6 +1870,7 @@ def finalize(config: Config) -> dict[str, Any]:
     probe_summary = (
         all_probes.groupby(
             [
+                "variant",
                 "l1_init",
                 "topology",
                 "layer",
@@ -1507,7 +1893,14 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     temporal_gap_summary = (
         temporal_gaps.groupby(
-            ["l1_init", "topology", "layer", "support"], sort=False
+            [
+                "variant",
+                "l1_init",
+                "topology",
+                "layer",
+                "support",
+            ],
+            sort=False,
         )[["fixed250_ba", "whole_ba", "temporal_gap"]]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1529,6 +1922,7 @@ def finalize(config: Config) -> dict[str, Any]:
         for layer, metrics in payload["activity"].items():
             activity_rows.append(
                 {
+                    "variant": spec["variant"],
                     "l1_init": spec["l1_init"],
                     "topology": spec["topology"],
                     "seed": int(spec["seed"]),
@@ -1547,7 +1941,7 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     activity_summary = (
         activity.groupby(
-            ["l1_init", "topology", "layer"], sort=False
+            ["variant", "l1_init", "topology", "layer"], sort=False
         )[activity_metrics]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1562,15 +1956,45 @@ def finalize(config: Config) -> dict[str, Any]:
         config.results_dir / "activity_summary.csv", index=False
     )
 
+    source_rows: list[dict[str, Any]] = []
+    for spec in source_specs():
+        payload = torch.load(
+            _source_artifact(config, spec),
+            map_location="cpu",
+            weights_only=False,
+        )
+        source_rows.append(
+            {
+                "variant": spec.variant,
+                "seed": spec.seed,
+                "best_epoch": int(payload["best_epoch"]),
+                "stopped_epoch": int(payload["stopped_epoch"]),
+                "train_ba": float(
+                    payload["source_metrics"]["train"]["balanced_accuracy"]
+                ),
+                "val_ba": float(
+                    payload["source_metrics"]["val"]["balanced_accuracy"]
+                ),
+                "test_ba": float(
+                    payload["source_metrics"]["test"]["balanced_accuracy"]
+                ),
+            }
+        )
+    pd.DataFrame(source_rows).to_csv(
+        config.results_dir / "d0_source_metrics.csv",
+        index=False,
+    )
+
     manifest = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "status": "PASS",
-        "dataset": VARIANT,
+        "variants": list(VARIANTS),
         "rotation": ROTATION,
         "l1_init_modes": list(L1_INIT_MODES),
         "topologies": list(TOPOLOGIES),
         "model_seeds": list(MODEL_SEEDS),
+        "d0_source_run_count": EXPECTED_SOURCE_RUNS,
         "run_count": int(len(runs)),
         "expected_run_count": EXPECTED_RUNS,
         "probe_rows": int(len(all_probes)),
@@ -1581,6 +2005,7 @@ def finalize(config: Config) -> dict[str, Any]:
         "fusion_tau_mem_ms": FUSION_TAU_MS,
         "objective": "valid-length mean time-shared WCCE",
         "primary_outputs": [
+            "d0_source_metrics.csv",
             "run_metrics.csv",
             "method_summary.csv",
             "paired_contrasts.csv",
@@ -1595,8 +2020,8 @@ def finalize(config: Config) -> dict[str, Any]:
             "activity_summary.csv",
         ],
         "statistical_scope": (
-            "one locked cross-user split; seeds are paired optimization "
-            "replicates, not independent user splits"
+            "one locked cross-user split; D0/D1 are paired by sample geometry, "
+            "seed, common initialization and loader ordering"
         ),
     }
     _save_json(config.results_dir / "manifest.json", manifest)
@@ -1627,8 +2052,7 @@ def _resolve_config(args: argparse.Namespace) -> Config:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Exp11.0: internalize Fixed250 temporal information with "
-            "L1 -> RSNN context -> feed-forward fusion -> shared Linear"
+            "Exp11.0 v2: parallel D0/D1 RSNN history internalization"
         )
     )
     parser.add_argument("--repo-root", default=None)
@@ -1639,7 +2063,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-epochs", type=int, default=MAX_EPOCHS)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("prepare")
+    sub.add_parser("list-source-runs")
     sub.add_parser("list-runs")
+
+    source_run = sub.add_parser("train-source-one")
+    source_run.add_argument("--array-task-id", type=int, required=True)
+    source_run.add_argument("--force", action="store_true")
+
     run = sub.add_parser("run-one")
     run.add_argument("--array-task-id", type=int, required=True)
     run.add_argument("--force", action="store_true")
@@ -1654,9 +2084,33 @@ def main() -> None:
     if args.command == "prepare":
         print(json.dumps(prepare_all(config), indent=2, sort_keys=True))
         return
+    if args.command == "list-source-runs":
+        for index, spec in enumerate(source_specs()):
+            print(index, spec.key)
+        return
     if args.command == "list-runs":
         for index, spec in enumerate(run_specs()):
             print(index, spec.key)
+        return
+    if args.command == "train-source-one":
+        specs = source_specs()
+        if not 0 <= args.array_task_id < len(specs):
+            raise IndexError(args.array_task_id)
+        spec = specs[args.array_task_id]
+        payload = _train_source_one(spec, config, force=args.force)
+        print(
+            json.dumps(
+                {
+                    "key": spec.key,
+                    "best_epoch": payload["best_epoch"],
+                    "test_ba": payload["source_metrics"]["test"][
+                        "balanced_accuracy"
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return
     if args.command == "run-one":
         specs = run_specs()
@@ -1664,6 +2118,7 @@ def main() -> None:
             raise IndexError(args.array_task_id)
         spec = specs[args.array_task_id]
         payload = run_one(spec, config, force=args.force)
+        probes = pd.read_csv(_run_artifacts(config, spec)["probes"])
         print(
             json.dumps(
                 {
@@ -1673,11 +2128,11 @@ def main() -> None:
                         "balanced_accuracy"
                     ],
                     "fusion_temporal_gap": _probe_value(
-                        pd.read_csv(_run_artifacts(config, spec)["probes"]),
+                        probes,
                         "fusion__communication__valid__fixed250_count",
                     )
                     - _probe_value(
-                        pd.read_csv(_run_artifacts(config, spec)["probes"]),
+                        probes,
                         "fusion__communication__valid__whole_count",
                     ),
                 },
