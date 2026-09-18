@@ -1,10 +1,34 @@
 name: Exp7.4 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_4_latent_softmax_evidence.py'
+      - 'scripts/experiment_7_4_latent_softmax_evidence/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_4*'
+      - 'tests/test_experiment_7_4_latent_softmax_evidence_contract.py'
+      - 'notebooks/experiment_7_4_latent_softmax_evidence.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - '.github/workflows/ci-exp7-4.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_4_latent_softmax_evidence.py'
+      - 'scripts/experiment_7_4_latent_softmax_evidence/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_4*'
+      - 'tests/test_experiment_7_4_latent_softmax_evidence_contract.py'
+      - 'notebooks/experiment_7_4_latent_softmax_evidence.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - '.github/workflows/ci-exp7-4.yml'
 
 permissions:
   contents: read
