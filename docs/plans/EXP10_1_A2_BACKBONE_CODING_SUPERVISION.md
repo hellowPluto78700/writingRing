@@ -88,15 +88,16 @@ than extra inference capacity.
 2 datasets
 x 2 coding conditions
 x 3 objectives
-x 5 cross-user rotations
+x 1 locked cross-user split (rotation0)
 x 3 seeds
-= 180 independent runs
+= 36 independent runs
 ```
 
-Seeds are `11,23,37`. For the same `rotation x seed`, all 12 conditions
-share the same model-init stream, DataLoader order, sample split, and probe
-random state. Dataset/coding/objective identity is excluded from paired model
-initialization.
+Seeds are `11,23,37`. Exp10.1 uses only Exp10.0/Exp9.0 cross-user
+`rotation0`: test fold 0, validation fold 1, and train folds 2/3/4. For the
+same seed, all 12 conditions share the same model-init stream, DataLoader
+order, sample split, and probe random state. Dataset/coding/objective identity
+is excluded from paired model initialization.
 
 ## Evaluation
 
@@ -147,7 +148,7 @@ the 0.5x threshold population is visible.
 
 ## Primary contrasts
 
-The finalizer produces paired run- and rotation-level contrasts:
+The finalizer produces paired per-seed contrasts on the single locked split:
 
 - D1 - D0;
 - MM - BB;
@@ -156,8 +157,9 @@ The finalizer produces paired run- and rotation-level contrasts:
 - MT × Joint interaction;
 - MT × L1-TSCE interaction.
 
-The primary statistical unit is the cross-user rotation. Three seeds are first
-averaged within each rotation, then the five rotations are summarized.
+This experiment does not estimate population-level split variance. The three
+paired seeds are optimization replicates on one fixed cross-user split, so
+mean/std across seeds are descriptive optimization statistics only.
 
 ## Multi-CPU strategy
 
@@ -165,9 +167,9 @@ averaged within each rotation, then the five rotations are summarized.
 prepare/audit
     |
     v
-180-task CPU Slurm array
+36-task CPU Slurm array
 one CPU per run
-max 20 concurrent
+max 36 concurrent
     |
     v
 afterok finalizer
