@@ -1,160 +1,229 @@
-# Exp11.0 — D0/D1 RSNN history internalization
+# Exp11.0 — D0/D1 context × fusion factorial
 
 ## Question
 
-Exp10.2.2 showed that ordered Fixed250 probes expose temporal information that the time-shared native readout cannot fully use. Exp11.0 asks whether an RSNN can internalize that ordering into a history-aware representation, and now tests the mechanism **in parallel on both D0 and D1**.
+Exp10.2.2 showed that ordered Fixed250 probes expose temporal information that the native time-shared readout cannot fully use. Exp11.0 tests two separate mechanisms for internalizing that information:
 
-Dataset factor:
+1. recurrence can convert local L1 evidence into a history-aware context representation;
+2. a Fusion SNN can use that context to remap the current local representation before the shared Linear readout.
 
-- `original` = D0 = `Encoder(a)`
-- `postencode_mask` = D1 = `m * Encoder(a)`
+The experiment now implements the complete A/B/C/D decomposition rather than keeping Fusion always enabled.
 
-The main scientific comparison is therefore not only recurrence vs no recurrence, but also whether the D1 preprocessing advantage survives after recurrent history modeling.
+## Dataset factor
 
-## Architecture
+- D0 `original`: `Encoder(a)`
+- D1 `postencode_mask`: `m * Encoder(a)`
+
+D0 and D1 use paired sample geometry, user split, seed, common random initialization streams, and DataLoader ordering.
+
+## A/B/C/D architecture decomposition
+
+| Case | Context topology | Fusion | Architecture | Main question |
+| --- | --- | --- | --- | --- |
+| A | FF / recurrence off | off | `L1 -> FF context -> Linear` | depth / context control |
+| B | diagonal or dense RSNN | off | `L1 -> RSNN -> Linear` | recurrence itself |
+| C | FF / recurrence off | on | `L1 -> FF context -> Fusion(L1, context) -> Linear` | Fusion architecture itself |
+| D | diagonal or dense RSNN | on | `L1 -> RSNN context -> Fusion(L1, context) -> Linear` | target history-conditioned remapping |
+
+B and D each have two recurrence variants:
+
+- `diagonal`: 128 trainable self-recurrent weights;
+- `dense`: full `128 x 128` recurrent matrix.
+
+This gives six concrete architecture configurations per dataset/L1-init/seed:
 
 ```text
-30-channel D0/D1 events
-    |
-    v
-L1 local SNN, 128
-    | z_t binary
-    +----------------------------+
-    |                            |
-    v                            |
-RSNN context, 128                |
-    | r_t binary                 |
-    +------------+---------------+
-                 |
-                 v
-       Fusion SNN, 128
-        Wz z_t + Wr r_t
-                 |
-                 v q_t binary
-        shared Linear 128 -> 12
-                 |
-                 v
-       valid-length mean WCCE
+A         = ff       + fusion off
+B-diag    = diagonal + fusion off
+B-dense   = dense    + fusion off
+C         = ff       + fusion on
+D-diag    = diagonal + fusion on
+D-dense   = dense    + fusion on
 ```
 
-Fusion is feed-forward. Long-range state is assigned to the RSNN branch.
-
-## Locked dynamics
+## Dynamics
 
 L1:
-- width 128
-- `tau_mem ~= 54 ms` from membrane shift2
-- original multi-tau synaptic shifts `(2,3,4)`
-- binary communication
 
-RSNN and Fusion:
-- width 128
-- `tau_syn ~= 54 ms`
-- `tau_mem ~= 54 ms`
-- binary communication
+- width 128;
+- `tau_mem ~= 54 ms` from membrane shift2;
+- original multi-tau synaptic shifts `(2,3,4)`;
+- binary communication.
 
-Fusion has no recurrent connection. At 64 Hz the 54 ms decay factor is approximately 0.75.
+Context layer:
+
+- width 128;
+- `tau_syn ~= 54 ms`;
+- `tau_mem ~= 54 ms`;
+- binary communication;
+- topology `ff / diagonal / dense`.
+
+`ff` means **no recurrent feedback**, but the context neurons still have their intrinsic 54 ms synaptic and membrane dynamics. Therefore A/B isolates recurrent feedback on top of matched local neuron dynamics.
+
+Fusion layer, when enabled:
+
+```math
+I_t^F
+=
+\alpha_F I_{t-1}^F
++
+W_z z_t
++
+W_r r_t
+```
+
+with width 128, `tau_syn ~= tau_mem ~= 54 ms`, binary communication, and no recurrence.
+
+When Fusion is disabled, no Fusion weight matrices are instantiated. The shared Linear reads the context output directly.
+
+## Readout representation
+
+To make probes comparable across all four cases, the final hidden representation is named `readout`:
+
+- Fusion off: `readout_t = context_t`;
+- Fusion on: `readout_t = Fusion(L1_t, context_t)`.
+
+Thus the same `readout whole` and `readout Fixed250` probes can be compared across A/B/C/D without pretending a Fusion layer exists in A/B.
 
 ## L1 initialization factor
 
-Two conditions are tested on both datasets.
+Two modes:
 
 ### dynamics_only
 
-Only the Exp10.2 L1 dynamics are inherited. The input->L1 matrix uses the paired random initialization.
+Use the Exp10.2 L1 dynamics but paired-random `input -> L1` weights.
 
 ### pretrained_input
 
-The input->L1 matrix is initialized from a seed-matched source and remains trainable.
+Copy only the seed-matched source `input -> L1` matrix and keep it trainable.
 
-For D1, the source is the existing Exp10.2.1 condition:
+D1 source:
 
 ```text
-binary__l1mem2__l2mem1__seed{seed}
+Exp10.2.1 binary__l1mem2__l2mem1__seed{seed}
 ```
 
-For D0, the repository did not contain an equivalent `L1 mem2 / L2 mem1` checkpoint. Exp11.0 therefore trains three **matched D0 source checkpoints** first using the same binary/WCCE dynamics and checkpoint-selection rule. This avoids copying D1-trained weights into D0.
-
-Only `input->L1` is copied. L2/output weights from source training are never inherited.
-
-## Recurrence factor
-
-Three topologies:
-
-- `ff`: no recurrent contribution, `Wrec=0`
-- `diagonal`: 128 self-recurrent weights, no cross-neuron mixing
-- `dense`: full `128 x 128` recurrent matrix
-
-Recurrent parameter counts:
-
-- ff: 0
-- diagonal: 128
-- dense: 16,384
-
-Dense vs diagonal is an architecture comparison, not a parameter-matched comparison.
+D0 has no pre-existing matched source, so Exp11.0 first trains three D0 binary/WCCE `L1 mem2 / L2 mem1` source checkpoints. D0 never inherits D1-trained input weights.
 
 ## Objective
 
-No auxiliary objective is used.
+Every main run uses only:
 
 ```math
-e_t = W_o q_t
+e_t = W_o h_t^{readout}
 ```
 
 ```math
-score = \frac{1}{T_{valid}}\sum_{t<T_{valid}} e_t
+score =
+\frac{1}{T_{valid}}
+\sum_{t<T_{valid}} e_t
 ```
 
 ```math
 \mathcal{L}=CE(score,y)
 ```
 
-The output matrix is bias-free and time-shared. Gradient norm is clipped at 1.0 to limit recurrent amplification.
+No TSCE or auxiliary loss is used. The output matrix is bias-free and time-shared. Gradient norm is clipped at 1.0.
 
 ## Main factorial
 
 ```text
-2 datasets: D0, D1
+2 datasets
 x 2 L1 init modes
-x 3 recurrence topologies
+x 3 context topologies
+x 2 fusion states
 x 3 seeds
-= 36 main runs
+= 72 main runs
 ```
 
-Before these runs, three D0 matched-source runs are trained.
+Before the main factorial, three matched D0 source runs are trained.
 
-For a fixed seed, D0 and D1 share identical split/sample geometry, shared random initialization streams, DataLoader ordering, topology, dynamics, and objective. Therefore `D1-D0` is a paired contrast.
+## Core contrasts
+
+The finalizer computes paired contrasts for identical seed/split conditions.
+
+### Recurrence itself
+
+```text
+B-diag - A
+B-dense - A
+```
+
+and, with Fusion enabled:
+
+```text
+D-diag - C
+D-dense - C
+```
+
+### Fusion itself
+
+```text
+C - A
+D-diag - B-diag
+D-dense - B-dense
+```
+
+implemented as `fusion_on_minus_off`.
+
+### Recurrence × Fusion interaction
+
+The key mechanism interaction is:
+
+```text
+(D - C) - (B - A)
+```
+
+reported separately for diagonal and dense recurrence.
+
+A positive interaction means recurrence becomes more useful when the history state is allowed to remap current L1 evidence through Fusion, rather than only being decoded directly.
+
+### Dataset and pretraining effects
+
+The finalizer also reports:
+
+- paired `D1 - D0`;
+- `pretrained_input - dynamics_only`;
+- D1 × recurrence;
+- D1 × Fusion;
+- pretraining × recurrence.
 
 ## Fixed250 internalization diagnostics
 
-The Exp10.2.2 valid/window support policy is preserved.
+For L1, context/RSNN, and final `readout`, under both valid-length and whole-window support:
 
-For L1, RSNN, and Fusion:
+- pre-reset whole mean;
+- pre-reset ordered Fixed250 mean;
+- binary whole mean;
+- binary ordered Fixed250 mean;
+- binary whole count;
+- binary Fixed250 count.
 
-- pre-reset membrane: whole mean and ordered Fixed250 mean
-- binary communication: whole mean, ordered Fixed250 mean, whole count, Fixed250 count
-
-Main mechanism metric:
+Main diagnostic:
 
 ```math
-G_{temporal} = BA_{Fixed250} - BA_{whole}
+G_{temporal}
+=
+BA_{Fixed250}
+-
+BA_{whole}
 ```
 
-Desired internalization pattern:
-
-```text
-L1:      Fixed250 >> whole
-RSNN:    gap begins to shrink
-Fusion:  Fixed250 ~= whole
-```
-
-while Fusion whole/native BA increases.
-
-The finalizer reports recurrence effects within D0/D1, pretrained-input effects, paired `D1-D0` effects, D1 x recurrence interactions, pretraining x recurrence interactions, and L1 -> RSNN -> Fusion temporal-gap movement.
+The desired target-model signature is that the final `readout` gap becomes smaller while whole/native BA increases.
 
 ## Recurrence health diagnostics
 
-Each run records L1/RSNN/Fusion firing activity, dead-neuron fraction, post-valid residual firing, mean absolute external RSNN input, mean absolute recurrent input, recurrent/external input magnitude ratio, and recurrent weight norm.
+Each run records:
+
+- firing activity for L1/context/readout;
+- dead-neuron fraction;
+- post-valid residual firing;
+- mean absolute external context input;
+- mean absolute recurrent input;
+- recurrent/external input magnitude ratio;
+- recurrent weight norm.
+
+These are used to detect sustained recurrent excitation.
 
 ## Multi-CPU execution
 
@@ -167,7 +236,7 @@ prepare
 3-way D0 matched-source array
   |
   v
-36-way D0+D1 main array
+72-way main array, max 50 concurrent
   |
   v
 afterok finalizer
@@ -176,7 +245,13 @@ afterok finalizer
 aggregation-only notebook
 ```
 
-The 36 main runs execute concurrently, so D0 and D1 are not run sequentially.
+The main array is:
+
+```text
+#SBATCH --array=0-71%50
+```
+
+which follows the repository default maximum of 50 concurrent CPU experiment tasks.
 
 Submit:
 
@@ -184,14 +259,7 @@ Submit:
 bash scripts/bash_script/SNN_Bash/submit_exp_11_0_cpu.bash
 ```
 
-Force source/main reruns:
-
-```bash
-EXP11_0_FORCE_SOURCE=1 bash scripts/bash_script/SNN_Bash/submit_exp_11_0_cpu.bash
-EXP11_0_FORCE=1 bash scripts/bash_script/SNN_Bash/submit_exp_11_0_cpu.bash
-```
-
-Inspect identities:
+Inspect run mapping:
 
 ```bash
 python -m scripts.experiment_11_0_rsnn_history_internalization list-source-runs
@@ -203,7 +271,7 @@ Output root:
 ```text
 notebooks/artifacts/
   experiment_11_0_rsnn_history_internalization/
-    d0_d1_l1mem2_rsnn_fusion_internalization_v2/
+    d0_d1_l1mem2_context_fusion_factorial_v3/
 ```
 
-The finalizer aggregates existing artifacts only. The notebook performs analysis only.
+The finalizer only aggregates existing artifacts. The notebook is analysis-only.

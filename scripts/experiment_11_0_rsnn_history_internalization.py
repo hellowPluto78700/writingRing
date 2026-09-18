@@ -29,7 +29,7 @@ from scripts import experiment_10_2_2_valid_window_probes as exp1022
 
 
 EXPERIMENT_ID = "experiment_11_0_rsnn_history_internalization"
-PROTOCOL_VERSION = "d0_d1_l1mem2_rsnn_fusion_internalization_v2"
+PROTOCOL_VERSION = "d0_d1_l1mem2_context_fusion_factorial_v3"
 
 VARIANT_ORIGINAL = exp10.VARIANT_ORIGINAL
 VARIANT_POSTENCODE = exp10.VARIANT_POSTENCODE
@@ -49,6 +49,10 @@ TOPOLOGY_DIAGONAL = "diagonal"
 TOPOLOGY_DENSE = "dense"
 TOPOLOGIES = (TOPOLOGY_FF, TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE)
 
+FUSION_OFF = "off"
+FUSION_ON = "on"
+FUSION_MODES = (FUSION_OFF, FUSION_ON)
+
 CONTEXT_TAU_MS = exp1021.tau_mem_ms_from_shift(2)
 FUSION_TAU_MS = CONTEXT_TAU_MS
 COMMUNICATION_CAP = 1
@@ -60,7 +64,7 @@ PATIENCE = exp1021.PATIENCE
 BATCH_SIZE = exp1021.BATCH_SIZE
 SPLITS = exp1021.SPLITS
 
-LAYERS = ("l1", "rsnn", "fusion")
+LAYERS = ("l1", "rsnn", "readout")
 PROBE_ANALOG_STATE = "pre_reset"
 PROBE_COMMUNICATION_STATE = "communication"
 SUPPORTS = exp1022.SUPPORTS
@@ -71,7 +75,11 @@ PROBE_MAX_ITER = exp1022.PROBE_MAX_ITER
 
 EXPECTED_SOURCE_RUNS = len(MODEL_SEEDS)
 EXPECTED_RUNS = (
-    len(VARIANTS) * len(L1_INIT_MODES) * len(TOPOLOGIES) * len(MODEL_SEEDS)
+    len(VARIANTS)
+    * len(L1_INIT_MODES)
+    * len(TOPOLOGIES)
+    * len(FUSION_MODES)
+    * len(MODEL_SEEDS)
 )
 EXPECTED_PROBES_PER_RUN = len(LAYERS) * (
     len(SUPPORTS) * len(ANALOG_AGGREGATIONS)
@@ -94,11 +102,27 @@ class RunSpec:
     variant: str
     l1_init: str
     topology: str
+    fusion: str
     seed: int
 
     @property
     def key(self) -> str:
-        return f"{self.variant}__{self.l1_init}__{self.topology}__seed{self.seed}"
+        return (
+            f"{self.variant}__{self.l1_init}__{self.topology}"
+            f"__fusion_{self.fusion}__seed{self.seed}"
+        )
+
+    @property
+    def architecture_case(self) -> str:
+        if self.topology == TOPOLOGY_FF and self.fusion == FUSION_OFF:
+            return "A"
+        if self.topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE) and self.fusion == FUSION_OFF:
+            return "B"
+        if self.topology == TOPOLOGY_FF and self.fusion == FUSION_ON:
+            return "C"
+        if self.topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE) and self.fusion == FUSION_ON:
+            return "D"
+        raise ValueError((self.topology, self.fusion))
 
     @property
     def rotation(self) -> int:
@@ -142,12 +166,14 @@ def source_specs() -> list[SourceSpec]:
 
 
 def run_specs() -> list[RunSpec]:
+    # Keep D0/D1 as adjacent array tasks for matched parallel scheduling.
     return [
-        RunSpec(variant, l1_init, topology, seed)
-        for variant in VARIANTS
+        RunSpec(variant, l1_init, topology, fusion, seed)
         for l1_init in L1_INIT_MODES
         for topology in TOPOLOGIES
+        for fusion in FUSION_MODES
         for seed in MODEL_SEEDS
+        for variant in VARIANTS
     ]
 
 
@@ -165,6 +191,8 @@ def validate_spec(spec: RunSpec) -> None:
         raise ValueError(spec.l1_init)
     if spec.topology not in TOPOLOGIES:
         raise ValueError(spec.topology)
+    if spec.fusion not in FUSION_MODES:
+        raise ValueError(spec.fusion)
     if spec.seed not in MODEL_SEEDS:
         raise ValueError(spec.seed)
 
@@ -385,9 +413,9 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "question": (
-            "Can RSNN context internalize the Fixed250 temporal information for "
-            "both D0 original and D1 post-encode-mask inputs, and does the D1 "
-            "preprocessing advantage remain after recurrent history modeling?"
+            "Can recurrent context, Fusion remapping, or their interaction "
+            "internalize the Fixed250 temporal information for both D0 and D1 "
+            "while preserving a single time-shared output matrix?"
         ),
         "variants": list(VARIANTS),
         "variant_definitions": {
@@ -410,7 +438,10 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "split_users_by_variant": split_users_by_variant,
         "split_samples_by_variant": split_samples_by_variant,
         "labels": list(labels_by_variant[VARIANT_ORIGINAL]),
-        "architecture": "30 -> L1(128) -> RSNN(128) -> Fusion(128) -> Linear(12)",
+        "architecture": (
+            "30 -> L1(128) -> context(128) -> optional Fusion(128) "
+            "-> Linear(12)"
+        ),
         "l1_init_modes": list(L1_INIT_MODES),
         "pretrained_input_contract": (
             "D0 copies input->L1 weight from an Exp11.0-trained D0 source; "
@@ -421,6 +452,13 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(L1_MEM_SHIFT),
         "l1_synaptic_shifts": list(L1_SYN_SHIFTS),
         "rsnn_topologies": list(TOPOLOGIES),
+        "fusion_modes": list(FUSION_MODES),
+        "architecture_cases": {
+            "A": "L1 -> FF context -> Linear",
+            "B": "L1 -> recurrent context -> Linear",
+            "C": "L1 -> FF context -> Fusion(L1, context) -> Linear",
+            "D": "L1 -> recurrent context -> Fusion(L1, context) -> Linear",
+        },
         "rsnn_tau_syn_ms": CONTEXT_TAU_MS,
         "rsnn_tau_mem_ms": CONTEXT_TAU_MS,
         "fusion_tau_syn_ms": FUSION_TAU_MS,
@@ -428,7 +466,9 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "fusion_recurrent": False,
         "objective": "valid-length mean time-shared WCCE only",
         "output": "single shared bias-free 128x12 Linear",
-        "communication": "binary spikes in L1, RSNN, and Fusion",
+        "communication": (
+            "binary spikes in L1/context; Fusion also uses binary spikes when enabled"
+        ),
         "gradient_clip_norm": GRAD_CLIP_NORM,
         "supports": list(SUPPORTS),
         "probe_layers": list(LAYERS),
@@ -442,10 +482,12 @@ def prepare_all(config: Config) -> dict[str, Any]:
             "replicates, not independent user splits"
         ),
         "primary_contrasts": [
-            "D1 minus D0 at identical L1-init/topology/seed",
-            "diagonal minus ff within each dataset/init",
-            "dense minus ff within each dataset/init",
-            "pretrained_input minus dynamics_only within each dataset/topology",
+            "D1 minus D0 at identical L1-init/topology/fusion/seed",
+            "diagonal minus ff within each dataset/init/fusion",
+            "dense minus ff within each dataset/init/fusion",
+            "fusion on minus off within each dataset/init/topology",
+            "pretrained_input minus dynamics_only within dataset/topology/fusion",
+            "recurrence x fusion interaction: (D-C) minus (B-A)",
         ],
     }
     _save_json(config.results_dir / "audit.json", audit)
@@ -469,7 +511,7 @@ class DiagonalRecurrent(nn.Module):
 
 
 class Exp110Net(nn.Module):
-    """L1 local representation -> recurrent context -> feed-forward fusion."""
+    """L1 local representation -> context -> optional fusion -> shared Linear."""
 
     def __init__(
         self,
@@ -485,9 +527,18 @@ class Exp110Net(nn.Module):
 
         self.l1_input = nn.Linear(exp72.EXPECTED_CHANNELS, WIDTH, bias=False)
         self.rsnn_input = nn.Linear(WIDTH, WIDTH, bias=False)
-        self.fusion_local = nn.Linear(WIDTH, WIDTH, bias=False)
-        self.fusion_context = nn.Linear(WIDTH, WIDTH, bias=False)
         self.output_linear = nn.Linear(WIDTH, n_classes, bias=False)
+
+        if spec.fusion == FUSION_ON:
+            self.fusion_local: nn.Linear | None = nn.Linear(
+                WIDTH, WIDTH, bias=False
+            )
+            self.fusion_context: nn.Linear | None = nn.Linear(
+                WIDTH, WIDTH, bias=False
+            )
+        else:
+            self.fusion_local = None
+            self.fusion_context = None
 
         if spec.topology == TOPOLOGY_FF:
             self.recurrent: nn.Module = ZeroRecurrent()
@@ -505,28 +556,39 @@ class Exp110Net(nn.Module):
             surrogate_slope=exp72.SURROGATE_SLOPE,
         )
         context_beta = decay_from_tau_ms(CONTEXT_TAU_MS, fs)
-        fusion_beta = decay_from_tau_ms(FUSION_TAU_MS, fs)
         self.rsnn_lif = exp401.MacroMultiSpikeLIF(
             beta=context_beta,
             threshold=float(exp73.THRESHOLD),
             max_spikes_per_dt=COMMUNICATION_CAP,
             surrogate_slope=exp72.SURROGATE_SLOPE,
         )
-        self.fusion_lif = exp401.MacroMultiSpikeLIF(
-            beta=fusion_beta,
-            threshold=float(exp73.THRESHOLD),
-            max_spikes_per_dt=COMMUNICATION_CAP,
-            surrogate_slope=exp72.SURROGATE_SLOPE,
-        )
+
+        if spec.fusion == FUSION_ON:
+            self.fusion_lif: exp401.MacroMultiSpikeLIF | None = (
+                exp401.MacroMultiSpikeLIF(
+                    beta=decay_from_tau_ms(FUSION_TAU_MS, fs),
+                    threshold=float(exp73.THRESHOLD),
+                    max_spikes_per_dt=COMMUNICATION_CAP,
+                    surrogate_slope=exp72.SURROGATE_SLOPE,
+                )
+            )
+        else:
+            self.fusion_lif = None
 
         self.register_buffer("l1_alpha", exp811._alpha_vector("binary"))
         self.register_buffer(
             "rsnn_alpha",
-            torch.tensor(decay_from_tau_ms(CONTEXT_TAU_MS, fs), dtype=torch.float32),
+            torch.tensor(
+                decay_from_tau_ms(CONTEXT_TAU_MS, fs),
+                dtype=torch.float32,
+            ),
         )
         self.register_buffer(
             "fusion_alpha",
-            torch.tensor(decay_from_tau_ms(FUSION_TAU_MS, fs), dtype=torch.float32),
+            torch.tensor(
+                decay_from_tau_ms(FUSION_TAU_MS, fs),
+                dtype=torch.float32,
+            ),
         )
 
     def forward_trajectory(self, x: torch.Tensor) -> dict[str, Any]:
@@ -567,17 +629,32 @@ class Exp110Net(nn.Module):
             mem_rsnn = post_rsnn
             prev_rsnn = r_t
 
-            fusion_drive = self.fusion_local(z_t) + self.fusion_context(r_t)
-            syn_fusion = self.fusion_alpha * syn_fusion + fusion_drive
-            q_t, post_fusion, pre_fusion = self.fusion_lif(
-                syn_fusion, mem_fusion
-            )
-            mem_fusion = post_fusion
+            if self.spec.fusion == FUSION_ON:
+                if (
+                    self.fusion_local is None
+                    or self.fusion_context is None
+                    or self.fusion_lif is None
+                ):
+                    raise RuntimeError("Fusion modules missing for fusion=on")
+                fusion_drive = (
+                    self.fusion_local(z_t) + self.fusion_context(r_t)
+                )
+                syn_fusion = self.fusion_alpha * syn_fusion + fusion_drive
+                q_t, post_readout, pre_readout = self.fusion_lif(
+                    syn_fusion, mem_fusion
+                )
+                mem_fusion = post_readout
+                readout_syn = syn_fusion
+            else:
+                q_t = r_t
+                readout_syn = syn_rsnn
+                pre_readout = pre_rsnn
+                post_readout = post_rsnn
 
             for layer, syn, pre, spike, post in (
                 ("l1", syn_l1, pre_l1, z_t, post_l1),
                 ("rsnn", syn_rsnn, pre_rsnn, r_t, post_rsnn),
-                ("fusion", syn_fusion, pre_fusion, q_t, post_fusion),
+                ("readout", readout_syn, pre_readout, q_t, post_readout),
             ):
                 states[layer]["syn_current"].append(syn)
                 states[layer]["pre_reset"].append(pre)
@@ -599,9 +676,8 @@ class Exp110Net(nn.Module):
             "hidden": hidden,
             "rsnn_external_input": torch.stack(rsnn_external, dim=1),
             "rsnn_recurrent_input": torch.stack(rsnn_recurrent, dim=1),
-            "fusion_evidence": torch.stack(evidence, dim=1),
+            "readout_evidence": torch.stack(evidence, dim=1),
         }
-
 
 def _reset_linear(module: nn.Linear, seed: int, role: str) -> None:
     exp3.seed_all(exp73._e2e_pair_seed(seed, role))
@@ -613,11 +689,23 @@ def _initialize_paired(model: Exp110Net, spec: RunSpec) -> None:
     for module, role in (
         (model.l1_input, "exp11_l1_input_init"),
         (model.rsnn_input, "exp11_rsnn_input_init"),
-        (model.fusion_local, "exp11_fusion_local_init"),
-        (model.fusion_context, "exp11_fusion_context_init"),
         (model.output_linear, "exp11_output_init"),
     ):
         _reset_linear(module, spec.seed, role)
+
+    if spec.fusion == FUSION_ON:
+        if model.fusion_local is None or model.fusion_context is None:
+            raise RuntimeError("Fusion modules missing for fusion=on")
+        _reset_linear(
+            model.fusion_local,
+            spec.seed,
+            "exp11_fusion_local_init",
+        )
+        _reset_linear(
+            model.fusion_context,
+            spec.seed,
+            "exp11_fusion_context_init",
+        )
 
     exp3.seed_all(exp73._e2e_pair_seed(spec.seed, "exp11_recurrent_init"))
     paired_dense = nn.Linear(WIDTH, WIDTH, bias=False)
@@ -719,11 +807,11 @@ def _native_scores(
     X: torch.Tensor,
     lengths: torch.Tensor,
 ) -> torch.Tensor:
-    return _valid_mean(model.forward_trajectory(X)["fusion_evidence"], lengths)
+    return _valid_mean(model.forward_trajectory(X)["readout_evidence"], lengths)
 
 
 def _window_scores(model: Exp110Net, X: torch.Tensor) -> torch.Tensor:
-    return model.forward_trajectory(X)["fusion_evidence"].mean(dim=1)
+    return model.forward_trajectory(X)["readout_evidence"].mean(dim=1)
 
 
 def _evaluate_scores(
@@ -774,7 +862,7 @@ def _evaluate_lif_transfer(
         for X, y, lengths in loader:
             Xd = X.to(device=device, dtype=torch.float32)
             ld = lengths.to(device=device, dtype=torch.long)
-            evidence = model.forward_trajectory(Xd)["fusion_evidence"]
+            evidence = model.forward_trajectory(Xd)["readout_evidence"]
             spikes = exp81._output_lif_spikes(evidence)
             mask = exp1021._valid_mask(ld, spikes.shape[1]).to(
                 spikes.dtype
@@ -1206,6 +1294,8 @@ def _fit_probes(
                 "variant": spec.variant,
                 "l1_init": spec.l1_init,
                 "topology": spec.topology,
+                "fusion": spec.fusion,
+                "architecture_case": spec.architecture_case,
                 "seed": spec.seed,
                 "layer": layer,
                 "state": state,
@@ -1404,9 +1494,16 @@ def run_one(
             "dataset": spec.variant,
             "rotation": ROTATION,
             "architecture": (
-                "30->L1(128)->RSNN(128)->Fusion(128)->Linear(12)"
+                "30->L1(128)->context(128)"
+                + (
+                    "->Fusion(128)->Linear(12)"
+                    if spec.fusion == FUSION_ON
+                    else "->Linear(12)"
+                )
             ),
+            "architecture_case": spec.architecture_case,
             "l1_init": spec.l1_init,
+            "fusion": spec.fusion,
             "l1_mem_shift": L1_MEM_SHIFT,
             "l1_tau_mem_ms": exp1021.tau_mem_ms_from_shift(
                 L1_MEM_SHIFT, data.fs
@@ -1418,9 +1515,14 @@ def run_one(
             ),
             "rsnn_tau_syn_ms": CONTEXT_TAU_MS,
             "rsnn_tau_mem_ms": CONTEXT_TAU_MS,
-            "fusion_tau_syn_ms": FUSION_TAU_MS,
-            "fusion_tau_mem_ms": FUSION_TAU_MS,
+            "fusion_tau_syn_ms": (
+                FUSION_TAU_MS if spec.fusion == FUSION_ON else None
+            ),
+            "fusion_tau_mem_ms": (
+                FUSION_TAU_MS if spec.fusion == FUSION_ON else None
+            ),
             "fusion_recurrent": False,
+            "fusion_present": spec.fusion == FUSION_ON,
             "objective": "valid-mean time-shared WCCE",
             "readout": "single bias-free 128x12 Linear",
             "gradient_clip_norm": GRAD_CLIP_NORM,
@@ -1453,6 +1555,17 @@ def _run_row(
         "variant": spec["variant"],
         "l1_init": spec["l1_init"],
         "topology": spec["topology"],
+        "fusion": spec["fusion"],
+        "architecture_case": (
+            "A"
+            if spec["topology"] == TOPOLOGY_FF and spec["fusion"] == FUSION_OFF
+            else "B"
+            if spec["topology"] in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE)
+            and spec["fusion"] == FUSION_OFF
+            else "C"
+            if spec["topology"] == TOPOLOGY_FF and spec["fusion"] == FUSION_ON
+            else "D"
+        ),
         "seed": int(spec["seed"]),
         "best_epoch": int(payload["best_epoch"]),
         "stopped_epoch": int(payload["stopped_epoch"]),
@@ -1536,24 +1649,26 @@ def _contrast_metrics() -> list[str]:
         "rsnn_comm_valid_fixed250_ba",
         "rsnn_comm_valid_whole_ba",
         "rsnn_comm_valid_temporal_gap",
-        "fusion_comm_valid_fixed250_ba",
-        "fusion_comm_valid_whole_ba",
-        "fusion_comm_valid_temporal_gap",
-        "fusion_pre_valid_fixed250_ba",
-        "fusion_pre_valid_whole_ba",
-        "fusion_pre_valid_temporal_gap",
+        "readout_comm_valid_fixed250_ba",
+        "readout_comm_valid_whole_ba",
+        "readout_comm_valid_temporal_gap",
+        "readout_pre_valid_fixed250_ba",
+        "readout_pre_valid_whole_ba",
+        "readout_pre_valid_temporal_gap",
         "recurrent_to_external_abs_ratio",
     ]
 
 
 def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
-    indexed = runs.set_index(["variant", "l1_init", "topology", "seed"])
+    indexed = runs.set_index(
+        ["variant", "l1_init", "topology", "fusion", "seed"]
+    )
     rows: list[dict[str, Any]] = []
 
     def emit(
         contrast: str,
-        left: tuple[str, str, str, int],
-        right: tuple[str, str, str, int],
+        left: tuple[str, str, str, str, int],
+        right: tuple[str, str, str, str, int],
     ) -> None:
         lrow = indexed.loc[left]
         rrow = indexed.loc[right]
@@ -1563,12 +1678,21 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
                 left[0] if left[0] == right[0] else "d1_vs_d0"
             ),
             "l1_init": (
-                left[1] if left[1] == right[1] else "pretrained_vs_dynamics"
+                left[1]
+                if left[1] == right[1]
+                else "pretrained_vs_dynamics"
             ),
             "topology": (
-                left[2] if left[2] == right[2] else f"{left[2]}_vs_{right[2]}"
+                left[2]
+                if left[2] == right[2]
+                else f"{left[2]}_vs_{right[2]}"
             ),
-            "seed": left[3],
+            "fusion": (
+                left[3]
+                if left[3] == right[3]
+                else f"{left[3]}_vs_{right[3]}"
+            ),
+            "seed": left[4],
         }
         for metric in _contrast_metrics():
             row[f"delta_{metric}"] = float(lrow[metric] - rrow[metric])
@@ -1576,103 +1700,324 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
 
     for seed in MODEL_SEEDS:
         for variant in VARIANTS:
-            for topology in TOPOLOGIES:
-                emit(
-                    "pretrained_minus_dynamics_only",
-                    (variant, L1_INIT_PRETRAINED, topology, seed),
-                    (variant, L1_INIT_DYNAMICS_ONLY, topology, seed),
-                )
+            for fusion in FUSION_MODES:
+                for topology in TOPOLOGIES:
+                    emit(
+                        "pretrained_minus_dynamics_only",
+                        (
+                            variant,
+                            L1_INIT_PRETRAINED,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            L1_INIT_DYNAMICS_ONLY,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                    )
+                for l1_init in L1_INIT_MODES:
+                    emit(
+                        "diagonal_minus_ff",
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_DIAGONAL,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_FF,
+                            fusion,
+                            seed,
+                        ),
+                    )
+                    emit(
+                        "dense_minus_ff",
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_DENSE,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_FF,
+                            fusion,
+                            seed,
+                        ),
+                    )
+                    emit(
+                        "dense_minus_diagonal",
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_DENSE,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            l1_init,
+                            TOPOLOGY_DIAGONAL,
+                            fusion,
+                            seed,
+                        ),
+                    )
+
             for l1_init in L1_INIT_MODES:
-                emit(
-                    "diagonal_minus_ff",
-                    (variant, l1_init, TOPOLOGY_DIAGONAL, seed),
-                    (variant, l1_init, TOPOLOGY_FF, seed),
-                )
-                emit(
-                    "dense_minus_ff",
-                    (variant, l1_init, TOPOLOGY_DENSE, seed),
-                    (variant, l1_init, TOPOLOGY_FF, seed),
-                )
-                emit(
-                    "dense_minus_diagonal",
-                    (variant, l1_init, TOPOLOGY_DENSE, seed),
-                    (variant, l1_init, TOPOLOGY_DIAGONAL, seed),
-                )
+                for topology in TOPOLOGIES:
+                    emit(
+                        "fusion_on_minus_off",
+                        (
+                            variant,
+                            l1_init,
+                            topology,
+                            FUSION_ON,
+                            seed,
+                        ),
+                        (
+                            variant,
+                            l1_init,
+                            topology,
+                            FUSION_OFF,
+                            seed,
+                        ),
+                    )
 
         for l1_init in L1_INIT_MODES:
             for topology in TOPOLOGIES:
-                emit(
-                    "d1_minus_d0",
-                    (
-                        VARIANT_POSTENCODE,
-                        l1_init,
-                        topology,
-                        seed,
-                    ),
-                    (
-                        VARIANT_ORIGINAL,
-                        l1_init,
-                        topology,
-                        seed,
-                    ),
-                )
+                for fusion in FUSION_MODES:
+                    emit(
+                        "d1_minus_d0",
+                        (
+                            VARIANT_POSTENCODE,
+                            l1_init,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                        (
+                            VARIANT_ORIGINAL,
+                            l1_init,
+                            topology,
+                            fusion,
+                            seed,
+                        ),
+                    )
 
     return pd.DataFrame(rows)
 
 
 def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
-    indexed = runs.set_index(["variant", "l1_init", "topology", "seed"])
+    indexed = runs.set_index(
+        ["variant", "l1_init", "topology", "fusion", "seed"]
+    )
     rows: list[dict[str, Any]] = []
 
     for seed in MODEL_SEEDS:
         for variant in VARIANTS:
-            for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
-                row: dict[str, Any] = {
-                    "interaction": f"pretrain_x_{topology}_vs_ff",
-                    "variant": variant,
-                    "l1_init": "interaction",
-                    "topology": topology,
-                    "seed": seed,
-                }
-                for metric in _contrast_metrics():
-                    pretrain_rec = float(
-                        indexed.loc[
-                            (variant, L1_INIT_PRETRAINED, topology, seed), metric
-                        ]
-                        - indexed.loc[
-                            (variant, L1_INIT_PRETRAINED, TOPOLOGY_FF, seed),
-                            metric,
-                        ]
-                    )
-                    random_rec = float(
-                        indexed.loc[
-                            (variant, L1_INIT_DYNAMICS_ONLY, topology, seed),
-                            metric,
-                        ]
-                        - indexed.loc[
-                            (variant, L1_INIT_DYNAMICS_ONLY, TOPOLOGY_FF, seed),
-                            metric,
-                        ]
-                    )
-                    row[f"interaction_{metric}"] = pretrain_rec - random_rec
-                rows.append(row)
+            for l1_init in L1_INIT_MODES:
+                for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+                    row: dict[str, Any] = {
+                        "interaction": "recurrence_x_fusion",
+                        "variant": variant,
+                        "l1_init": l1_init,
+                        "topology": topology,
+                        "fusion": "on_vs_off",
+                        "seed": seed,
+                    }
+                    for metric in _contrast_metrics():
+                        rec_on = float(
+                            indexed.loc[
+                                (
+                                    variant,
+                                    l1_init,
+                                    topology,
+                                    FUSION_ON,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    variant,
+                                    l1_init,
+                                    TOPOLOGY_FF,
+                                    FUSION_ON,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        rec_off = float(
+                            indexed.loc[
+                                (
+                                    variant,
+                                    l1_init,
+                                    topology,
+                                    FUSION_OFF,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    variant,
+                                    l1_init,
+                                    TOPOLOGY_FF,
+                                    FUSION_OFF,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        row[f"interaction_{metric}"] = rec_on - rec_off
+                    rows.append(row)
+
+            for fusion in FUSION_MODES:
+                for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+                    row = {
+                        "interaction": "pretrain_x_recurrence",
+                        "variant": variant,
+                        "l1_init": "pretrained_vs_dynamics",
+                        "topology": topology,
+                        "fusion": fusion,
+                        "seed": seed,
+                    }
+                    for metric in _contrast_metrics():
+                        pretrain_rec = float(
+                            indexed.loc[
+                                (
+                                    variant,
+                                    L1_INIT_PRETRAINED,
+                                    topology,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    variant,
+                                    L1_INIT_PRETRAINED,
+                                    TOPOLOGY_FF,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        random_rec = float(
+                            indexed.loc[
+                                (
+                                    variant,
+                                    L1_INIT_DYNAMICS_ONLY,
+                                    topology,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    variant,
+                                    L1_INIT_DYNAMICS_ONLY,
+                                    TOPOLOGY_FF,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        row[f"interaction_{metric}"] = (
+                            pretrain_rec - random_rec
+                        )
+                    rows.append(row)
 
         for l1_init in L1_INIT_MODES:
-            for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+            for fusion in FUSION_MODES:
+                for topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE):
+                    row = {
+                        "interaction": "d1_x_recurrence",
+                        "variant": "d1_vs_d0",
+                        "l1_init": l1_init,
+                        "topology": topology,
+                        "fusion": fusion,
+                        "seed": seed,
+                    }
+                    for metric in _contrast_metrics():
+                        d1_rec = float(
+                            indexed.loc[
+                                (
+                                    VARIANT_POSTENCODE,
+                                    l1_init,
+                                    topology,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    VARIANT_POSTENCODE,
+                                    l1_init,
+                                    TOPOLOGY_FF,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        d0_rec = float(
+                            indexed.loc[
+                                (
+                                    VARIANT_ORIGINAL,
+                                    l1_init,
+                                    topology,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                            - indexed.loc[
+                                (
+                                    VARIANT_ORIGINAL,
+                                    l1_init,
+                                    TOPOLOGY_FF,
+                                    fusion,
+                                    seed,
+                                ),
+                                metric,
+                            ]
+                        )
+                        row[f"interaction_{metric}"] = d1_rec - d0_rec
+                    rows.append(row)
+
+            for topology in TOPOLOGIES:
                 row = {
-                    "interaction": f"d1_x_{topology}_vs_ff",
+                    "interaction": "d1_x_fusion",
                     "variant": "d1_vs_d0",
                     "l1_init": l1_init,
                     "topology": topology,
+                    "fusion": "on_vs_off",
                     "seed": seed,
                 }
                 for metric in _contrast_metrics():
-                    d1_rec = float(
+                    d1_fusion = float(
                         indexed.loc[
                             (
                                 VARIANT_POSTENCODE,
                                 l1_init,
                                 topology,
+                                FUSION_ON,
                                 seed,
                             ),
                             metric,
@@ -1681,18 +2026,20 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
                             (
                                 VARIANT_POSTENCODE,
                                 l1_init,
-                                TOPOLOGY_FF,
+                                topology,
+                                FUSION_OFF,
                                 seed,
                             ),
                             metric,
                         ]
                     )
-                    d0_rec = float(
+                    d0_fusion = float(
                         indexed.loc[
                             (
                                 VARIANT_ORIGINAL,
                                 l1_init,
                                 topology,
+                                FUSION_ON,
                                 seed,
                             ),
                             metric,
@@ -1701,17 +2048,17 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
                             (
                                 VARIANT_ORIGINAL,
                                 l1_init,
-                                TOPOLOGY_FF,
+                                topology,
+                                FUSION_OFF,
                                 seed,
                             ),
                             metric,
                         ]
                     )
-                    row[f"interaction_{metric}"] = d1_rec - d0_rec
+                    row[f"interaction_{metric}"] = d1_fusion - d0_fusion
                 rows.append(row)
 
     return pd.DataFrame(rows)
-
 
 def _temporal_gap_rows(runs: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
@@ -1724,6 +2071,8 @@ def _temporal_gap_rows(runs: pd.DataFrame) -> pd.DataFrame:
                         "variant": source["variant"],
                         "l1_init": source["l1_init"],
                         "topology": source["topology"],
+                        "fusion": source["fusion"],
+                        "architecture_case": source["architecture_case"],
                         "seed": source["seed"],
                         "layer": layer,
                         "support": support,
@@ -1781,7 +2130,9 @@ def finalize(config: Config) -> dict[str, Any]:
             _run_row(payload, probes)
             for payload, probes in zip(payloads, probe_frames, strict=True)
         ]
-    ).sort_values(["variant", "l1_init", "topology", "seed"])
+    ).sort_values(
+        ["variant", "l1_init", "topology", "fusion", "seed"]
+    )
     runs.to_csv(config.results_dir / "run_metrics.csv", index=False)
 
     metric_cols = [
@@ -1792,6 +2143,8 @@ def finalize(config: Config) -> dict[str, Any]:
             "variant",
             "l1_init",
             "topology",
+            "fusion",
+            "architecture_case",
             "seed",
             "best_epoch",
             "stopped_epoch",
@@ -1802,7 +2155,7 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     summary = (
         runs.groupby(
-            ["variant", "l1_init", "topology"], sort=False
+            ["variant", "l1_init", "topology", "fusion"], sort=False
         )[metric_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1822,7 +2175,14 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     contrast_summary = (
         contrasts.groupby(
-            ["contrast", "variant", "l1_init", "topology"], sort=False
+            [
+                "contrast",
+                "variant",
+                "l1_init",
+                "topology",
+                "fusion",
+            ],
+            sort=False,
         )[delta_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1849,7 +2209,14 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     interaction_summary = (
         interactions.groupby(
-            ["interaction", "variant", "l1_init", "topology"], sort=False
+            [
+                "interaction",
+                "variant",
+                "l1_init",
+                "topology",
+                "fusion",
+            ],
+            sort=False,
         )[interaction_cols]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1873,6 +2240,8 @@ def finalize(config: Config) -> dict[str, Any]:
                 "variant",
                 "l1_init",
                 "topology",
+                "fusion",
+                "architecture_case",
                 "layer",
                 "state",
                 "support",
@@ -1897,6 +2266,8 @@ def finalize(config: Config) -> dict[str, Any]:
                 "variant",
                 "l1_init",
                 "topology",
+                "fusion",
+                "architecture_case",
                 "layer",
                 "support",
             ],
@@ -1925,6 +2296,20 @@ def finalize(config: Config) -> dict[str, Any]:
                     "variant": spec["variant"],
                     "l1_init": spec["l1_init"],
                     "topology": spec["topology"],
+                    "fusion": spec["fusion"],
+                    "architecture_case": (
+                        "A"
+                        if spec["topology"] == TOPOLOGY_FF
+                        and spec["fusion"] == FUSION_OFF
+                        else "B"
+                        if spec["topology"]
+                        in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE)
+                        and spec["fusion"] == FUSION_OFF
+                        else "C"
+                        if spec["topology"] == TOPOLOGY_FF
+                        and spec["fusion"] == FUSION_ON
+                        else "D"
+                    ),
                     "seed": int(spec["seed"]),
                     "layer": layer,
                     **metrics,
@@ -1941,7 +2326,15 @@ def finalize(config: Config) -> dict[str, Any]:
     ]
     activity_summary = (
         activity.groupby(
-            ["variant", "l1_init", "topology", "layer"], sort=False
+            [
+                "variant",
+                "l1_init",
+                "topology",
+                "fusion",
+                "architecture_case",
+                "layer",
+            ],
+            sort=False,
         )[activity_metrics]
         .agg(["count", "mean", "std"])
         .reset_index()
@@ -1993,6 +2386,8 @@ def finalize(config: Config) -> dict[str, Any]:
         "rotation": ROTATION,
         "l1_init_modes": list(L1_INIT_MODES),
         "topologies": list(TOPOLOGIES),
+        "fusion_modes": list(FUSION_MODES),
+        "architecture_cases": ["A", "B", "C", "D"],
         "model_seeds": list(MODEL_SEEDS),
         "d0_source_run_count": EXPECTED_SOURCE_RUNS,
         "run_count": int(len(runs)),
@@ -2052,7 +2447,7 @@ def _resolve_config(args: argparse.Namespace) -> Config:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Exp11.0 v2: parallel D0/D1 RSNN history internalization"
+            "Exp11.0 v3: D0/D1 context x fusion architecture factorial"
         )
     )
     parser.add_argument("--repo-root", default=None)
