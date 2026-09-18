@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import torch
+
 from scripts import experiment_10_2_l1_membrane_memory as exp102
 
 
@@ -46,6 +48,41 @@ def test_network_changes_only_l1_membrane_beta() -> None:
     assert model.hidden_linears[1].out_features == 128
     assert model.output_linear.in_features == 128
     assert model.output_linear.out_features == 12
+
+
+
+def test_shift1_replays_exp101_bb_baseline_dynamics() -> None:
+    spec101 = exp102.exp101.RunSpec(
+        exp102.VARIANT,
+        exp102.CODING,
+        exp102.OBJECTIVE,
+        exp102.ROTATION,
+        11,
+    )
+    seed = exp102.exp73._e2e_pair_seed(11, "model_init")
+
+    exp102.exp3.seed_all(seed)
+    reference = exp102.exp101.Exp101Net(spec101, n_classes=12, fs=64.0)
+    exp102.exp3.seed_all(seed)
+    candidate = exp102.Exp102Net(1, n_classes=12, fs=64.0)
+
+    assert set(reference.state_dict()) == set(candidate.state_dict())
+    for name, value in reference.state_dict().items():
+        assert torch.equal(value, candidate.state_dict()[name]), name
+
+    generator = torch.Generator().manual_seed(123)
+    x = torch.randn(2, 9, 30, generator=generator)
+    with torch.no_grad():
+        ref = reference.forward_trajectory(x)
+        got = candidate.forward_trajectory(x)
+
+    assert torch.equal(ref["l2_evidence"], got["l2_evidence"])
+    for layer in ("l1", "l2"):
+        for state in ("syn_current", "pre_reset", "spike", "post_reset"):
+            assert torch.equal(
+                ref["hidden"][layer][state],
+                got["hidden"][layer][state],
+            ), (layer, state)
 
 
 def test_paired_seed_excludes_membrane_shift() -> None:
