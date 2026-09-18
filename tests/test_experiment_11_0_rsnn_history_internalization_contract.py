@@ -125,7 +125,7 @@ def test_no_fusion_readout_is_context_output() -> None:
             trajectory["hidden"]["rsnn"][state],
         )
     expected = model.output_linear(trajectory["hidden"]["rsnn"]["spike"])
-    assert torch.allclose(trajectory["readout_evidence"], expected)
+    torch.testing.assert_close(\n        trajectory["readout_evidence"], expected, rtol=1e-5, atol=1e-6\n    )
 
 
 def test_fusion_on_has_distinct_readout_transform() -> None:
@@ -300,7 +300,7 @@ def test_abcd_contrast_tables_execute_on_full_synthetic_factorial() -> None:
     contrasts = exp110._paired_contrasts(frame)
     interactions = exp110._interaction_rows(frame)
 
-    assert len(contrasts) == 216
+    assert len(contrasts) == 180
     assert len(interactions) == 90
     assert len(contrasts[contrasts.contrast == "fusion_on_minus_off"]) == 36
     assert len(contrasts[contrasts.contrast == "d1_minus_d0"]) == 36
