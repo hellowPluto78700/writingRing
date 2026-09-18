@@ -6,9 +6,11 @@ cd "$REPO_ROOT"
 export REPO_ROOT
 
 prepare_job=$(sbatch --parsable --export=ALL scripts/bash_script/SNN_Bash/prepare_exp_11_0_cpu.bash)
-array_job=$(sbatch --parsable --dependency="afterok:${prepare_job}" --export=ALL scripts/bash_script/SNN_Bash/run_exp_11_0_cpu_array.bash)
+source_job=$(sbatch --parsable --dependency="afterok:${prepare_job}" --export=ALL scripts/bash_script/SNN_Bash/run_exp_11_0_source_cpu_array.bash)
+array_job=$(sbatch --parsable --dependency="afterok:${source_job}" --export=ALL scripts/bash_script/SNN_Bash/run_exp_11_0_cpu_array.bash)
 finalizer_job=$(sbatch --parsable --dependency="afterok:${array_job}" --export=ALL scripts/bash_script/SNN_Bash/finalize_exp_11_0_cpu.bash)
 
 echo "Exp11.0 prepare: ${prepare_job}"
-echo "Exp11.0 18-run CPU array: ${array_job}"
+echo "Exp11.0 D0 matched-source 3-run CPU array: ${source_job}"
+echo "Exp11.0 D0+D1 36-run CPU array: ${array_job}"
 echo "Exp11.0 finalizer: ${finalizer_job}"
