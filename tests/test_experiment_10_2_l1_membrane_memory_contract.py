@@ -142,6 +142,12 @@ def test_slurm_arrays_and_dependencies() -> None:
     assert 'afterok:${replay_job}' in stage_a
     assert 'run_exp_10_2_long_e2e_cpu_array.bash' in stage_b
     assert 'afterok:${long_job}' in stage_b
+    assert 'stage_a_manifest.json' in stage_b
+    assert '"status": "PASS"' in stage_b
+    assert '"run_count": 12' in stage_b
+    assert '"protocol_version": "d1_bb_l1_mem_shift_sweep_v1"' in stage_b
+    assert stage_b.index('stage_a_manifest.json') < stage_b.index('sbatch --parsable')
+    assert 'exit 2' in stage_b
     assert 'afterok:${prepare_job}' in full
     assert 'afterok:${baseline_job}' in full
     assert 'afterok:${replay_job}:${long_job}' in full

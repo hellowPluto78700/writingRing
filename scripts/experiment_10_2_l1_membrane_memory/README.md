@@ -162,7 +162,11 @@ bash scripts/bash_script/SNN_Bash/submit_exp_10_2_stage_b_cpu.bash
 ```
 
 This submits only the nine end-to-end `shift_mem=2/3/4` runs and the full
-finalizer. It assumes the Stage-A baseline and replay artifacts already exist.
+finalizer. The submit script now performs a hard preflight: a matching
+`stage_a_manifest.json` must exist with `status=PASS` and `run_count=12`.
+If Stage A is still running or failed, Stage B exits before submitting any
+Slurm jobs. This prevents the full finalizer from racing unfinished replay
+tasks.
 
 ### Full Stage A + Stage B
 
