@@ -166,13 +166,14 @@ def source_specs() -> list[SourceSpec]:
 
 
 def run_specs() -> list[RunSpec]:
+    # Keep D0/D1 as adjacent array tasks for matched parallel scheduling.
     return [
         RunSpec(variant, l1_init, topology, fusion, seed)
-        for variant in VARIANTS
         for l1_init in L1_INIT_MODES
         for topology in TOPOLOGIES
         for fusion in FUSION_MODES
         for seed in MODEL_SEEDS
+        for variant in VARIANTS
     ]
 
 
