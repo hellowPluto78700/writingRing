@@ -1718,6 +1718,7 @@ A more productive decomposition is:
 \[
 \boxed{
 \text{output-neuron realization}
+}
 \]
 
 and experiments should continue to isolate these factors before combining them.
