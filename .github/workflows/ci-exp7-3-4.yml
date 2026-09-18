@@ -1,10 +1,26 @@
 name: Exp7.3.4 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_4_linear_pretrained_lif_finetuning.py'
+      - 'scripts/experiment_7_3_4_linear_pretrained_lif_finetuning/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_4*'
+      - 'tests/test_experiment_7_3_4_linear_pretrained_lif_finetuning_contract.py'
+      - 'notebooks/experiment_7_3_4_linear_pretrained_lif_finetuning.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - '.github/workflows/ci-exp7-3-4.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_4_linear_pretrained_lif_finetuning.py'
+      - 'scripts/experiment_7_3_4_linear_pretrained_lif_finetuning/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_4*'
+      - 'tests/test_experiment_7_3_4_linear_pretrained_lif_finetuning_contract.py'
+      - 'notebooks/experiment_7_3_4_linear_pretrained_lif_finetuning.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - '.github/workflows/ci-exp7-3-4.yml'
 
 permissions:
   contents: read
