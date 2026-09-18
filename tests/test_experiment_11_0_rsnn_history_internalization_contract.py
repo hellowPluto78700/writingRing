@@ -16,23 +16,35 @@ def make_spec(
     variant: str = exp110.VARIANT_ORIGINAL,
     l1_init: str = exp110.L1_INIT_DYNAMICS_ONLY,
     topology: str = exp110.TOPOLOGY_FF,
+    fusion: str = exp110.FUSION_OFF,
     seed: int = 11,
 ) -> exp110.RunSpec:
-    return exp110.RunSpec(variant, l1_init, topology, seed)
+    return exp110.RunSpec(variant, l1_init, topology, fusion, seed)
 
 
 def test_factorial_contract() -> None:
-    assert exp110.PROTOCOL_VERSION == "d0_d1_l1mem2_rsnn_fusion_internalization_v2"
+    assert exp110.PROTOCOL_VERSION == "d0_d1_l1mem2_context_fusion_factorial_v3"
     assert exp110.VARIANTS == ("original", "postencode_mask")
     assert exp110.ROTATION == 0
     assert exp110.MODEL_SEEDS == (11, 23, 37)
     assert exp110.L1_INIT_MODES == ("dynamics_only", "pretrained_input")
     assert exp110.TOPOLOGIES == ("ff", "diagonal", "dense")
+    assert exp110.FUSION_MODES == ("off", "on")
     specs = exp110.run_specs()
-    assert len(specs) == 36
-    assert exp110.EXPECTED_RUNS == 36
-    assert len({spec.key for spec in specs}) == 36
+    assert len(specs) == 72
+    assert exp110.EXPECTED_RUNS == 72
+    assert len({spec.key for spec in specs}) == 72
     assert {spec.variant for spec in specs} == set(exp110.VARIANTS)
+    assert {spec.fusion for spec in specs} == set(exp110.FUSION_MODES)
+
+
+def test_architecture_case_mapping() -> None:
+    assert make_spec(topology="ff", fusion="off").architecture_case == "A"
+    assert make_spec(topology="diagonal", fusion="off").architecture_case == "B"
+    assert make_spec(topology="dense", fusion="off").architecture_case == "B"
+    assert make_spec(topology="ff", fusion="on").architecture_case == "C"
+    assert make_spec(topology="diagonal", fusion="on").architecture_case == "D"
+    assert make_spec(topology="dense", fusion="on").architecture_case == "D"
 
 
 def test_d0_source_stage_contract() -> None:
@@ -79,6 +91,49 @@ def test_topology_modules_are_strictly_distinct() -> None:
     assert dense.recurrent.weight.shape == (exp110.WIDTH, exp110.WIDTH)
 
 
+def test_fusion_off_removes_fusion_parameters() -> None:
+    off = exp110.Exp110Net(make_spec(fusion="off"), 12, 64.0)
+    on = exp110.Exp110Net(make_spec(fusion="on"), 12, 64.0)
+    assert off.fusion_local is None
+    assert off.fusion_context is None
+    assert off.fusion_lif is None
+    assert isinstance(on.fusion_local, nn.Linear)
+    assert isinstance(on.fusion_context, nn.Linear)
+    assert on.fusion_lif is not None
+    off_params = sum(parameter.numel() for parameter in off.parameters())
+    on_params = sum(parameter.numel() for parameter in on.parameters())
+    assert on_params - off_params == 2 * exp110.WIDTH * exp110.WIDTH
+
+
+def test_no_fusion_readout_is_context_output() -> None:
+    spec = make_spec(topology="diagonal", fusion="off")
+    model = exp110.Exp110Net(spec, 12, 64.0)
+    exp110._initialize_paired(model, spec)
+    x = torch.randn(2, 9, 30)
+    trajectory = model.forward_trajectory(x)
+    for state in ("syn_current", "pre_reset", "spike", "post_reset"):
+        assert torch.equal(
+            trajectory["hidden"]["readout"][state],
+            trajectory["hidden"]["rsnn"][state],
+        )
+    expected = model.output_linear(trajectory["hidden"]["rsnn"]["spike"])
+    assert torch.allclose(trajectory["readout_evidence"], expected)
+
+
+def test_fusion_on_has_distinct_readout_transform() -> None:
+    spec = make_spec(topology="diagonal", fusion="on")
+    model = exp110.Exp110Net(spec, 12, 64.0)
+    exp110._initialize_paired(model, spec)
+    x = torch.randn(2, 9, 30)
+    trajectory = model.forward_trajectory(x)
+    assert trajectory["hidden"]["readout"]["spike"].shape == (
+        2,
+        9,
+        exp110.WIDTH,
+    )
+    assert trajectory["readout_evidence"].shape == (2, 9, 12)
+
+
 def test_diagonal_recurrence_has_no_cross_neuron_mixing() -> None:
     module = exp110.DiagonalRecurrent()
     with torch.no_grad():
@@ -94,17 +149,21 @@ def test_paired_initialization_is_shared_across_variants() -> None:
     d0_spec = make_spec(
         variant=exp110.VARIANT_ORIGINAL,
         topology=exp110.TOPOLOGY_DENSE,
+        fusion=exp110.FUSION_ON,
         seed=23,
     )
     d1_spec = make_spec(
         variant=exp110.VARIANT_POSTENCODE,
         topology=exp110.TOPOLOGY_DENSE,
+        fusion=exp110.FUSION_ON,
         seed=23,
     )
     d0 = exp110.Exp110Net(d0_spec, 12, 64.0)
     d1 = exp110.Exp110Net(d1_spec, 12, 64.0)
     exp110._initialize_paired(d0, d0_spec)
     exp110._initialize_paired(d1, d1_spec)
+    assert d0.fusion_local is not None and d1.fusion_local is not None
+    assert d0.fusion_context is not None and d1.fusion_context is not None
     for left, right in (
         (d0.l1_input.weight, d1.l1_input.weight),
         (d0.rsnn_input.weight, d1.rsnn_input.weight),
@@ -117,8 +176,8 @@ def test_paired_initialization_is_shared_across_variants() -> None:
 
 
 def test_dense_and_diagonal_share_paired_diagonal_initialization() -> None:
-    diag_spec = make_spec(topology="diagonal", seed=23)
-    dense_spec = make_spec(topology="dense", seed=23)
+    diag_spec = make_spec(topology="diagonal", fusion="off", seed=23)
+    dense_spec = make_spec(topology="dense", fusion="off", seed=23)
     diag = exp110.Exp110Net(diag_spec, 12, 64.0)
     dense = exp110.Exp110Net(dense_spec, 12, 64.0)
     exp110._initialize_paired(diag, diag_spec)
@@ -158,12 +217,12 @@ def test_pretrained_contract_copies_only_l1_input_and_keeps_trainable() -> None:
 
 
 def test_forward_trajectory_contract() -> None:
-    spec = make_spec(topology="diagonal")
+    spec = make_spec(topology="diagonal", fusion="on")
     model = exp110.Exp110Net(spec, 12, 64.0)
     exp110._initialize_paired(model, spec)
     x = torch.randn(2, 9, 30)
     trajectory = model.forward_trajectory(x)
-    assert trajectory["fusion_evidence"].shape == (2, 9, 12)
+    assert trajectory["readout_evidence"].shape == (2, 9, 12)
     assert trajectory["rsnn_external_input"].shape == (2, 9, exp110.WIDTH)
     assert trajectory["rsnn_recurrent_input"].shape == (2, 9, exp110.WIDTH)
     for layer in exp110.LAYERS:
@@ -179,6 +238,7 @@ def test_probe_inventory_has_valid_and_window_supports() -> None:
     names = exp110.probe_names()
     assert len(names) == exp110.EXPECTED_PROBES_PER_RUN
     assert len(set(names)) == len(names)
+    assert exp110.LAYERS == ("l1", "rsnn", "readout")
     for layer in exp110.LAYERS:
         assert f"{layer}__communication__valid__whole_count" in names
         assert f"{layer}__communication__valid__fixed250_count" in names
@@ -198,13 +258,13 @@ def test_training_is_wcce_only_with_gradient_clipping() -> None:
     assert "tsce" not in run_block.lower()
 
 
-def test_finalizer_contains_paired_d1_d0_contrast() -> None:
+def test_finalizer_contains_abcd_contrasts() -> None:
     source = (
         REPO_ROOT / "scripts" / "experiment_11_0_rsnn_history_internalization.py"
     ).read_text()
+    assert '"fusion_on_minus_off"' in source
+    assert '"recurrence_x_fusion"' in source
     assert '"d1_minus_d0"' in source
-    assert "VARIANT_POSTENCODE" in source
-    assert "VARIANT_ORIGINAL" in source
 
 
 def test_slurm_contract() -> None:
@@ -213,7 +273,7 @@ def test_slurm_contract() -> None:
     run = (root / "run_exp_11_0_cpu_array.bash").read_text()
     submit = (root / "submit_exp_11_0_cpu.bash").read_text()
     assert "#SBATCH --array=0-2%3" in source_run
-    assert "#SBATCH --array=0-35%36" in run
+    assert "#SBATCH --array=0-71%50" in run
     assert "#SBATCH --cpus-per-task=1" in source_run
     assert "#SBATCH --cpus-per-task=1" in run
     for script in (source_run, run):
@@ -227,6 +287,7 @@ def test_slurm_contract() -> None:
     assert 'afterok:${prepare_job}' in submit
     assert 'afterok:${source_job}' in submit
     assert 'afterok:${array_job}' in submit
+    assert "72-run A/B/C/D" in submit
 
 
 def test_notebook_is_aggregation_only() -> None:
@@ -237,6 +298,8 @@ def test_notebook_is_aggregation_only() -> None:
     assert "method_summary.csv" in notebook
     assert "temporal_gap_summary.csv" in notebook
     assert "paired_contrast_summary.csv" in notebook
-    assert "d1_minus_d0" in notebook
+    assert "fusion_on_minus_off" in notebook
+    assert "recurrence_x_fusion" in notebook
+    assert "readout_comm_valid" in notebook
     assert "run_one(" not in notebook
     assert "torch.optim" not in notebook
