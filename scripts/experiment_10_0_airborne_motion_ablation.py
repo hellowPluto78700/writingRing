@@ -785,107 +785,143 @@ def run_one(
     model_init_seed = exp73._e2e_pair_seed(spec.seed, "model_init")
     exp3.seed_all(model_init_seed)
     model = exp73.Exp73Net("linear", len(data.labels), data.fs).to(device)
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=exp72.LR,
-        weight_decay=exp72.WEIGHT_DECAY,
+    resume_checkpoint = (
+        not force
+        and artifacts["checkpoint"].exists()
+        and artifacts["history"].exists()
     )
-    train_loader = exp73._raw_loaders(
-        data, spec.seed, config.batch_size, True
-    )["train"]
+    if resume_checkpoint:
+        checkpoint_payload = torch.load(
+            artifacts["checkpoint"],
+            map_location="cpu",
+            weights_only=False,
+        )
+        if checkpoint_payload.get("experiment_id") != EXPERIMENT_ID:
+            raise RuntimeError(
+                f"{spec.key}: checkpoint experiment identity mismatch"
+            )
+        if checkpoint_payload.get("protocol_version") != PROTOCOL_VERSION:
+            raise RuntimeError(
+                f"{spec.key}: checkpoint protocol identity mismatch"
+            )
+        if checkpoint_payload.get("spec") != asdict(spec):
+            raise RuntimeError(f"{spec.key}: checkpoint spec mismatch")
+        if checkpoint_payload.get("split_sample_hashes") != split_hashes:
+            raise RuntimeError(
+                f"{spec.key}: checkpoint split geometry no longer matches current data"
+            )
+        if int(checkpoint_payload.get("model_init_seed", -1)) != int(model_init_seed):
+            raise RuntimeError(f"{spec.key}: checkpoint model-init seed mismatch")
+        best_state = checkpoint_payload["model_state_dict"]
+        best_epoch = int(checkpoint_payload["best_epoch"])
+        stopped_epoch = int(checkpoint_payload["stopped_epoch"])
+        best_ba = float(checkpoint_payload["best_val_ba"])
+        best_loss = float(checkpoint_payload["best_val_objective_loss"])
+    else:
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=exp72.LR,
+            weight_decay=exp72.WEIGHT_DECAY,
+        )
+        train_loader = exp73._raw_loaders(
+            data, spec.seed, config.batch_size, True
+        )["train"]
+        eval_loaders_for_training = exp73._raw_loaders(
+            data, spec.seed, config.batch_size, False
+        )
+
+        best_state: dict[str, torch.Tensor] | None = None
+        best_epoch = -1
+        best_ba = -1.0
+        best_loss = float("inf")
+        stopped_epoch = config.max_epochs
+        history: list[dict[str, float]] = []
+
+        for epoch in range(1, config.max_epochs + 1):
+            model.train()
+            train_loss_sum = 0.0
+            n_total = 0
+            for X, y, lengths in train_loader:
+                X = X.to(device=device, dtype=torch.float32)
+                y = y.to(device)
+                lengths = lengths.to(device)
+                optimizer.zero_grad(set_to_none=True)
+                trajectory = model.forward_trajectory(X)
+                loss, _ = exp73._objective_loss_scores(
+                    trajectory["evidence"],
+                    lengths,
+                    y,
+                    "wcce",
+                )
+                loss.backward()
+                optimizer.step()
+                train_loss_sum += float(loss.detach()) * len(y)
+                n_total += len(y)
+
+            train_metrics, _, _ = _evaluate_native(
+                model, eval_loaders_for_training["train"], device
+            )
+            val_metrics, _, _ = _evaluate_native(
+                model, eval_loaders_for_training["val"], device
+            )
+            history.append(
+                {
+                    "epoch": float(epoch),
+                    "train_ba": float(train_metrics["balanced_accuracy"]),
+                    "val_ba": float(val_metrics["balanced_accuracy"]),
+                    "train_loss": train_loss_sum / max(n_total, 1),
+                    "val_loss": float(val_metrics["objective_loss"]),
+                }
+            )
+            if _checkpoint_improved(val_metrics, best_ba, best_loss):
+                best_ba = float(val_metrics["balanced_accuracy"])
+                best_loss = float(val_metrics["objective_loss"])
+                best_epoch = epoch
+                best_state = {
+                    key: value.detach().cpu().clone()
+                    for key, value in model.state_dict().items()
+                }
+            if (
+                epoch >= MIN_EPOCHS
+                and best_epoch > 0
+                and epoch - best_epoch >= PATIENCE
+            ):
+                stopped_epoch = epoch
+                break
+
+        if best_state is None:
+            raise RuntimeError(f"No A2 checkpoint selected for {spec.key}")
+
+        artifacts["checkpoint"].parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "experiment_id": EXPERIMENT_ID,
+                "protocol_version": PROTOCOL_VERSION,
+                "spec": asdict(spec),
+                "variant": spec.variant,
+                "architecture": ARCHITECTURE,
+                "architecture_shifts": ARCHITECTURE_SHIFTS,
+                "training_method": "Exp7.3 A2_e2e_linear_wcce",
+                "readout": "linear",
+                "objective": "wcce",
+                "regularization": "task_only",
+                "bias": False,
+                "best_epoch": best_epoch,
+                "stopped_epoch": stopped_epoch,
+                "best_val_ba": best_ba,
+                "best_val_objective_loss": best_loss,
+                "model_init_seed": int(model_init_seed),
+                "split_sample_hashes": split_hashes,
+                "model_state_dict": best_state,
+            },
+            artifacts["checkpoint"],
+        )
+        artifacts["history"].parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(history).to_csv(artifacts["history"], index=False)
+
     eval_loaders = exp73._raw_loaders(
         data, spec.seed, config.batch_size, False
     )
-
-    best_state: dict[str, torch.Tensor] | None = None
-    best_epoch = -1
-    best_ba = -1.0
-    best_loss = float("inf")
-    stopped_epoch = config.max_epochs
-    history: list[dict[str, float]] = []
-
-    for epoch in range(1, config.max_epochs + 1):
-        model.train()
-        train_loss_sum = 0.0
-        n_total = 0
-        for X, y, lengths in train_loader:
-            X = X.to(device=device, dtype=torch.float32)
-            y = y.to(device)
-            lengths = lengths.to(device)
-            optimizer.zero_grad(set_to_none=True)
-            trajectory = model.forward_trajectory(X)
-            loss, _ = exp73._objective_loss_scores(
-                trajectory["evidence"],
-                lengths,
-                y,
-                "wcce",
-            )
-            loss.backward()
-            optimizer.step()
-            train_loss_sum += float(loss.detach()) * len(y)
-            n_total += len(y)
-
-        train_metrics, _, _ = _evaluate_native(
-            model, eval_loaders["train"], device
-        )
-        val_metrics, _, _ = _evaluate_native(
-            model, eval_loaders["val"], device
-        )
-        history.append(
-            {
-                "epoch": float(epoch),
-                "train_ba": float(train_metrics["balanced_accuracy"]),
-                "val_ba": float(val_metrics["balanced_accuracy"]),
-                "train_loss": train_loss_sum / max(n_total, 1),
-                "val_loss": float(val_metrics["objective_loss"]),
-            }
-        )
-        if _checkpoint_improved(val_metrics, best_ba, best_loss):
-            best_ba = float(val_metrics["balanced_accuracy"])
-            best_loss = float(val_metrics["objective_loss"])
-            best_epoch = epoch
-            best_state = {
-                key: value.detach().cpu().clone()
-                for key, value in model.state_dict().items()
-            }
-        if (
-            epoch >= MIN_EPOCHS
-            and best_epoch > 0
-            and epoch - best_epoch >= PATIENCE
-        ):
-            stopped_epoch = epoch
-            break
-
-    if best_state is None:
-        raise RuntimeError(f"No A2 checkpoint selected for {spec.key}")
-
-    artifacts["checkpoint"].parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "experiment_id": EXPERIMENT_ID,
-            "protocol_version": PROTOCOL_VERSION,
-            "spec": asdict(spec),
-            "variant": spec.variant,
-            "architecture": ARCHITECTURE,
-            "architecture_shifts": ARCHITECTURE_SHIFTS,
-            "training_method": "Exp7.3 A2_e2e_linear_wcce",
-            "readout": "linear",
-            "objective": "wcce",
-            "regularization": "task_only",
-            "bias": False,
-            "best_epoch": best_epoch,
-            "stopped_epoch": stopped_epoch,
-            "best_val_ba": best_ba,
-            "best_val_objective_loss": best_loss,
-            "model_init_seed": int(model_init_seed),
-            "split_sample_hashes": split_hashes,
-            "model_state_dict": best_state,
-        },
-        artifacts["checkpoint"],
-    )
-    artifacts["history"].parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(history).to_csv(artifacts["history"], index=False)
-
     model.load_state_dict(best_state, strict=True)
     native_metrics: dict[str, dict[str, float]] = {}
     native_arrays: dict[str, tuple[np.ndarray, np.ndarray]] = {}
