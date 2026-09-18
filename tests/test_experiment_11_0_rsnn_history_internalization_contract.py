@@ -125,7 +125,12 @@ def test_no_fusion_readout_is_context_output() -> None:
             trajectory["hidden"]["rsnn"][state],
         )
     expected = model.output_linear(trajectory["hidden"]["rsnn"]["spike"])
-    torch.testing.assert_close(\n        trajectory["readout_evidence"], expected, rtol=1e-5, atol=1e-6\n    )
+    torch.testing.assert_close(
+        trajectory["readout_evidence"],
+        expected,
+        rtol=1e-5,
+        atol=1e-6,
+    )
 
 
 def test_fusion_on_has_distinct_readout_transform() -> None:
