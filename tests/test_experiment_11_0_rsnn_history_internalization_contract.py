@@ -372,6 +372,19 @@ def test_abcd_contrast_tables_execute_on_full_synthetic_factorial() -> None:
     assert row.iloc[0]["interaction_native_test_ba"] == 7.0
 
 
+def test_run_one_cli_summary_uses_readout_probe_names() -> None:
+    source = (
+        REPO_ROOT / "scripts" / "experiment_11_0_rsnn_history_internalization.py"
+    ).read_text()
+    main_block = source[source.index("def main()"):]
+
+    assert '"readout_temporal_gap"' in main_block
+    assert '"readout__communication__valid__fixed250_count"' in main_block
+    assert '"readout__communication__valid__whole_count"' in main_block
+    assert "fusion__communication__valid__fixed250_count" not in main_block
+    assert "fusion__communication__valid__whole_count" not in main_block
+
+
 def test_finalizer_contains_abcd_contrasts() -> None:
     source = (
         REPO_ROOT / "scripts" / "experiment_11_0_rsnn_history_internalization.py"

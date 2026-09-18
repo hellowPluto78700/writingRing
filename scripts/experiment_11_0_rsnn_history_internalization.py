@@ -2650,13 +2650,13 @@ def main() -> None:
                     "native_test_ba": payload["native_metrics"]["test"][
                         "balanced_accuracy"
                     ],
-                    "fusion_temporal_gap": _probe_value(
+                    "readout_temporal_gap": _probe_value(
                         probes,
-                        "fusion__communication__valid__fixed250_count",
+                        "readout__communication__valid__fixed250_count",
                     )
                     - _probe_value(
                         probes,
-                        "fusion__communication__valid__whole_count",
+                        "readout__communication__valid__whole_count",
                     ),
                 },
                 indent=2,
