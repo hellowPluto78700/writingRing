@@ -448,7 +448,7 @@ def prepare_all(config: Config) -> dict[str, Any]:
             "-> Linear(12)"
         ),
         "l1_init_modes": list(L1_INIT_MODES),
-        "pretrained_input_contract": (
+        "pretrained_l1_contract": (
             "D0 and D1 both use seed-matched source input->L1 weights. "
             "pretrained_trainable keeps the copied L1 weight trainable; "
             "pretrained_frozen sets requires_grad=False and excludes it from "
@@ -2014,7 +2014,7 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
                     row = {
                         "interaction": "pretrained_trainable_x_recurrence",
                         "variant": variant,
-                        "l1_init": "pretrained_vs_dynamics",
+                        "l1_init": "pretrained_trainable_vs_dynamics",
                         "topology": topology,
                         "fusion": fusion,
                         "seed": seed,
@@ -2575,7 +2575,7 @@ def _resolve_config(args: argparse.Namespace) -> Config:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Exp11.0 v3: D0/D1 context x fusion architecture factorial"
+            "Exp11.0 v4: D0/D1 context x fusion with frozen-L1 control"
         )
     )
     parser.add_argument("--repo-root", default=None)
