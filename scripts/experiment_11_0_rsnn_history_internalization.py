@@ -412,9 +412,9 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
         "question": (
-            "Can RSNN context internalize the Fixed250 temporal information for "
-            "both D0 original and D1 post-encode-mask inputs, and does the D1 "
-            "preprocessing advantage remain after recurrent history modeling?"
+            "Can recurrent context, Fusion remapping, or their interaction "
+            "internalize the Fixed250 temporal information for both D0 and D1 "
+            "while preserving a single time-shared output matrix?"
         ),
         "variants": list(VARIANTS),
         "variant_definitions": {
@@ -465,7 +465,9 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "fusion_recurrent": False,
         "objective": "valid-length mean time-shared WCCE only",
         "output": "single shared bias-free 128x12 Linear",
-        "communication": "binary spikes in L1, RSNN, and Fusion",
+        "communication": (
+            "binary spikes in L1/context; Fusion also uses binary spikes when enabled"
+        ),
         "gradient_clip_norm": GRAD_CLIP_NORM,
         "supports": list(SUPPORTS),
         "probe_layers": list(LAYERS),
