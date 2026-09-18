@@ -17,6 +17,7 @@ from scripts import experiment_3_0_1_single_tau_objectives as exp3
 from scripts import experiment_6_0_multiscale_phase_evidence as exp60
 from scripts import experiment_7_2_two_layer_tau_training as exp72
 from scripts import experiment_7_3_training_strategy_decomposition as exp73
+from scripts import experiment_8_1_hidden_quantization_ablation as exp81
 from scripts import experiment_8_1_1_two_layer_mt_factorial as exp811
 from scripts import experiment_9_0_within_user_generalization as exp90
 from scripts import experiment_10_0_airborne_motion_ablation as exp10
@@ -438,7 +439,7 @@ def _evaluate_lif_transfer(
             Xd = X.to(device=device, dtype=torch.float32)
             ld = lengths.to(device)
             trajectory = model.forward_trajectory(Xd)
-            spikes = exp101.exp81._output_lif_spikes(trajectory["l2_evidence"])
+            spikes = exp81._output_lif_spikes(trajectory["l2_evidence"])
             mask = exp101._valid_mask(ld, spikes.shape[1]).to(
                 spikes.dtype
             ).unsqueeze(-1)
