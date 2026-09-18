@@ -1,0 +1,83 @@
+{
+  "analog_aggregations": [
+    "whole_mean",
+    "fixed250_ordered_mean"
+  ],
+  "analog_states": [
+    "syn_current",
+    "pre_reset",
+    "post_reset"
+  ],
+  "checkpoint_count": 18,
+  "communication_aggregations": [
+    "whole_mean",
+    "fixed250_ordered_mean",
+    "whole_count",
+    "fixed250_count"
+  ],
+  "communication_state": "communication",
+  "evaluation_only": true,
+  "expected_probe_rows": 720,
+  "experiment_id": "experiment_10_2_2_valid_window_probes",
+  "layers": [
+    "l1",
+    "l2"
+  ],
+  "primary_contrast": "window_minus_valid",
+  "probe_count_per_checkpoint": 40,
+  "probe_selection_metric": "validation balanced accuracy",
+  "protocol_version": "exp10_2_1_checkpoints_valid_window_v1",
+  "reported_metrics": [
+    "accuracy",
+    "balanced_accuracy",
+    "macro_f1"
+  ],
+  "snn_training": false,
+  "source_experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+  "source_manifest": {
+    "codings": [
+      "binary",
+      "weighted31"
+    ],
+    "dataset": "postencode_mask",
+    "expected_run_count": 18,
+    "experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+    "l1_mem_shift": 2,
+    "l2_mem_shifts": [
+      1,
+      2,
+      3
+    ],
+    "model_seeds": [
+      11,
+      23,
+      37
+    ],
+    "phase_aware_readout": false,
+    "primary_outputs": [
+      "run_metrics.csv",
+      "method_summary.csv",
+      "paired_contrasts.csv",
+      "paired_contrast_summary.csv",
+      "interaction_runs.csv",
+      "interaction_summary.csv",
+      "activity_runs.csv",
+      "activity_summary.csv",
+      "probe_runs.csv",
+      "probe_summary.csv"
+    ],
+    "protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+    "readout": "time_shared_only",
+    "rotation": 0,
+    "run_count": 18,
+    "statistical_scope": "one locked cross-user split; seeds 11/23/37 are paired optimization replicates, not independent user splits",
+    "status": "PASS",
+    "weighted_cap": 31
+  },
+  "source_protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+  "statistical_scope": "one locked cross-user split; seeds 11/23/37 are paired optimization replicates inherited from Exp10.2.1",
+  "supports": [
+    "valid",
+    "window"
+  ]
+}
