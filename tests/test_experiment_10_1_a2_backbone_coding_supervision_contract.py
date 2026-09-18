@@ -18,17 +18,24 @@ def test_factorial_run_contract() -> None:
         "l1_l2_joint",
         "l2_wcce_plus_0p1_l1_tsce",
     )
-    assert exp101.ROTATIONS == (0, 1, 2, 3, 4)
+    assert exp101.ROTATIONS == (0,)
     assert exp101.MODEL_SEEDS == (11, 23, 37)
     assert exp101.TSCE_LAMBDA == 0.1
     specs = exp101.run_specs()
-    assert len(specs) == 180
-    assert len({spec.key for spec in specs}) == 180
+    assert len(specs) == 36
+    assert len({spec.key for spec in specs}) == 36
     assert specs[0].key == "original__bb__l2_wcce__rotation0__seed11"
     assert specs[-1].key == (
-        "postencode_mask__mm__l2_wcce_plus_0p1_l1_tsce__rotation4__seed37"
+        "postencode_mask__mm__l2_wcce_plus_0p1_l1_tsce__rotation0__seed37"
     )
 
+
+
+def test_single_split_is_exp10_rotation0() -> None:
+    roles = exp101.exp90._rotation_fold_roles(0)
+    assert roles[0] == "test"
+    assert roles[1] == "val"
+    assert all(roles[fold] == "train" for fold in (2, 3, 4))
 
 def test_bb_mm_coding_contract() -> None:
     bb = exp101.RunSpec("original", "bb", "l2_wcce", 0, 11)
@@ -125,7 +132,7 @@ def test_joint_is_single_cooperative_evidence_path() -> None:
 
 def test_model_init_is_factor_independent() -> None:
     specs = [
-        exp101.RunSpec(variant, coding, objective, 3, 23)
+        exp101.RunSpec(variant, coding, objective, 0, 23)
         for variant in exp101.VARIANTS
         for coding in exp101.CODINGS
         for objective in exp101.OBJECTIVES
@@ -153,7 +160,7 @@ def test_slurm_multi_cpu_contract() -> None:
     submit = (root / "submit_exp_10_1_cpu.bash").read_text()
     finalize = (root / "finalize_exp_10_1_cpu.bash").read_text()
 
-    assert "#SBATCH --array=0-179%20" in run
+    assert "#SBATCH --array=0-35%36" in run
     assert "#SBATCH --cpus-per-task=1" in run
     assert "OMP_NUM_THREADS=1" in run
     assert "MKL_NUM_THREADS=1" in run
@@ -170,7 +177,7 @@ def test_slurm_multi_cpu_contract() -> None:
 def test_notebook_is_aggregation_only() -> None:
     path = REPO_ROOT / "notebooks" / "experiment_10_1_a2_backbone_coding_supervision.ipynb"
     notebook = path.read_text()
-    assert "d0_d1_bb_mm_supervision_factorial_v1" in notebook
+    assert "d0_d1_bb_mm_supervision_single_split_v1" in notebook
     assert "condition_summary.csv" in notebook
     assert "information_path_summary.csv" in notebook
     assert "information_path_contrast_summary.csv" in notebook
