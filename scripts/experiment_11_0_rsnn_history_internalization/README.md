@@ -1,233 +1,198 @@
-# Exp11.0 — D0/D1 context × fusion factorial
+# Exp11.0 — D0/D1 context × fusion factorial with frozen-L1 control
 
-## Question
+## Goal
 
-Exp10.2.2 showed that ordered Fixed250 probes expose temporal information that the native time-shared readout cannot fully use. Exp11.0 tests two separate mechanisms for internalizing that information:
+Exp11.0 asks whether the temporal information exposed by external Fixed250 probes can be internalized by:
 
-1. recurrence can convert local L1 evidence into a history-aware context representation;
-2. a Fusion SNN can use that context to remap the current local representation before the shared Linear readout.
+1. recurrent context;
+2. a Fusion SNN that remaps current local evidence using context;
+3. their interaction.
 
-The experiment now implements the complete A/B/C/D decomposition rather than keeping Fusion always enabled.
+The new frozen-L1 control separates **using the original pretrained local representation** from **end-to-end reshaping of L1 by WCCE**.
 
 ## Dataset factor
 
 - D0 `original`: `Encoder(a)`
 - D1 `postencode_mask`: `m * Encoder(a)`
 
-D0 and D1 use paired sample geometry, user split, seed, common random initialization streams, and DataLoader ordering.
+D0 and D1 remain paired by sample identity, user split, seed, common random initialization, and DataLoader ordering.
 
-## A/B/C/D architecture decomposition
+## A/B/C/D architecture factor
 
-| Case | Context topology | Fusion | Architecture | Main question |
-| --- | --- | --- | --- | --- |
-| A | FF / recurrence off | off | `L1 -> FF context -> Linear` | depth / context control |
-| B | diagonal or dense RSNN | off | `L1 -> RSNN -> Linear` | recurrence itself |
-| C | FF / recurrence off | on | `L1 -> FF context -> Fusion(L1, context) -> Linear` | Fusion architecture itself |
-| D | diagonal or dense RSNN | on | `L1 -> RSNN context -> Fusion(L1, context) -> Linear` | target history-conditioned remapping |
+| Case | Context | Fusion | Architecture |
+| --- | --- | --- | --- |
+| A | FF / recurrence off | off | `L1 -> FF context -> Linear` |
+| B | diagonal or dense RSNN | off | `L1 -> RSNN -> Linear` |
+| C | FF / recurrence off | on | `L1 -> FF context -> Fusion(L1, context) -> Linear` |
+| D | diagonal or dense RSNN | on | `L1 -> RSNN context -> Fusion(L1, context) -> Linear` |
 
-B and D each have two recurrence variants:
+B and D each have diagonal and dense variants, so each dataset/L1-mode/seed has six concrete architectures.
 
-- `diagonal`: 128 trainable self-recurrent weights;
-- `dense`: full `128 x 128` recurrent matrix.
+## L1 modes
 
-This gives six concrete architecture configurations per dataset/L1-init/seed:
+Three L1 conditions are now used:
 
-```text
-A         = ff       + fusion off
-B-diag    = diagonal + fusion off
-B-dense   = dense    + fusion off
-C         = ff       + fusion on
-D-diag    = diagonal + fusion on
-D-dense   = dense    + fusion on
-```
+### dynamics_only
+
+- L1 dynamics follow Exp10.2.
+- `input -> L1` weight is paired-random.
+- L1 weight is trainable.
+
+### pretrained_trainable
+
+- Load the seed-matched source `input -> L1` weight.
+- Keep it trainable under Exp11.0 WCCE.
+- Measures the best end-to-end result when L1 is allowed to adapt.
+
+### pretrained_frozen
+
+- Load the exact same seed-matched source `input -> L1` weight.
+- Set `requires_grad=False`.
+- Exclude the L1 weight from the Adam parameter list.
+- Downstream context/Fusion/readout remain trainable.
+
+This branch directly tests whether the downstream SNN can exploit the temporal representation that already existed before Exp11.0 training.
+
+D1 source is the existing Exp10.2.1 binary/L1-mem2/L2-mem1 checkpoint. D0 first trains the same three matched source checkpoints as before. Only `input -> L1` is inherited.
 
 ## Dynamics
 
 L1:
 
 - width 128;
-- `tau_mem ~= 54 ms` from membrane shift2;
-- original multi-tau synaptic shifts `(2,3,4)`;
+- `tau_mem ~= 54 ms`;
+- synaptic shifts `(2,3,4)`;
 - binary communication.
 
-Context layer:
+Context:
 
 - width 128;
-- `tau_syn ~= 54 ms`;
-- `tau_mem ~= 54 ms`;
-- binary communication;
+- `tau_syn ~= tau_mem ~= 54 ms`;
 - topology `ff / diagonal / dense`.
 
-`ff` means **no recurrent feedback**, but the context neurons still have their intrinsic 54 ms synaptic and membrane dynamics. Therefore A/B isolates recurrent feedback on top of matched local neuron dynamics.
+Fusion, when enabled:
 
-Fusion layer, when enabled:
-
-```math
-I_t^F
-=
-\alpha_F I_{t-1}^F
-+
-W_z z_t
-+
-W_r r_t
-```
-
-with width 128, `tau_syn ~= tau_mem ~= 54 ms`, binary communication, and no recurrence.
-
-When Fusion is disabled, no Fusion weight matrices are instantiated. The shared Linear reads the context output directly.
-
-## Readout representation
-
-To make probes comparable across all four cases, the final hidden representation is named `readout`:
-
-- Fusion off: `readout_t = context_t`;
-- Fusion on: `readout_t = Fusion(L1_t, context_t)`.
-
-Thus the same `readout whole` and `readout Fixed250` probes can be compared across A/B/C/D without pretending a Fusion layer exists in A/B.
-
-## L1 initialization factor
-
-Two modes:
-
-### dynamics_only
-
-Use the Exp10.2 L1 dynamics but paired-random `input -> L1` weights.
-
-### pretrained_input
-
-Copy only the seed-matched source `input -> L1` matrix and keep it trainable.
-
-D1 source:
-
-```text
-Exp10.2.1 binary__l1mem2__l2mem1__seed{seed}
-```
-
-D0 has no pre-existing matched source, so Exp11.0 first trains three D0 binary/WCCE `L1 mem2 / L2 mem1` source checkpoints. D0 never inherits D1-trained input weights.
+- width 128;
+- `tau_syn ~= tau_mem ~= 54 ms`;
+- receives both L1 spikes and context spikes;
+- no recurrence.
 
 ## Objective
 
-Every main run uses only:
+All main runs use only valid-length mean WCCE:
 
 ```math
 e_t = W_o h_t^{readout}
 ```
 
 ```math
-score =
-\frac{1}{T_{valid}}
-\sum_{t<T_{valid}} e_t
+score = \frac{1}{T_{valid}}\sum_{t<T_{valid}} e_t
 ```
 
 ```math
 \mathcal{L}=CE(score,y)
 ```
 
-No TSCE or auxiliary loss is used. The output matrix is bias-free and time-shared. Gradient norm is clipped at 1.0.
+No TSCE or auxiliary loss is used. Gradient norm is clipped at 1.0.
 
 ## Main factorial
 
 ```text
 2 datasets
-x 2 L1 init modes
+x 3 L1 modes
 x 3 context topologies
-x 2 fusion states
+x 2 Fusion states
 x 3 seeds
-= 72 main runs
+= 108 main runs
 ```
 
-Before the main factorial, three matched D0 source runs are trained.
+The run list keeps D0/D1 adjacent for every matched condition. Slurm caps concurrency at 50.
 
-## Core contrasts
+## Frozen-L1 mechanism questions
 
-The finalizer computes paired contrasts for identical seed/split conditions.
+### Can recurrence use the original representation?
 
-### Recurrence itself
+Under `pretrained_frozen`:
 
 ```text
-B-diag - A
-B-dense - A
+B - A
 ```
 
-and, with Fusion enabled:
+tests recurrence without allowing WCCE to change L1.
+
+### Does context-conditioned remapping help?
+
+Under `pretrained_frozen`:
 
 ```text
-D-diag - C
-D-dense - C
+D - B
 ```
 
-### Fusion itself
+tests whether Fusion adds value on top of a fixed recurrent context.
+
+### How much does end-to-end L1 adaptation matter?
 
 ```text
-C - A
-D-diag - B-diag
-D-dense - B-dense
+pretrained_trainable - pretrained_frozen
 ```
 
-implemented as `fusion_on_minus_off`.
+is reported for every dataset/topology/Fusion/seed combination.
 
-### Recurrence × Fusion interaction
+## L1 representation preservation
 
-The key mechanism interaction is:
+Each pretrained run stores:
 
 ```text
-(D - C) - (B - A)
+relative Frobenius drift =
+||W_L1(final) - W_L1(source)||_F / ||W_L1(source)||_F
 ```
 
-reported separately for diagonal and dense recurrence.
+and cosine similarity to the source L1 weight.
 
-A positive interaction means recurrence becomes more useful when the history state is allowed to remap current L1 evidence through Fusion, rather than only being decoded directly.
+Expected frozen behavior:
 
-### Dataset and pretraining effects
+```text
+relative drift = 0
+cosine similarity = 1
+```
 
-The finalizer also reports:
+The finalizer also compares both L1 analog and binary probes:
 
-- paired `D1 - D0`;
-- `pretrained_input - dynamics_only`;
-- D1 × recurrence;
-- D1 × Fusion;
-- pretraining × recurrence.
+- L1 pre-reset whole;
+- L1 pre-reset Fixed250;
+- L1 binary whole;
+- L1 binary Fixed250.
 
-## Fixed250 internalization diagnostics
+This matters because the previously observed ~70% Fixed250 signal is associated more closely with the L1 pre-reset analog state than with the binary spike output.
 
-For L1, context/RSNN, and final `readout`, under both valid-length and whole-window support:
+## Readout probes
 
-- pre-reset whole mean;
-- pre-reset ordered Fixed250 mean;
-- binary whole mean;
-- binary ordered Fixed250 mean;
-- binary whole count;
-- binary Fixed250 count.
+The final hidden representation is called `readout`:
 
-Main diagnostic:
+- Fusion off: `readout = context`;
+- Fusion on: `readout = Fusion(L1, context)`.
+
+For L1, context/RSNN, and readout, both valid-length and whole-window probe support are evaluated.
+
+Primary temporal diagnostic:
 
 ```math
-G_{temporal}
-=
-BA_{Fixed250}
--
-BA_{whole}
+G_{temporal}=BA_{Fixed250}-BA_{whole}.
 ```
 
-The desired target-model signature is that the final `readout` gap becomes smaller while whole/native BA increases.
+## Main contrasts
 
-## Recurrence health diagnostics
+Finalization reports:
 
-Each run records:
-
-- firing activity for L1/context/readout;
-- dead-neuron fraction;
-- post-valid residual firing;
-- mean absolute external context input;
-- mean absolute recurrent input;
-- recurrent/external input magnitude ratio;
-- recurrent weight norm.
-
-These are used to detect sustained recurrent excitation.
+- diagonal/dense recurrence minus FF;
+- Fusion on minus off;
+- recurrence × Fusion `(D-C)-(B-A)`;
+- paired D1-D0;
+- pretrained_trainable minus dynamics_only;
+- pretrained_frozen minus dynamics_only;
+- pretrained_trainable minus pretrained_frozen.
 
 ## Multi-CPU execution
-
-Execution graph:
 
 ```text
 prepare
@@ -236,7 +201,7 @@ prepare
 3-way D0 matched-source array
   |
   v
-72-way main array, max 50 concurrent
+108-way main array, max 50 concurrent
   |
   v
 afterok finalizer
@@ -245,13 +210,11 @@ afterok finalizer
 aggregation-only notebook
 ```
 
-The main array is:
+Main array:
 
 ```text
-#SBATCH --array=0-71%50
+#SBATCH --array=0-107%50
 ```
-
-which follows the repository default maximum of 50 concurrent CPU experiment tasks.
 
 Submit:
 
@@ -259,19 +222,10 @@ Submit:
 bash scripts/bash_script/SNN_Bash/submit_exp_11_0_cpu.bash
 ```
 
-Inspect run mapping:
-
-```bash
-python -m scripts.experiment_11_0_rsnn_history_internalization list-source-runs
-python -m scripts.experiment_11_0_rsnn_history_internalization list-runs
-```
-
 Output root:
 
 ```text
 notebooks/artifacts/
   experiment_11_0_rsnn_history_internalization/
-    d0_d1_l1mem2_context_fusion_factorial_v3/
+    d0_d1_l1mem2_context_fusion_frozen_l1_v4/
 ```
-
-The finalizer only aggregates existing artifacts. The notebook is analysis-only.

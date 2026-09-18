@@ -24,17 +24,21 @@ def make_spec(
 
 
 def test_factorial_contract() -> None:
-    assert exp110.PROTOCOL_VERSION == "d0_d1_l1mem2_context_fusion_factorial_v3"
+    assert exp110.PROTOCOL_VERSION == "d0_d1_l1mem2_context_fusion_frozen_l1_v4"
     assert exp110.VARIANTS == ("original", "postencode_mask")
     assert exp110.ROTATION == 0
     assert exp110.MODEL_SEEDS == (11, 23, 37)
-    assert exp110.L1_INIT_MODES == ("dynamics_only", "pretrained_input")
+    assert exp110.L1_INIT_MODES == (
+        "dynamics_only",
+        "pretrained_trainable",
+        "pretrained_frozen",
+    )
     assert exp110.TOPOLOGIES == ("ff", "diagonal", "dense")
     assert exp110.FUSION_MODES == ("off", "on")
     specs = exp110.run_specs()
-    assert len(specs) == 72
-    assert exp110.EXPECTED_RUNS == 72
-    assert len({spec.key for spec in specs}) == 72
+    assert len(specs) == 108
+    assert exp110.EXPECTED_RUNS == 108
+    assert len({spec.key for spec in specs}) == 108
     assert {spec.variant for spec in specs} == set(exp110.VARIANTS)
     assert {spec.fusion for spec in specs} == set(exp110.FUSION_MODES)
     for index in range(0, len(specs), 2):
@@ -215,7 +219,7 @@ def test_pretrained_source_routing_is_variant_specific() -> None:
     assert "_source_artifact" in block
 
 
-def test_pretrained_contract_copies_only_l1_input_and_keeps_trainable() -> None:
+def test_pretrained_contract_copies_only_l1_input_and_supports_freeze() -> None:
     source = (
         REPO_ROOT / "scripts" / "experiment_11_0_rsnn_history_internalization.py"
     ).read_text()
@@ -226,7 +230,45 @@ def test_pretrained_contract_copies_only_l1_input_and_keeps_trainable() -> None:
     assert "model.l1_input.weight.copy_" in block
     assert "model.rsnn_input.weight.copy_" not in block
     assert "model.fusion_local.weight.copy_" not in block
-    assert "requires_grad" in block
+    assert "L1_INIT_PRETRAINED_FROZEN" in source
+    assert "requires_grad_(not frozen)" in source
+
+
+def test_frozen_l1_is_excluded_from_optimizer_and_does_not_update() -> None:
+    spec = make_spec(
+        l1_init=exp110.L1_INIT_PRETRAINED_FROZEN,
+        topology=exp110.TOPOLOGY_DIAGONAL,
+        fusion=exp110.FUSION_ON,
+    )
+    model = exp110.Exp110Net(spec, 12, 64.0)
+    exp110._initialize_paired(model, spec)
+    exp110._configure_l1_trainability(model, spec)
+    assert model.l1_input.weight.requires_grad is False
+
+    before = model.l1_input.weight.detach().clone()
+    trainable = [
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    ]
+    assert all(parameter is not model.l1_input.weight for parameter in trainable)
+
+    optimizer = torch.optim.Adam(trainable, lr=1e-3)
+    x = torch.randn(2, 9, 30)
+    lengths = torch.tensor([9, 9], dtype=torch.long)
+    labels = torch.tensor([0, 1], dtype=torch.long)
+    optimizer.zero_grad(set_to_none=True)
+    loss = torch.nn.functional.cross_entropy(
+        exp110._native_scores(model, x, lengths), labels
+    )
+    loss.backward()
+    optimizer.step()
+    assert torch.equal(before, model.l1_input.weight.detach())
+
+
+def test_trainable_pretrained_l1_remains_trainable() -> None:
+    spec = make_spec(l1_init=exp110.L1_INIT_PRETRAINED_TRAINABLE)
+    model = exp110.Exp110Net(spec, 12, 64.0)
+    exp110._configure_l1_trainability(model, spec)
+    assert model.l1_input.weight.requires_grad is True
 
 
 def test_forward_trajectory_contract() -> None:
@@ -275,7 +317,11 @@ def test_abcd_contrast_tables_execute_on_full_synthetic_factorial() -> None:
     rows = []
     for spec in exp110.run_specs():
         dataset = 1.0 if spec.variant == exp110.VARIANT_POSTENCODE else 0.0
-        pretrain = 2.0 if spec.l1_init == exp110.L1_INIT_PRETRAINED else 0.0
+        pretrain = {
+            exp110.L1_INIT_DYNAMICS_ONLY: 0.0,
+            exp110.L1_INIT_PRETRAINED_FROZEN: 2.0,
+            exp110.L1_INIT_PRETRAINED_TRAINABLE: 4.0,
+        }[spec.l1_init]
         recurrence = {
             exp110.TOPOLOGY_FF: 0.0,
             exp110.TOPOLOGY_DIAGONAL: 3.0,
@@ -305,10 +351,15 @@ def test_abcd_contrast_tables_execute_on_full_synthetic_factorial() -> None:
     contrasts = exp110._paired_contrasts(frame)
     interactions = exp110._interaction_rows(frame)
 
-    assert len(contrasts) == 180
-    assert len(interactions) == 90
-    assert len(contrasts[contrasts.contrast == "fusion_on_minus_off"]) == 36
-    assert len(contrasts[contrasts.contrast == "d1_minus_d0"]) == 36
+    assert len(contrasts) == 324
+    assert len(interactions) == 123
+    assert len(contrasts[contrasts.contrast == "fusion_on_minus_off"]) == 54
+    assert len(contrasts[contrasts.contrast == "d1_minus_d0"]) == 54
+    assert len(
+        contrasts[
+            contrasts.contrast == "pretrained_trainable_minus_frozen"
+        ]
+    ) == 36
 
     row = interactions[
         (interactions.interaction == "recurrence_x_fusion")
@@ -336,7 +387,7 @@ def test_slurm_contract() -> None:
     run = (root / "run_exp_11_0_cpu_array.bash").read_text()
     submit = (root / "submit_exp_11_0_cpu.bash").read_text()
     assert "#SBATCH --array=0-2%3" in source_run
-    assert "#SBATCH --array=0-71%50" in run
+    assert "#SBATCH --array=0-107%50" in run
     assert "#SBATCH --cpus-per-task=1" in source_run
     assert "#SBATCH --cpus-per-task=1" in run
     for script in (source_run, run):
@@ -350,7 +401,7 @@ def test_slurm_contract() -> None:
     assert 'afterok:${prepare_job}' in submit
     assert 'afterok:${source_job}' in submit
     assert 'afterok:${array_job}' in submit
-    assert "72-run A/B/C/D" in submit
+    assert "108-run A/B/C/D" in submit
 
 
 def test_notebook_is_aggregation_only() -> None:
@@ -363,6 +414,8 @@ def test_notebook_is_aggregation_only() -> None:
     assert "paired_contrast_summary.csv" in notebook
     assert "fusion_on_minus_off" in notebook
     assert "recurrence_x_fusion" in notebook
+    assert "pretrained_trainable_minus_frozen" in notebook
+    assert "l1_relative_frobenius_drift" in notebook
     assert "readout_comm_valid" in notebook
     assert "run_one(" not in notebook
     assert "torch.optim" not in notebook

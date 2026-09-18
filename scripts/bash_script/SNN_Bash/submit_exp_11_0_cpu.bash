@@ -12,5 +12,5 @@ finalizer_job=$(sbatch --parsable --dependency="afterok:${array_job}" --export=A
 
 echo "Exp11.0 prepare: ${prepare_job}"
 echo "Exp11.0 D0 matched-source 3-run CPU array: ${source_job}"
-echo "Exp11.0 D0+D1 72-run A/B/C/D CPU array: ${array_job}"
+echo "Exp11.0 D0+D1 108-run A/B/C/D + frozen-L1 CPU array: ${array_job}"
 echo "Exp11.0 finalizer: ${finalizer_job}"
