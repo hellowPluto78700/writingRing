@@ -149,12 +149,31 @@ def results_dir(repo_root: Path) -> Path:
     return repo_root / "notebooks" / "artifacts" / EXPERIMENT_ID / PROTOCOL_VERSION
 
 
-def beta_from_mem_shift(shift: int) -> float:
-    return exp60.decay_from_shift(int(shift))
+def beta_from_mem_shift(
+    shift: int,
+    fs: float = exp72.EXPECTED_FS,
+) -> float:
+    shift = int(shift)
+    if shift == BASELINE_L1_MEM_SHIFT:
+        # Preserve the exact current A2 contract. Existing A2 code stores
+        # tau_mem as 22.54 ms and derives beta from it, giving ~0.4999676 at
+        # 64 Hz rather than a hard-coded 0.5.
+        return float(
+            math.exp(
+                -(1000.0 / float(fs)) / float(exp72.TAU_MEM_MS)
+            )
+        )
+    return exp60.decay_from_shift(shift)
 
 
-def tau_mem_ms_from_shift(shift: int, fs: float = exp72.EXPECTED_FS) -> float:
-    return exp60.tau_ms_from_shift(int(shift), float(fs))
+def tau_mem_ms_from_shift(
+    shift: int,
+    fs: float = exp72.EXPECTED_FS,
+) -> float:
+    shift = int(shift)
+    if shift == BASELINE_L1_MEM_SHIFT:
+        return float(exp72.TAU_MEM_MS)
+    return exp60.tau_ms_from_shift(shift, float(fs))
 
 
 def baseline_specs() -> list[TrainSpec]:
@@ -332,8 +351,12 @@ class Exp102Net(nn.Module):
         )
         self.output_linear = nn.Linear(WIDTH, n_classes, bias=False)
 
-        self.l1_lif = exp811._lif("binary", beta_from_mem_shift(l1_mem_shift))
-        self.l2_lif = exp811._lif("binary", beta_from_mem_shift(L2_MEM_SHIFT))
+        self.l1_lif = exp811._lif(
+            "binary", beta_from_mem_shift(l1_mem_shift, fs)
+        )
+        self.l2_lif = exp811._lif(
+            "binary", beta_from_mem_shift(L2_MEM_SHIFT, fs)
+        )
         self.register_buffer("alpha_0", exp811._alpha_vector("binary"))
         self.register_buffer("alpha_1", exp811._alpha_vector("binary"))
 
