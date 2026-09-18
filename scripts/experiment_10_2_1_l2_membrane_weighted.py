@@ -424,6 +424,49 @@ def _split_hashes(frames: Mapping[str, pd.DataFrame]) -> dict[str, str]:
     return exp101._split_hashes(frames)
 
 
+def _evidence_scale_metrics(
+    model: Exp1021Net,
+    loader: Iterable,
+    device: torch.device,
+) -> dict[str, float]:
+    evidence_abs_sum = 0.0
+    evidence_l2_sum = 0.0
+    valid_step_count = 0.0
+    score_l2_sum = 0.0
+    sample_count = 0
+
+    model.eval()
+    with torch.no_grad():
+        for X, _, lengths in loader:
+            Xd = X.to(device=device, dtype=torch.float32)
+            ld = lengths.to(device)
+            evidence = model.forward_trajectory(Xd)["l2_evidence"]
+            mask = _valid_mask(ld, evidence.shape[1])
+            valid_evidence = evidence[mask]
+            if valid_evidence.numel():
+                evidence_abs_sum += float(valid_evidence.abs().mean(dim=1).sum().item())
+                evidence_l2_sum += float(valid_evidence.norm(dim=1).sum().item())
+                valid_step_count += float(valid_evidence.shape[0])
+            scores = _valid_mean(evidence, ld)
+            score_l2_sum += float(scores.norm(dim=1).sum().item())
+            sample_count += int(scores.shape[0])
+
+    weight = model.output_linear.weight.detach()
+    return {
+        "output_weight_fro_norm": float(weight.norm().item()),
+        "output_weight_mean_abs": float(weight.abs().mean().item()),
+        "mean_abs_evidence_per_valid_step": (
+            evidence_abs_sum / max(valid_step_count, 1.0)
+        ),
+        "mean_l2_evidence_norm_per_valid_step": (
+            evidence_l2_sum / max(valid_step_count, 1.0)
+        ),
+        "mean_native_score_l2_norm": (
+            score_l2_sum / max(sample_count, 1)
+        ),
+    }
+
+
 def _collect_features_and_activity(
     model: Exp1021Net,
     data: exp3.Data,
@@ -736,6 +779,10 @@ def run_one(
     artifacts["probes"].parent.mkdir(parents=True, exist_ok=True)
     probes.to_csv(artifacts["probes"], index=False)
 
+    scale_metrics = _evidence_scale_metrics(
+        model, eval_loaders["test"], device
+    )
+
     payload = {
         "experiment_id": EXPERIMENT_ID,
         "protocol_version": PROTOCOL_VERSION,
@@ -763,6 +810,7 @@ def run_one(
         "stopped_epoch": stopped_epoch,
         "native_metrics": native_metrics,
         "lif_transfer_metrics": lif_metrics,
+        "scale_metrics": scale_metrics,
         "activity": activity,
         "probe_count": int(len(probes)),
         "parameter_count": int(sum(p.numel() for p in model.parameters())),
@@ -815,6 +863,21 @@ def _run_row(payload: Mapping[str, Any], probes: pd.DataFrame) -> dict[str, Any]
         "l2_communication_delta": l2_comm - l2_pre,
         "l2_communication_whole_ba": l2_whole,
         "l2_temporal_ordering_gain": l2_comm - l2_whole,
+        "output_weight_fro_norm": float(
+            payload["scale_metrics"]["output_weight_fro_norm"]
+        ),
+        "output_weight_mean_abs": float(
+            payload["scale_metrics"]["output_weight_mean_abs"]
+        ),
+        "mean_abs_evidence_per_valid_step": float(
+            payload["scale_metrics"]["mean_abs_evidence_per_valid_step"]
+        ),
+        "mean_l2_evidence_norm_per_valid_step": float(
+            payload["scale_metrics"]["mean_l2_evidence_norm_per_valid_step"]
+        ),
+        "mean_native_score_l2_norm": float(
+            payload["scale_metrics"]["mean_native_score_l2_norm"]
+        ),
     }
     return row
 
@@ -848,6 +911,11 @@ def _paired_contrasts(runs: pd.DataFrame) -> pd.DataFrame:
         "l2_communication_delta",
         "l2_communication_whole_ba",
         "l2_temporal_ordering_gain",
+        "output_weight_fro_norm",
+        "output_weight_mean_abs",
+        "mean_abs_evidence_per_valid_step",
+        "mean_l2_evidence_norm_per_valid_step",
+        "mean_native_score_l2_norm",
     ]
     indexed = runs.set_index(["coding", "l2_mem_shift", "seed"])
     rows: list[dict[str, Any]] = []
@@ -894,6 +962,9 @@ def _interaction_rows(runs: pd.DataFrame) -> pd.DataFrame:
         "l2_communication_fixed250_ba",
         "l2_communication_whole_ba",
         "l2_temporal_ordering_gain",
+        "output_weight_fro_norm",
+        "mean_abs_evidence_per_valid_step",
+        "mean_native_score_l2_norm",
     ]
     indexed = runs.set_index(["coding", "l2_mem_shift", "seed"])
     rows: list[dict[str, Any]] = []
