@@ -173,6 +173,7 @@ def test_notebook_is_aggregation_only() -> None:
     assert "d0_d1_bb_mm_supervision_factorial_v1" in notebook
     assert "condition_summary.csv" in notebook
     assert "information_path_summary.csv" in notebook
+    assert "information_path_contrast_summary.csv" in notebook
     assert "contrast_summary.csv" in notebook
     assert "run_one(" not in notebook
     assert ".fit(" not in notebook
