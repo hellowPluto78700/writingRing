@@ -33,6 +33,8 @@ class WritingInterval:
     assigned_label_index: int | None
     crossing_resolution: str
     collapsed_to_single_sample: bool
+    recording_boundary_clipped_start: bool = False
+    recording_boundary_clipped_end: bool = False
 
     @property
     def duration_samples(self) -> int:
@@ -110,13 +112,28 @@ def build_boundary_timestamps(
         raise WritingMotionMaskError(str(exc)) from exc
 
 
-def _sample_index(boundary_timestamps_us: np.ndarray, timestamp_us: float) -> int:
+def _clipped_sample_index(
+    boundary_timestamps_us: np.ndarray,
+    timestamp_us: float,
+) -> tuple[int, bool]:
+    """Map one Board timestamp to an observable Ring row.
+
+    Existing segmentation uses searchsorted(..., side="left"). Derived
+    recording masks keep that mapping inside the Ring time span, but clip an
+    endpoint that lies beyond the observable recording boundary. A touch pair
+    wholly outside the recording is filtered before this helper is called.
+    """
+
+    first = float(boundary_timestamps_us[0])
+    last = float(boundary_timestamps_us[-1])
+    if timestamp_us < first:
+        return 0, True
+    if timestamp_us > last:
+        return len(boundary_timestamps_us) - 1, True
     index = int(np.searchsorted(boundary_timestamps_us, timestamp_us, side="left"))
-    if index < 0 or index >= len(boundary_timestamps_us):
-        raise WritingMotionMaskError(
-            f"Board event timestamp {timestamp_us} maps outside recording sample range"
-        )
-    return index
+    if index >= len(boundary_timestamps_us):
+        return len(boundary_timestamps_us) - 1, True
+    return index, False
 
 
 def build_recording_writing_mask(
@@ -191,8 +208,17 @@ def build_recording_writing_mask(
             raise WritingMotionMaskError(
                 f"dataset {dataset_id} pair {pair_id} has non-positive touch duration"
             )
-        press_index = _sample_index(boundary, press_us)
-        lift_index = _sample_index(boundary, lift_us)
+
+        # Board audit rows can legitimately extend past the observable Ring
+        # interval. They cannot affect the encoder if the whole touch lies
+        # outside the recording; partially observable touches are clipped to
+        # the available Ring rows instead of becoming a derived-data failure.
+        boundary_first = float(boundary[0])
+        boundary_last = float(boundary[-1])
+        if lift_us < boundary_first or press_us > boundary_last:
+            continue
+        press_index, clipped_start = _clipped_sample_index(boundary, press_us)
+        lift_index, clipped_end = _clipped_sample_index(boundary, lift_us)
         if lift_index < press_index:
             raise WritingMotionMaskError(
                 f"dataset {dataset_id} pair {pair_id} maps lift before press"
@@ -231,6 +257,8 @@ def build_recording_writing_mask(
                 assigned_label_index=press_label,
                 crossing_resolution=(next(iter(resolutions)) if resolutions else "not_crossing"),
                 collapsed_to_single_sample=press_index == lift_index,
+                recording_boundary_clipped_start=clipped_start,
+                recording_boundary_clipped_end=clipped_end,
             )
         )
     if not intervals:
@@ -280,17 +308,17 @@ def build_segment_masks(
         for interval in intervals_by_dataset.get(dataset_id, ()):
             if interval.assigned_segment_index != segment_index:
                 continue
-            if not (
-                start <= interval.press_recording_sample_index
-                <= interval.lift_recording_sample_index < stop
-            ):
-                raise WritingMotionMaskError(
-                    f"segment {segment_index} owns touch pair {interval.paired_touch_index} "
-                    "whose mapped samples fall outside the published segment"
-                )
-            local_press = interval.press_recording_sample_index - start
-            local_lift = interval.lift_recording_sample_index - start
-            local_mask[local_press : local_lift + 1] = True
+            # Ownership comes from source segmentation, but the final
+            # non-overlapping sample slice can clip a boundary touch. Intersect
+            # with the published slice instead of extending segment geometry.
+            overlap_start = max(start, interval.press_recording_sample_index)
+            overlap_end = min(stop - 1, interval.lift_recording_sample_index)
+            retained = overlap_start <= overlap_end
+            local_press = overlap_start - start if retained else None
+            local_lift = overlap_end - start if retained else None
+            if retained:
+                assert local_press is not None and local_lift is not None
+                local_mask[local_press : local_lift + 1] = True
             interval_rows.append(
                 {
                     "dataset_id": dataset_id,
@@ -306,15 +334,27 @@ def build_segment_masks(
                     "press_segment_local_index": local_press,
                     "lift_segment_local_index": local_lift,
                     "duration_samples": interval.duration_samples,
+                    "segment_overlap_samples": (
+                        overlap_end - overlap_start + 1 if retained else 0
+                    ),
+                    "retained_in_segment": retained,
+                    "segment_boundary_clipped_start": (
+                        interval.press_recording_sample_index < start
+                    ),
+                    "segment_boundary_clipped_end": (
+                        interval.lift_recording_sample_index >= stop
+                    ),
+                    "recording_boundary_clipped_start": (
+                        interval.recording_boundary_clipped_start
+                    ),
+                    "recording_boundary_clipped_end": (
+                        interval.recording_boundary_clipped_end
+                    ),
                     "collapsed_to_single_sample": interval.collapsed_to_single_sample,
                     "crossing_resolution": interval.crossing_resolution,
                 }
             )
             stroke_index += 1
-        if not np.any(local_mask):
-            raise WritingMotionMaskError(
-                f"published segment {segment_index} has zero writing samples"
-            )
         concatenated[int(offsets[segment_index]) : int(offsets[segment_index + 1])] = local_mask
     return concatenated, interval_rows
 

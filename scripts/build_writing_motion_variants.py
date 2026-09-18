@@ -543,6 +543,13 @@ def build_user(
                     "sample_count": len(recording_mask),
                     "sampling_rate_hz": rate,
                     "writing_interval_count": len(intervals),
+                    "recording_boundary_clipped_interval_count": int(
+                        sum(
+                            interval.recording_boundary_clipped_start
+                            or interval.recording_boundary_clipped_end
+                            for interval in intervals
+                        )
+                    ),
                     "writing_sample_count": int(np.count_nonzero(recording_mask)),
                     "writing_fraction": float(np.mean(recording_mask)),
                     "reposition_sample_count": int(np.count_nonzero(~recording_mask)),
@@ -556,6 +563,13 @@ def build_user(
                 "writing_samples": int(np.count_nonzero(recording_mask)),
                 "writing_fraction": float(np.mean(recording_mask)),
                 "touch_pair_count": len(intervals),
+                "recording_boundary_clipped_touch_pair_count": int(
+                    sum(
+                        interval.recording_boundary_clipped_start
+                        or interval.recording_boundary_clipped_end
+                        for interval in intervals
+                    )
+                ),
             }
         )
         d1_recordings[dataset_id] = d1
@@ -567,6 +581,25 @@ def build_user(
         segment_lengths=segment_lengths,
     )
     offsets = np.concatenate(([0], np.cumsum(segment_lengths, dtype=np.int64)))
+    zero_writing_segment_count = sum(
+        not np.any(segment_mask[int(offsets[index]) : int(offsets[index + 1])])
+        for index in range(len(segment_lengths))
+    )
+    segment_boundary_clipped_interval_count = sum(
+        bool(row.get("segment_boundary_clipped_start"))
+        or bool(row.get("segment_boundary_clipped_end"))
+        for row in interval_rows
+    )
+    no_segment_overlap_interval_count = sum(
+        not bool(row.get("retained_in_segment"))
+        for row in interval_rows
+    )
+    recording_boundary_clipped_interval_count = sum(
+        interval.recording_boundary_clipped_start
+        or interval.recording_boundary_clipped_end
+        for intervals in intervals_by_dataset.values()
+        for interval in intervals
+    )
     d1_pieces: list[np.ndarray] = []
     d2_pieces: list[np.ndarray] = []
     exported_rows = [row for row in segment_rows if str(row.get("segment_index", "")).strip() != ""]
@@ -630,6 +663,16 @@ def build_user(
             "total_segment_samples": int(len(segment_mask)),
             "writing_fraction": float(np.mean(segment_mask)),
             "writing_interval_count": int(len(interval_rows)),
+            "recording_boundary_clipped_interval_count": int(
+                recording_boundary_clipped_interval_count
+            ),
+            "segment_boundary_clipped_interval_count": int(
+                segment_boundary_clipped_interval_count
+            ),
+            "no_segment_overlap_interval_count": int(
+                no_segment_overlap_interval_count
+            ),
+            "zero_writing_segment_count": int(zero_writing_segment_count),
         },
     )
     report = {
@@ -643,6 +686,16 @@ def build_user(
         "segment_sample_count": int(len(segment_mask)),
         "writing_fraction": float(np.mean(segment_mask)),
         "interval_count": int(len(interval_rows)),
+        "recording_boundary_clipped_interval_count": int(
+            recording_boundary_clipped_interval_count
+        ),
+        "segment_boundary_clipped_interval_count": int(
+            segment_boundary_clipped_interval_count
+        ),
+        "no_segment_overlap_interval_count": int(
+            no_segment_overlap_interval_count
+        ),
+        "zero_writing_segment_count": int(zero_writing_segment_count),
         "recordings": writing_stats,
         "branches": ["original_reference", "postencode_mask", "masked_accel_reencode"],
         "geometry_reused": True,

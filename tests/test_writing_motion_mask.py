@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from writingring.writing_motion_mask import (
     WritingInterval,
-    WritingMotionMaskError,
     apply_mask,
     build_recording_writing_mask,
     build_segment_masks,
@@ -79,17 +77,71 @@ def test_segment_mask_only_uses_owned_intervals() -> None:
     assert len(rows) == 1
 
 
-def test_owned_interval_outside_segment_hard_fails() -> None:
+def test_owned_interval_is_clipped_to_final_segment_geometry() -> None:
     intervals = {0: (WritingInterval(0, 0, 100, 200, 0, 5, 0, 0, "not_crossing", False),)}
-    with pytest.raises(WritingMotionMaskError, match="outside the published segment"):
-        build_segment_masks(
-            segment_rows=[{
-                "segment_index": "0", "dataset_id": "0", "start_sample_index": "1",
-                "stop_sample_index_exclusive": "5", "label": "a",
-            }],
-            intervals_by_dataset=intervals,
-            segment_lengths=np.array([4], dtype=np.int32),
-        )
+    mask, rows = build_segment_masks(
+        segment_rows=[{
+            "segment_index": "0", "dataset_id": "0", "start_sample_index": "1",
+            "stop_sample_index_exclusive": "5", "label": "a",
+        }],
+        intervals_by_dataset=intervals,
+        segment_lengths=np.array([4], dtype=np.int32),
+    )
+    np.testing.assert_array_equal(mask, [True, True, True, True])
+    assert rows[0]["press_segment_local_index"] == 0
+    assert rows[0]["lift_segment_local_index"] == 3
+    assert rows[0]["segment_boundary_clipped_start"]
+    assert rows[0]["segment_boundary_clipped_end"]
+    assert rows[0]["segment_overlap_samples"] == 4
+
+
+def test_assigned_touch_with_no_final_segment_overlap_is_audited_not_invented() -> None:
+    intervals = {0: (WritingInterval(0, 0, 100, 200, 8, 9, 0, 0, "not_crossing", False),)}
+    mask, rows = build_segment_masks(
+        segment_rows=[{
+            "segment_index": "0", "dataset_id": "0", "start_sample_index": "1",
+            "stop_sample_index_exclusive": "5", "label": "a",
+        }],
+        intervals_by_dataset=intervals,
+        segment_lengths=np.array([4], dtype=np.int32),
+    )
+    assert not np.any(mask)
+    assert rows[0]["retained_in_segment"] is False
+    assert rows[0]["segment_overlap_samples"] == 0
+    assert rows[0]["press_segment_local_index"] is None
+    assert rows[0]["lift_segment_local_index"] is None
+
+
+def test_recording_touch_overlapping_right_boundary_is_clipped() -> None:
+    events = _events().iloc[:2].copy()
+    events.loc[events["event_type"] == "press", "aligned_event_timestamp_us"] = 700.0
+    events.loc[events["event_type"] == "lift", "aligned_event_timestamp_us"] = 1200.0
+    timestamps = np.arange(0.0, 1000.0, 100.0)
+    mask, intervals, _ = build_recording_writing_mask(
+        events, dataset_id=0, canonical_timestamps_us=timestamps, sampling_rate_hz=10_000.0
+    )
+    np.testing.assert_array_equal(
+        mask, [False, False, False, False, False, False, False, True, True, True]
+    )
+    assert intervals[0].recording_boundary_clipped_end
+    assert not intervals[0].recording_boundary_clipped_start
+    assert intervals[0].lift_recording_sample_index == 9
+
+
+def test_recording_touch_wholly_outside_range_is_ignored() -> None:
+    events = _events().copy()
+    extra = events.iloc[:2].copy()
+    extra["paired_touch_index"] = 9
+    extra.loc[extra["event_type"] == "press", "aligned_event_timestamp_us"] = 1100.0
+    extra.loc[extra["event_type"] == "lift", "aligned_event_timestamp_us"] = 1200.0
+    combined = pd.concat([events, extra], ignore_index=True)
+    timestamps = np.arange(0.0, 1000.0, 100.0)
+    mask, intervals, _ = build_recording_writing_mask(
+        combined, dataset_id=0, canonical_timestamps_us=timestamps, sampling_rate_hz=10_000.0
+    )
+    assert len(intervals) == 2
+    assert all(interval.paired_touch_index != 9 for interval in intervals)
+    assert np.count_nonzero(mask) > 0
 
 
 def test_mask_and_padding_zero_airborne_samples() -> None:
