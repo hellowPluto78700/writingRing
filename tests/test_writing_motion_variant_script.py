@@ -27,3 +27,5 @@ def test_writing_motion_python_entrypoint_exists() -> None:
     assert 'sub.add_parser("finalize")' in text
     assert '"postencode_mask"' in text
     assert '"masked_accel_reencode"' in text
+    assert '"writing_motion_verification"' in text
+    assert "masked_accel_verification.png" not in text

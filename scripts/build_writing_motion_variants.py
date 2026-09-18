@@ -22,10 +22,15 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from writingring.event_alignment import compute_transient_score_array
 from writingring.imu_preprocessing import STANDARD_GRAVITY_M_S2
+from writingring.segmentation_verification import SegmentationVerificationConfig
 from writingring.spike_encoding.encoders.custom_wavelet import (
     CustomWaveletEncoder,
     CustomWaveletSettings,
+)
+from writingring.writing_motion_verification import (
+    create_writing_motion_verification_figure,
 )
 from writingring.writing_motion_mask import (
     WritingMotionMaskError,
@@ -281,55 +286,6 @@ def _save_recording_artifact(
     return destination / "spikeIMU.npy"
 
 
-def _plot_verification(
-    path: Path, *, user: str, action: str, dataset_id: int,
-    boundary_timestamps_us: np.ndarray, source_values: np.ndarray, writing_mask: np.ndarray,
-    event_rows: pd.DataFrame, segment_rows: Sequence[Mapping[str, str]], dpi: int,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    time_s = (boundary_timestamps_us - boundary_timestamps_us[0]) / 1_000_000.0
-    original = source_values[:, 30:33]
-    masked = original.copy()
-    masked[~writing_mask] = 0
-    fig, axes = plt.subplots(4, 1, figsize=(16, 10), sharex=True)
-    for axis_index, label in enumerate(("x", "y", "z")):
-        axes[0].plot(time_s, original[:, axis_index], linewidth=0.8, label=f"acc_{label}")
-        axes[1].plot(time_s, masked[:, axis_index], linewidth=0.8, label=f"acc_{label}")
-    axes[0].set_ylabel("Original accel\n(m/s²)")
-    axes[1].set_ylabel("Masked accel\n(m/s²)")
-    axes[0].legend(ncol=3, loc="upper right")
-    axes[1].legend(ncol=3, loc="upper right")
-    axes[2].step(time_s, writing_mask.astype(np.int8), where="post")
-    axes[2].set_ylabel("Writing mask")
-    axes[2].set_ylim(-0.1, 1.1)
-    axes[3].set_ylabel("Segments")
-    axes[3].set_xlabel("Recording elapsed time (s)")
-    axes[3].set_ylim(0.0, 1.0)
-    for row in event_rows.to_dict(orient="records"):
-        event_time = (float(row["aligned_event_timestamp_us"]) - boundary_timestamps_us[0]) / 1_000_000.0
-        style = "-" if str(row["event_type"]) == "press" else "--"
-        for axis in axes[:3]:
-            axis.axvline(event_time, linewidth=0.7, linestyle=style, alpha=0.45)
-    for row in segment_rows:
-        if str(row.get("segment_index", "")).strip() == "" or _integral(row["dataset_id"], field="dataset_id") != dataset_id:
-            continue
-        start = _integral(row["start_sample_index"], field="start_sample_index")
-        stop = _integral(row["stop_sample_index_exclusive"], field="stop_sample_index_exclusive")
-        left, right = time_s[start], time_s[stop - 1]
-        axes[3].axvspan(left, right, alpha=0.2)
-        axes[3].text((left + right) / 2.0, 0.5, str(row.get("label", "")), ha="center", va="center", fontsize=8)
-    kept = int(np.count_nonzero(writing_mask))
-    fig.suptitle(
-        f"{user} action {action} dataset {dataset_id} — writing-only mask verification "
-        f"({kept}/{len(writing_mask)} samples, {kept/len(writing_mask):.1%} kept)"
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=dpi)
-    plt.close(fig)
-
-
 def _patch_segmentation_summary(summary: Mapping[str, Any], *, branch: str, mask_path: Path, intervals_path: Path) -> dict[str, Any]:
     payload = json.loads(json.dumps(summary))
     payload["writing_motion_variant"] = {
@@ -443,6 +399,19 @@ def build_user(
         raise BuildError(f"source user package is incomplete: {user}")
     segment_rows = _read_csv(source_seg / f"{stem}_segments.csv")
     event_df = pd.read_csv(source_seg / f"{stem}_board_events.csv")
+    source_segmentation_summary = _load_json(
+        source_seg / f"{stem}_segmentation_summary.json"
+    )
+    transient_channel_indices = source_segmentation_summary.get(
+        "transient_channel_indices"
+    )
+    if (
+        not isinstance(transient_channel_indices, list)
+        or transient_channel_indices != list(range(30, 36))
+    ):
+        raise BuildError(
+            "source segmentation must declare transient_channel_indices=[30,31,32,33,34,35]"
+        )
     segment_lengths = np.load(source_seg / f"{stem}_segment_lengths.npy", allow_pickle=False)
     source_segmented = np.load(source_seg / f"{stem}_spikeIMU.npy", allow_pickle=False)
     if source_segmented.ndim != 2 or source_segmented.shape[1] != SOURCE_CHANNEL_COUNT:
@@ -480,6 +449,7 @@ def build_user(
     d2_recordings: dict[int, np.ndarray] = {}
     intervals_by_dataset: dict[int, Sequence[Any]] = {}
     writing_stats: list[dict[str, Any]] = []
+    verification_contexts: dict[int, dict[str, Any]] = {}
 
     for rec_user, rec_action, dataset_id, directory in recordings:
         source_values, metadata, timestamps, encoder = _validate_recording(directory)
@@ -518,44 +488,15 @@ def build_user(
                 overwrite=overwrite,
             )
         if verification:
-            verification_path = (
-                output_root / "masked_accel_reencode" / "masking" / "verification"
-                / user / f"action_{action}" / f"{dataset_id}_masked_accel_verification.png"
-            )
-            _plot_verification(
-                verification_path,
-                user=user,
-                action=action,
-                dataset_id=dataset_id,
-                boundary_timestamps_us=boundary_timestamps,
-                source_values=source_values,
-                writing_mask=recording_mask,
-                event_rows=event_df[pd.to_numeric(event_df["dataset_id"], errors="coerce") == dataset_id],
-                segment_rows=segment_rows,
-                dpi=verification_dpi,
-            )
-            _write_json(
-                verification_path.with_suffix(".json"),
-                {
-                    "user": user,
-                    "action": action,
-                    "dataset_id": dataset_id,
-                    "sample_count": len(recording_mask),
-                    "sampling_rate_hz": rate,
-                    "writing_interval_count": len(intervals),
-                    "recording_boundary_clipped_interval_count": int(
-                        sum(
-                            interval.recording_boundary_clipped_start
-                            or interval.recording_boundary_clipped_end
-                            for interval in intervals
-                        )
-                    ),
-                    "writing_sample_count": int(np.count_nonzero(recording_mask)),
-                    "writing_fraction": float(np.mean(recording_mask)),
-                    "reposition_sample_count": int(np.count_nonzero(~recording_mask)),
-                    "reposition_fraction": float(np.mean(~recording_mask)),
-                },
-            )
+            verification_contexts[dataset_id] = {
+                "canonical_timestamps_us": timestamps,
+                "display_timestamps_us": boundary_timestamps,
+                "transient_score": compute_transient_score_array(
+                    source_values[:, transient_channel_indices]
+                ),
+                "recording_writing_mask": recording_mask,
+                "sampling_rate_hz": rate,
+            }
         writing_stats.append(
             {
                 "dataset_id": dataset_id,
@@ -600,6 +541,98 @@ def build_user(
         for intervals in intervals_by_dataset.values()
         for interval in intervals
     )
+
+    verification_files: list[str] = []
+    if verification:
+        legacy_verification_root = (
+            output_root / "masked_accel_reencode" / "masking" / "verification" / user
+        )
+        if overwrite and legacy_verification_root.exists():
+            shutil.rmtree(legacy_verification_root)
+        verification_root = (
+            output_root / "writing_motion_verification" / user / f"action_{action}"
+        )
+        if overwrite and verification_root.exists():
+            shutil.rmtree(verification_root)
+        for dataset_id in exported_dataset_ids:
+            context = verification_contexts.get(dataset_id)
+            if context is None:
+                raise BuildError(
+                    f"missing verification context for {user} dataset {dataset_id}"
+                )
+            png_path = (
+                verification_root
+                / f"{dataset_id}_writing_motion_verification.png"
+            )
+            result = create_writing_motion_verification_figure(
+                canonical_timestamps_us=context["canonical_timestamps_us"],
+                display_timestamps_us=context["display_timestamps_us"],
+                transient_score=context["transient_score"],
+                board_events=event_df,
+                segment_rows=segment_rows,
+                writing_interval_rows=interval_rows,
+                output_path=png_path,
+                user=user,
+                action=action,
+                dataset_id=dataset_id,
+                config=SegmentationVerificationConfig(
+                    output_dpi=verification_dpi,
+                    overwrite=True,
+                ),
+            )
+            dataset_intervals = [
+                row
+                for row in interval_rows
+                if _integral(row["dataset_id"], field="dataset_id") == dataset_id
+            ]
+            recording_mask = context["recording_writing_mask"]
+            json_path = png_path.with_suffix(".json")
+            _write_json(
+                json_path,
+                {
+                    "schema_version": 2,
+                    "user": user,
+                    "action": action,
+                    "dataset_id": dataset_id,
+                    "visual_contract": "segmentation_transient_score_plus_writing_intervals",
+                    "sample_count": len(recording_mask),
+                    "sampling_rate_hz": context["sampling_rate_hz"],
+                    "panel_count": result.panel_count,
+                    "recording_duration_s": result.recording_duration_s,
+                    "displayed_event_count": result.displayed_event_count,
+                    "displayed_label_count": result.displayed_label_count,
+                    "displayed_segment_count": result.displayed_segment_count,
+                    "displayed_writing_interval_count": result.displayed_writing_interval_count,
+                    "writing_sample_count": int(np.count_nonzero(recording_mask)),
+                    "writing_fraction": float(np.mean(recording_mask)),
+                    "reposition_sample_count": int(np.count_nonzero(~recording_mask)),
+                    "reposition_fraction": float(np.mean(~recording_mask)),
+                    "recording_boundary_clipped_interval_count": int(
+                        sum(
+                            interval.recording_boundary_clipped_start
+                            or interval.recording_boundary_clipped_end
+                            for interval in intervals_by_dataset.get(dataset_id, ())
+                        )
+                    ),
+                    "segment_boundary_clipped_interval_count": int(
+                        sum(
+                            bool(row.get("segment_boundary_clipped_start"))
+                            or bool(row.get("segment_boundary_clipped_end"))
+                            for row in dataset_intervals
+                        )
+                    ),
+                    "no_segment_overlap_interval_count": int(
+                        sum(
+                            not bool(row.get("retained_in_segment"))
+                            for row in dataset_intervals
+                        )
+                    ),
+                },
+            )
+            verification_files.extend(
+                [str(png_path.resolve()), str(json_path.resolve())]
+            )
+
     d1_pieces: list[np.ndarray] = []
     d2_pieces: list[np.ndarray] = []
     exported_rows = [row for row in segment_rows if str(row.get("segment_index", "")).strip() != ""]
@@ -700,6 +733,8 @@ def build_user(
         "branches": ["original_reference", "postencode_mask", "masked_accel_reencode"],
         "geometry_reused": True,
         "verification_enabled": verification,
+        "verification_files": verification_files,
+        "verification_file_count": len(verification_files),
     }
     _write_json(output_root / "user_reports" / f"{user}.json", report)
     return report
@@ -739,6 +774,20 @@ def finalize(source_root: Path, output_root: Path, *, overwrite: bool) -> dict[s
         report = _load_json(path)
         if report.get("status") != "PASS":
             raise BuildError(f"user worker did not PASS: {path}")
+        if report.get("verification_enabled"):
+            files = report.get("verification_files")
+            expected_count = 2 * len(report.get("recordings", []))
+            if not isinstance(files, list) or len(files) != expected_count:
+                raise BuildError(
+                    f"verification file inventory is incomplete for {user}: "
+                    f"expected {expected_count}, got "
+                    f"{len(files) if isinstance(files, list) else 'invalid'}"
+                )
+            missing = [item for item in files if not Path(item).is_file()]
+            if missing:
+                raise BuildError(
+                    f"verification files are missing for {user}: {missing[:3]}"
+                )
         reports.append(report)
     for branch in ("postencode_mask", "masked_accel_reencode"):
         _copy_root_padding_metadata(
@@ -780,6 +829,13 @@ def finalize(source_root: Path, output_root: Path, *, overwrite: bool) -> dict[s
         "press_lift_endpoints_inclusive": True,
         "airborne_definition": "valid segment samples outside assigned complete valid non-transient press-lift unions",
         "recording_reencode_mask_definition": "all complete valid non-transient physical Board touch pairs",
+        "writing_motion_verification_root": str(
+            (output_root / "writing_motion_verification").resolve()
+        ),
+        "verification_visual_contract": (
+            "source transient score + source Board events/labels/final segments "
+            "+ retained writing/contact intervals"
+        ),
         "user_reports": reports,
     }
     _write_json(output_root / "writing_motion_ablation_manifest.json", manifest)

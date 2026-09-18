@@ -49,8 +49,28 @@ all user reports pass.
 
 Each derived segmentation package additionally contains
 `*_writing_mask.npy` and `*_writing_intervals.csv`; padded packages contain
-`*_padded_writing_mask.npy`. D2 also writes recording-level masked-acceleration
-verification PNG/JSON files under `masking/verification/<user>/action_<action>/`.
+`*_padded_writing_mask.npy`.
+
+Verification is branch-independent and is written once under:
+
+```text
+writing_motion_verification/<user>/action_<action>/
+  <dataset_id>_writing_motion_verification.png
+  <dataset_id>_writing_motion_verification.json
+```
+
+The PNG intentionally follows the original Board-event segmentation
+verification contract: the source Ring transient score is the base signal,
+panels are 10 s wide, valid/transient Board press/lift events and timestamp
+labels are preserved, and exported source segments remain light-green spans.
+The writing-motion overlay adds explicit final segment start/end markers and a
+darker span for each *retained* writing/contact interval. Light-green area
+inside an exported segment but outside the darker spans is therefore the
+airborne/reposition portion removed by D1/D2.
+
+The verification recomputes the transient score from the exact source
+segmentation-declared transient channels only for visualization. It does not
+recompute segmentation, Board ownership, or the writing mask.
 
 ## Re-running after a partial Slurm array
 
