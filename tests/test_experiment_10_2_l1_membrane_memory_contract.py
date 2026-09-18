@@ -27,12 +27,17 @@ def test_exp102_factorial_contract() -> None:
 
 
 def test_membrane_shift_mapping() -> None:
-    expected_beta = {1: 0.5, 2: 0.75, 3: 0.875, 4: 0.9375}
+    expected_beta = {
+        1: math.exp(-(1000.0 / 64.0) / exp102.exp72.TAU_MEM_MS),
+        2: 0.75,
+        3: 0.875,
+        4: 0.9375,
+    }
     for shift, expected in expected_beta.items():
         assert math.isclose(exp102.beta_from_mem_shift(shift), expected)
     taus = [exp102.tau_mem_ms_from_shift(s, 64.0) for s in exp102.L1_MEM_SHIFTS]
     assert all(left < right for left, right in zip(taus, taus[1:]))
-    assert math.isclose(taus[0], 22.542110013890053, rel_tol=1e-9)
+    assert math.isclose(taus[0], exp102.exp72.TAU_MEM_MS, rel_tol=1e-12)
     assert math.isclose(taus[1], 54.31342963722199, rel_tol=1e-9)
     assert math.isclose(taus[2], 117.0136826471659, rel_tol=1e-9)
     assert math.isclose(taus[3], 242.10347130039656, rel_tol=1e-9)
@@ -41,7 +46,10 @@ def test_membrane_shift_mapping() -> None:
 def test_network_changes_only_l1_membrane_beta() -> None:
     model = exp102.Exp102Net(3, n_classes=12, fs=64.0)
     assert math.isclose(model.l1_lif.beta, 0.875)
-    assert math.isclose(model.l2_lif.beta, 0.5)
+    assert math.isclose(
+        model.l2_lif.beta,
+        math.exp(-(1000.0 / 64.0) / exp102.exp72.TAU_MEM_MS),
+    )
     assert model.hidden_linears[0].in_features == 30
     assert model.hidden_linears[0].out_features == 128
     assert model.hidden_linears[1].in_features == 128
