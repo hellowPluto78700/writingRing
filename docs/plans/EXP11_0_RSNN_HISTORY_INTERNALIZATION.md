@@ -1,64 +1,80 @@
-# Exp11.0 plan — paired D0/D1 RSNN history internalization
+# Exp11.0 plan — full A/B/C/D context × fusion factorial
 
 ## Goal
 
-Test whether recurrent SNN state can internalize the temporal information exposed by Exp10.2.2 Fixed250 probes, and whether the mechanism behaves differently for D0 original events versus D1 post-encode-masked events.
+Test whether the temporal information exposed by external Fixed250 probes can be internalized by recurrent SNN dynamics, by a history-conditioned Fusion transform, or by their interaction.
+
+## Architecture factor
+
+Use the complete 3 context topologies × 2 Fusion states:
+
+- A: FF context, Fusion off — `L1 -> FF -> Linear`
+- B-diag/B-dense: recurrent context, Fusion off — `L1 -> RSNN -> Linear`
+- C: FF context, Fusion on — `L1 -> FF context -> Fusion -> Linear`
+- D-diag/D-dense: recurrent context, Fusion on — `L1 -> RSNN context -> Fusion -> Linear`
+
+Fusion off must instantiate no Fusion weight matrices. Fusion on must combine both L1 local spikes and context spikes.
+
+The final hidden state is exposed uniformly as `readout`: context output when Fusion is off, Fusion output when Fusion is on.
 
 ## Preserved contracts
 
-- D0 and D1 contain identical sample identities, labels, valid lengths, and user split geometry.
-- Locked cross-user rotation0.
+- D0 original and D1 post-encode-mask.
+- Paired D0/D1 sample identities, labels, valid lengths, split geometry, seed streams, and DataLoader ordering.
+- Rotation0.
 - Seeds 11/23/37.
-- L1 width 128, membrane shift2, synaptic shifts (2,3,4), binary communication.
-- RSNN and Fusion tau_syn ~= tau_mem ~= 54 ms.
-- Fusion is non-recurrent and receives both L1 local spikes and RSNN context spikes.
-- Primary objective is valid-length time-shared WCCE only.
+- L1 width 128, membrane shift2, synaptic shifts (2,3,4), binary spikes.
+- Context width 128, tau_syn ~= tau_mem ~= 54 ms.
+- Fusion width 128, tau_syn ~= tau_mem ~= 54 ms, no recurrence.
+- Valid-mean time-shared WCCE only.
 - Exp10.2.2 valid/window probe semantics.
-- Validation BA selects checkpoints; validation objective loss is the tiebreak.
-
-## Matched pretrained-source stage
-
-D1 already has seed-matched Exp10.2.1 binary/l1mem2/l2mem1 checkpoints.
-
-No equivalent D0 source exists. Before the main factorial, train exactly three D0 source checkpoints with the same 30 -> 128 -> 128 -> 12 backbone, binary communication, L1 mem shift2, L2 mem shift1, synaptic shifts (2,3,4), valid-mean WCCE, optimizer, early stopping, checkpoint selection, and seed-specific initialization/loader order.
-
-The main D0 pretrained branch copies only the source input->L1 matrix. The main D1 pretrained branch copies only the corresponding Exp10.2.1 input->L1 matrix. Copied weights remain trainable.
+- Validation BA primary checkpoint criterion and validation loss tiebreak.
+- D0 pretrained-input source remains matched D0 source; D1 source remains seed-matched Exp10.2.1.
 
 ## Main factorial
 
-2 datasets x 2 L1 init modes x 3 recurrence topologies x 3 seeds = 36 runs.
+2 datasets × 2 L1 init modes × 3 context topologies × 2 Fusion states × 3 seeds = 72 main runs.
 
-Topologies:
+## Required contrasts
 
-- ff: no recurrence
-- diagonal: neuron-wise self recurrence
-- dense: full 128x128 recurrence
+Finalizer must report:
 
-All common random weights and DataLoader order are paired across D0/D1 for a fixed seed.
+- diagonal/dense recurrence minus FF separately for Fusion off and on;
+- Fusion on minus off separately for FF/diagonal/dense;
+- recurrence × Fusion interaction `(D-C)-(B-A)`;
+- paired D1-D0;
+- pretrained-input minus dynamics-only;
+- D1 × recurrence;
+- D1 × Fusion;
+- pretraining × recurrence.
 
-## Required outputs
+## Mechanism diagnostics
 
-Per main run: checkpoint/history, valid-native metrics, whole-window metrics, output-LIF diagnostic, L1/RSNN/Fusion valid/window probes, firing/activity diagnostics, recurrent input diagnostics, and parameter counts.
+For L1, context/RSNN, and readout, evaluate valid/window whole and Fixed250 probes. Main temporal diagnostic is `Fixed250 BA - Whole BA`.
 
-Finalized outputs: method summaries grouped by variant/init/topology, paired recurrence contrasts, paired pretrained-input contrasts, paired D1-D0 contrasts, D1 x recurrence interactions, pretraining x recurrence interactions, temporal-gap summaries through L1 -> RSNN -> Fusion, and D0 source metrics.
+For Fusion-off runs, readout state must equal context state exactly. For Fusion-on runs, readout is the Fusion output.
+
+Record recurrent/external input ratio, recurrent weight norm, firing activity, dead-neuron fraction, and post-valid residual firing.
 
 ## Multi-CPU execution
 
-Use one 3-task CPU array for D0 matched-source training, one 36-task CPU array for the main factorial, one CPU core per task, afterok dependencies, an aggregation-only finalizer, and an analysis-only notebook.
-
-The 36-task array intentionally runs D0 and D1 concurrently.
+- 3-task D0 matched-source array.
+- 72-task main array with one CPU core per task.
+- Cap main concurrency at 50: `#SBATCH --array=0-71%50`.
+- afterok finalizer.
+- finalizer aggregates only.
+- notebook is analysis-only.
 
 ## Acceptance criteria
 
-- Exactly 3 D0 source specs.
-- Exactly 36 unique main specs.
-- D0/D1 geometry is verified paired before training.
-- D0 pretrained mode cannot use a D1 source checkpoint.
-- D1 pretrained mode must use the seed-matched Exp10.2.1 binary/l1mem2/l2mem1 checkpoint.
-- Only input->L1 is copied; copied parameters remain trainable.
-- ff/diagonal/dense recurrent parameter counts are 0/128/16384.
-- Main Slurm array is 0-35 with maximum concurrency 36.
-- D0 source Slurm array is 0-2 with maximum concurrency 3.
-- Finalizer contains paired D1-D0 comparisons.
-- Notebook is aggregation-only.
+- Exactly 72 unique main run specs.
+- A/B/C/D case mapping is correct for all topology/Fusion combinations.
+- Fusion-off models contain no Fusion weight matrices.
+- Fusion-off readout state is identical to context state.
+- Fusion-on models instantiate both local and context Fusion projections.
+- D0/D1 common initializations remain paired.
+- Diagonal recurrence has 128 recurrent parameters; dense has 16,384; FF has 0.
+- Probe inventory uses `l1 / rsnn / readout`.
+- Finalizer contains `fusion_on_minus_off` and `recurrence_x_fusion`.
+- Slurm main array is `0-71%50`.
 - Focused Exp11.0 contract tests and repository source-syntax test pass.
