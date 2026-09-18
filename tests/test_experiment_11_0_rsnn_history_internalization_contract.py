@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pandas as pd
 import torch
 from torch import nn
 
@@ -263,6 +264,56 @@ def test_training_is_wcce_only_with_gradient_clipping() -> None:
     assert "F.cross_entropy(scores, yd)" in run_block
     assert "clip_grad_norm_" in run_block
     assert "tsce" not in run_block.lower()
+
+
+def test_abcd_contrast_tables_execute_on_full_synthetic_factorial() -> None:
+    rows = []
+    for spec in exp110.run_specs():
+        dataset = 1.0 if spec.variant == exp110.VARIANT_POSTENCODE else 0.0
+        pretrain = 2.0 if spec.l1_init == exp110.L1_INIT_PRETRAINED else 0.0
+        recurrence = {
+            exp110.TOPOLOGY_FF: 0.0,
+            exp110.TOPOLOGY_DIAGONAL: 3.0,
+            exp110.TOPOLOGY_DENSE: 4.0,
+        }[spec.topology]
+        fusion = 5.0 if spec.fusion == exp110.FUSION_ON else 0.0
+        interaction = 0.0
+        if spec.fusion == exp110.FUSION_ON:
+            interaction = {
+                exp110.TOPOLOGY_FF: 0.0,
+                exp110.TOPOLOGY_DIAGONAL: 7.0,
+                exp110.TOPOLOGY_DENSE: 8.0,
+            }[spec.topology]
+        value = dataset + pretrain + recurrence + fusion + interaction
+        row = {
+            "variant": spec.variant,
+            "l1_init": spec.l1_init,
+            "topology": spec.topology,
+            "fusion": spec.fusion,
+            "seed": spec.seed,
+        }
+        for metric in exp110._contrast_metrics():
+            row[metric] = value
+        rows.append(row)
+
+    frame = pd.DataFrame(rows)
+    contrasts = exp110._paired_contrasts(frame)
+    interactions = exp110._interaction_rows(frame)
+
+    assert len(contrasts) == 216
+    assert len(interactions) == 90
+    assert len(contrasts[contrasts.contrast == "fusion_on_minus_off"]) == 36
+    assert len(contrasts[contrasts.contrast == "d1_minus_d0"]) == 36
+
+    row = interactions[
+        (interactions.interaction == "recurrence_x_fusion")
+        & (interactions.variant == exp110.VARIANT_ORIGINAL)
+        & (interactions.l1_init == exp110.L1_INIT_DYNAMICS_ONLY)
+        & (interactions.topology == exp110.TOPOLOGY_DIAGONAL)
+        & (interactions.seed == 11)
+    ]
+    assert len(row) == 1
+    assert row.iloc[0]["interaction_native_test_ba"] == 7.0
 
 
 def test_finalizer_contains_abcd_contrasts() -> None:
