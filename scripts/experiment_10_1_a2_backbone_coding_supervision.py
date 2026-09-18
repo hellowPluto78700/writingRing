@@ -1117,6 +1117,99 @@ def _native_contrast_rows(runs: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+
+def _information_contrast_rows(info: pd.DataFrame) -> pd.DataFrame:
+    metric_columns = (
+        "l1_pre_reset_fixed250_ba",
+        "l1_spike_fixed250_ba",
+        "l2_pre_reset_fixed250_ba",
+        "l2_spike_fixed250_ba",
+        "l1_quantization_delta",
+        "l1_to_l2_transform_delta",
+        "l2_quantization_delta",
+    )
+    rows: list[dict[str, Any]] = []
+    for rotation in ROTATIONS:
+        for seed in MODEL_SEEDS:
+            cell = info[(info.rotation == rotation) & (info.seed == seed)]
+            indexed = cell.set_index(["variant", "coding", "objective"])
+
+            def add(
+                contrast: str,
+                left: tuple[str, str, str],
+                right: tuple[str, str, str],
+                **meta: Any,
+            ) -> None:
+                row: dict[str, Any] = {
+                    "contrast": contrast,
+                    "rotation": rotation,
+                    "seed": seed,
+                    **meta,
+                }
+                for metric in metric_columns:
+                    row[f"{metric}_delta"] = float(
+                        indexed.loc[left, metric] - indexed.loc[right, metric]
+                    )
+                rows.append(row)
+
+            for coding in CODINGS:
+                for objective in OBJECTIVES:
+                    add(
+                        "D1_minus_D0",
+                        (VARIANT_POSTENCODE, coding, objective),
+                        (VARIANT_ORIGINAL, coding, objective),
+                        coding=coding,
+                        objective=objective,
+                    )
+            for variant in VARIANTS:
+                for objective in OBJECTIVES:
+                    add(
+                        "MM_minus_BB",
+                        (variant, CODING_MM, objective),
+                        (variant, CODING_BB, objective),
+                        variant=variant,
+                        objective=objective,
+                    )
+                for coding in CODINGS:
+                    add(
+                        "Joint_minus_Baseline",
+                        (variant, coding, OBJECTIVE_JOINT),
+                        (variant, coding, OBJECTIVE_BASELINE),
+                        variant=variant,
+                        coding=coding,
+                    )
+                    add(
+                        "L1TSCE_minus_Baseline",
+                        (variant, coding, OBJECTIVE_L1_TSCE),
+                        (variant, coding, OBJECTIVE_BASELINE),
+                        variant=variant,
+                        coding=coding,
+                    )
+            for variant in VARIANTS:
+                for objective, name in (
+                    (OBJECTIVE_JOINT, "MT_x_Joint"),
+                    (OBJECTIVE_L1_TSCE, "MT_x_L1TSCE"),
+                ):
+                    row = {
+                        "contrast": name,
+                        "variant": variant,
+                        "rotation": rotation,
+                        "seed": seed,
+                    }
+                    for metric in metric_columns:
+                        treatment = (
+                            float(indexed.loc[(variant, CODING_MM, objective), metric])
+                            - float(indexed.loc[(variant, CODING_BB, objective), metric])
+                        )
+                        baseline = (
+                            float(indexed.loc[(variant, CODING_MM, OBJECTIVE_BASELINE), metric])
+                            - float(indexed.loc[(variant, CODING_BB, OBJECTIVE_BASELINE), metric])
+                        )
+                        row[f"{metric}_delta"] = treatment - baseline
+                    rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _information_path_runs(probes: pd.DataFrame) -> pd.DataFrame:
     target = {
         "l1_pre_reset_fixed250_ba": "l1__pre_reset__fixed250_ordered_mean",
@@ -1317,6 +1410,48 @@ def finalize(config: Config) -> dict[str, Any]:
         config.results_dir / "information_path_summary.csv", index=False
     )
 
+    info_contrasts = _information_contrast_rows(info)
+    info_contrasts.to_csv(
+        config.results_dir / "information_path_contrast_runs.csv", index=False
+    )
+    info_contrast_metrics = [
+        column for column in info_contrasts.columns if column.endswith("_delta")
+    ]
+    info_contrast_split = (
+        info_contrasts.groupby(
+            [
+                column
+                for column in ("contrast", "variant", "coding", "objective", "rotation")
+                if column in info_contrasts.columns
+            ],
+            dropna=False,
+            sort=False,
+        )[info_contrast_metrics]
+        .mean()
+        .reset_index()
+    )
+    info_contrast_split.to_csv(
+        config.results_dir / "information_path_contrast_split_level.csv",
+        index=False,
+    )
+    info_contrast_summary = (
+        info_contrast_split.groupby(
+            [
+                column
+                for column in ("contrast", "variant", "coding", "objective")
+                if column in info_contrast_split.columns
+            ],
+            dropna=False,
+            sort=False,
+        )[info_contrast_metrics]
+        .agg(["count", "mean", "std"])
+        .reset_index()
+    )
+    _flatten_columns(info_contrast_summary).to_csv(
+        config.results_dir / "information_path_contrast_summary.csv",
+        index=False,
+    )
+
     activity = pd.DataFrame(
         [row for payload in payloads for row in _activity_rows(payload)]
     )
@@ -1388,6 +1523,9 @@ def finalize(config: Config) -> dict[str, Any]:
             "information_path_runs.csv",
             "information_path_split_level.csv",
             "information_path_summary.csv",
+            "information_path_contrast_runs.csv",
+            "information_path_contrast_split_level.csv",
+            "information_path_contrast_summary.csv",
             "activity_runs.csv",
             "activity_summary.csv",
         ],
