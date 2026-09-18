@@ -201,7 +201,7 @@ python -m scripts.experiment_10_1_a2_backbone_coding_supervision list-runs
 ```text
 notebooks/artifacts/
   experiment_10_1_a2_backbone_coding_supervision/
-    d0_d1_bb_mm_supervision_factorial_v1/
+    d0_d1_bb_mm_supervision_single_split_v1/
 ```
 
 Main aggregate outputs:
