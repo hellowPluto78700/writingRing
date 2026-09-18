@@ -218,6 +218,9 @@ probe_summary.csv
 information_path_runs.csv
 information_path_split_level.csv
 information_path_summary.csv
+information_path_contrast_runs.csv
+information_path_contrast_split_level.csv
+information_path_contrast_summary.csv
 activity_runs.csv
 activity_summary.csv
 manifest.json
