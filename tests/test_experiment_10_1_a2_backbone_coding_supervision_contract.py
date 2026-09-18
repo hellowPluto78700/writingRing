@@ -49,6 +49,36 @@ def test_dataset_roots_only_cover_d0_d1() -> None:
     )
 
 
+
+def test_bb_baseline_replays_exp73_a2_forward_contract() -> None:
+    spec = exp101.RunSpec("original", "bb", "l2_wcce", 0, 11)
+    init_seed = exp101.exp73._e2e_pair_seed(spec.seed, "model_init")
+
+    exp101.exp3.seed_all(init_seed)
+    reference = exp101.exp73.Exp73Net("linear", 12, 64.0)
+    exp101.exp3.seed_all(init_seed)
+    candidate = exp101.Exp101Net(spec, 12, 64.0)
+
+    assert torch.equal(
+        reference.hidden_linears[0].weight,
+        candidate.hidden_linears[0].weight,
+    )
+    assert torch.equal(
+        reference.hidden_linears[1].weight,
+        candidate.hidden_linears[1].weight,
+    )
+    assert torch.equal(reference.output_linear.weight, candidate.output_linear.weight)
+
+    x = torch.linspace(0.0, 1.0, steps=2 * 12 * 30, dtype=torch.float32).reshape(
+        2, 12, 30
+    )
+    with torch.no_grad():
+        ref = reference.forward_trajectory(x)
+        got = candidate.forward_trajectory(x)
+    assert torch.equal(ref["hidden_spikes"][0], got["hidden"]["l1"]["spike"])
+    assert torch.equal(ref["hidden_spikes"][1], got["hidden"]["l2"]["spike"])
+    assert torch.equal(ref["evidence"], got["l2_evidence"])
+
 def test_l1_tsce_is_valid_timestep_mean_ce() -> None:
     evidence = torch.tensor(
         [
