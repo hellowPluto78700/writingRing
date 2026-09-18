@@ -1,80 +1,77 @@
-# Exp11.0 plan — full A/B/C/D context × fusion factorial
+# Exp11.0 v4 plan — frozen-L1 temporal representation control
 
-## Goal
+## Scientific question
 
-Test whether the temporal information exposed by external Fixed250 probes can be internalized by recurrent SNN dynamics, by a history-conditioned Fusion transform, or by their interaction.
+Determine whether RSNN/Fusion can internalize the temporal information already present in the pretrained L1 representation, or whether the final gain requires WCCE to substantially reshape L1.
 
-## Architecture factor
+## Factors
 
-Use the complete 3 context topologies × 2 Fusion states:
+- Dataset: D0 / D1.
+- L1 mode:
+  - dynamics_only;
+  - pretrained_trainable;
+  - pretrained_frozen.
+- Context topology:
+  - ff;
+  - diagonal recurrence;
+  - dense recurrence.
+- Fusion:
+  - off;
+  - on.
+- Seed:
+  - 11 / 23 / 37.
 
-- A: FF context, Fusion off — `L1 -> FF -> Linear`
-- B-diag/B-dense: recurrent context, Fusion off — `L1 -> RSNN -> Linear`
-- C: FF context, Fusion on — `L1 -> FF context -> Fusion -> Linear`
-- D-diag/D-dense: recurrent context, Fusion on — `L1 -> RSNN context -> Fusion -> Linear`
+Total main runs: 108.
 
-Fusion off must instantiate no Fusion weight matrices. Fusion on must combine both L1 local spikes and context spikes.
+## Frozen contract
 
-The final hidden state is exposed uniformly as `readout`: context output when Fusion is off, Fusion output when Fusion is on.
+For `pretrained_frozen`:
 
-## Preserved contracts
+- load the same seed-matched source L1 input matrix used by `pretrained_trainable`;
+- set only `model.l1_input.weight.requires_grad=False`;
+- exclude that parameter from the optimizer;
+- leave context, recurrence, Fusion, and Linear readout trainable;
+- assert post-training source-relative L1 drift <= 1e-12.
 
-- D0 original and D1 post-encode-mask.
-- Paired D0/D1 sample identities, labels, valid lengths, split geometry, seed streams, and DataLoader ordering.
-- Rotation0.
-- Seeds 11/23/37.
-- L1 width 128, membrane shift2, synaptic shifts (2,3,4), binary spikes.
-- Context width 128, tau_syn ~= tau_mem ~= 54 ms.
-- Fusion width 128, tau_syn ~= tau_mem ~= 54 ms, no recurrence.
-- Valid-mean time-shared WCCE only.
-- Exp10.2.2 valid/window probe semantics.
-- Validation BA primary checkpoint criterion and validation loss tiebreak.
-- D0 pretrained-input source remains matched D0 source; D1 source remains seed-matched Exp10.2.1.
+Neuron dynamics are fixed in all conditions, so freezing the input matrix freezes the only trainable L1 parameter.
 
-## Main factorial
+## Representation-drift diagnostics
 
-2 datasets × 2 L1 init modes × 3 context topologies × 2 Fusion states × 3 seeds = 72 main runs.
+For both pretrained modes record:
 
-## Required contrasts
+- relative Frobenius drift from the source matrix;
+- cosine similarity to the source matrix;
+- L1 pre-reset Fixed250 and whole probes;
+- L1 spike Fixed250 and whole probes.
 
-Finalizer must report:
+The frozen branch should reproduce the source weight exactly. The trainable branch quantifies how strongly WCCE reshapes L1.
 
-- diagonal/dense recurrence minus FF separately for Fusion off and on;
-- Fusion on minus off separately for FF/diagonal/dense;
-- recurrence × Fusion interaction `(D-C)-(B-A)`;
-- paired D1-D0;
-- pretrained-input minus dynamics-only;
-- D1 × recurrence;
-- D1 × Fusion;
-- pretraining × recurrence.
+## Core comparisons
 
-## Mechanism diagnostics
+- B-A under pretrained_frozen: recurrence can use the original L1 representation.
+- D-B under pretrained_frozen: history-conditioned Fusion adds value without L1 adaptation.
+- pretrained_trainable - pretrained_frozen: value of L1 adaptation.
+- D1-D0: preprocessing effect at fixed architecture and L1 mode.
+- recurrence × Fusion: `(D-C)-(B-A)`.
 
-For L1, context/RSNN, and readout, evaluate valid/window whole and Fixed250 probes. Main temporal diagnostic is `Fixed250 BA - Whole BA`.
+## Execution
 
-For Fusion-off runs, readout state must equal context state exactly. For Fusion-on runs, readout is the Fusion output.
-
-Record recurrent/external input ratio, recurrent weight norm, firing activity, dead-neuron fraction, and post-valid residual firing.
-
-## Multi-CPU execution
-
-- 3-task D0 matched-source array.
-- 72-task main array with one CPU core per task.
-- Cap main concurrency at 50: `#SBATCH --array=0-71%50`.
-- afterok finalizer.
+- 3 D0 matched-source runs.
+- 108 main runs.
+- D0/D1 remain adjacent array tasks.
+- one CPU core per task.
+- main array cap 50 concurrent: `0-107%50`.
 - finalizer aggregates only.
-- notebook is analysis-only.
+- notebook performs analysis only.
 
 ## Acceptance criteria
 
-- Exactly 72 unique main run specs.
-- A/B/C/D case mapping is correct for all topology/Fusion combinations.
-- Fusion-off models contain no Fusion weight matrices.
-- Fusion-off readout state is identical to context state.
-- Fusion-on models instantiate both local and context Fusion projections.
-- D0/D1 common initializations remain paired.
-- Diagonal recurrence has 128 recurrent parameters; dense has 16,384; FF has 0.
-- Probe inventory uses `l1 / rsnn / readout`.
-- Finalizer contains `fusion_on_minus_off` and `recurrence_x_fusion`.
-- Slurm main array is `0-71%50`.
-- Focused Exp11.0 contract tests and repository source-syntax test pass.
+- Exactly 108 main specs.
+- L1 modes are exactly dynamics_only / pretrained_trainable / pretrained_frozen.
+- Frozen L1 is absent from optimizer parameter list.
+- Synthetic training step cannot change frozen L1.
+- Frozen post-training drift is zero within 1e-12.
+- Trainable/frozen paired contrasts are generated.
+- L1 pre-reset Fixed250 appears in core contrasts.
+- A/B/C/D and D0/D1 pairing contracts remain unchanged.
+- focused Exp11.0 CI passes.
