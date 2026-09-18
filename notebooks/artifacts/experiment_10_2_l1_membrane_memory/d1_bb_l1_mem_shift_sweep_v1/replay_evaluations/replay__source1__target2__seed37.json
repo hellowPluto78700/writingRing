@@ -1,0 +1,160 @@
+{
+  "activity": {
+    "l1": [
+      {
+        "bank": 0,
+        "count": 43,
+        "dead_neuron_fraction": 0.04651162773370743,
+        "fraction_nonzero": 0.9534883499145508,
+        "high_rate_neuron_fraction_ge_0p5": 0.0,
+        "mean_spikes_per_neuron_s": 1.100808024406433,
+        "mean_value_per_neuron_step": 0.017200125381350517,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 2,
+        "start": 0,
+        "stop": 43,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "count": 43,
+        "dead_neuron_fraction": 0.06976744532585144,
+        "fraction_nonzero": 0.930232584476471,
+        "high_rate_neuron_fraction_ge_0p5": 0.0,
+        "mean_spikes_per_neuron_s": 3.9598143100738525,
+        "mean_value_per_neuron_step": 0.061872098594903946,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 3,
+        "start": 43,
+        "stop": 86,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "count": 42,
+        "dead_neuron_fraction": 0.1190476194024086,
+        "fraction_nonzero": 0.8809523582458496,
+        "high_rate_neuron_fraction_ge_0p5": 0.0476190485060215,
+        "mean_spikes_per_neuron_s": 12.700469970703125,
+        "mean_value_per_neuron_step": 0.19844484329223633,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 4,
+        "start": 86,
+        "stop": 128,
+        "threshold_multiplier": 1.0
+      }
+    ],
+    "l2": [
+      {
+        "bank": 0,
+        "count": 43,
+        "dead_neuron_fraction": 0.0,
+        "fraction_nonzero": 1.0,
+        "high_rate_neuron_fraction_ge_0p5": 0.1627907007932663,
+        "mean_spikes_per_neuron_s": 22.787702560424805,
+        "mean_value_per_neuron_step": 0.3560578525066376,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 2,
+        "start": 0,
+        "stop": 43,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "count": 43,
+        "dead_neuron_fraction": 0.0,
+        "fraction_nonzero": 1.0,
+        "high_rate_neuron_fraction_ge_0p5": 0.23255814611911774,
+        "mean_spikes_per_neuron_s": 24.511289596557617,
+        "mean_value_per_neuron_step": 0.38298889994621277,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 3,
+        "start": 43,
+        "stop": 86,
+        "threshold_multiplier": 1.0
+      },
+      {
+        "bank": 0,
+        "count": 42,
+        "dead_neuron_fraction": 0.0,
+        "fraction_nonzero": 1.0,
+        "high_rate_neuron_fraction_ge_0p5": 0.2857142984867096,
+        "mean_spikes_per_neuron_s": 24.787588119506836,
+        "mean_value_per_neuron_step": 0.3873060643672943,
+        "saturated_neuron_fraction_ge_0p95": 0.0,
+        "shift": 4,
+        "start": 86,
+        "stop": 128,
+        "threshold_multiplier": 1.0
+      }
+    ]
+  },
+  "contract": {
+    "coding": "bb",
+    "dataset": "postencode_mask",
+    "l2_mem_shift": 1,
+    "learned_weights_frozen": true,
+    "objective": "l2_wcce",
+    "readout": "time_shared",
+    "source_l1_mem_shift": 1,
+    "target_l1_beta": 0.75,
+    "target_l1_mem_shift": 2,
+    "target_l1_tau_mem_ms": 54.31342963722199
+  },
+  "experiment_id": "experiment_10_2_l1_membrane_memory",
+  "lif_transfer_metrics": {
+    "test": {
+      "accuracy": 0.2471264367816092,
+      "balanced_accuracy": 0.2537410302116185,
+      "macro_f1": 0.24122773822754473
+    },
+    "train": {
+      "accuracy": 0.49607843137254903,
+      "balanced_accuracy": 0.4994960123114336,
+      "macro_f1": 0.4678474156496817
+    },
+    "val": {
+      "accuracy": 0.41420118343195267,
+      "balanced_accuracy": 0.39396332833832837,
+      "macro_f1": 0.34947666764439944
+    }
+  },
+  "model_init_seed": 2825277461,
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.3333333333333333,
+      "balanced_accuracy": 0.33437200054847116,
+      "macro_f1": 0.3129916907329187,
+      "objective_loss": 2.13607185873492
+    },
+    "train": {
+      "accuracy": 0.5803921568627451,
+      "balanced_accuracy": 0.5847716430286725,
+      "macro_f1": 0.551572271873417,
+      "objective_loss": 1.2962460559957167
+    },
+    "val": {
+      "accuracy": 0.47337278106508873,
+      "balanced_accuracy": 0.4569212037962038,
+      "macro_f1": 0.41789529585200086,
+      "objective_loss": 1.9987620122333956
+    }
+  },
+  "parameter_count": 21760,
+  "protocol_version": "d1_bb_l1_mem_shift_sweep_v1",
+  "source_best_epoch": 92,
+  "source_train_spec": {
+    "l1_mem_shift": 1,
+    "seed": 37
+  },
+  "spec": {
+    "seed": 37,
+    "target_l1_mem_shift": 2
+  },
+  "split_sample_hashes": {
+    "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+    "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+    "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+  },
+  "stage": "frozen_replay"
+}

@@ -1,0 +1,40 @@
+{
+  "dataset": "postencode_mask",
+  "e2e_runs": 12,
+  "experiment_id": "experiment_10_2_l1_membrane_memory",
+  "l1_mem_shifts": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "l2_mem_shift": 1,
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "phase_aware_readout": false,
+  "primary_outputs": [
+    "stage_a_replay_runs.csv",
+    "stage_a_replay_summary.csv",
+    "all_runs.csv",
+    "all_summary.csv",
+    "all_shift_contrasts.csv",
+    "all_shift_contrast_summary.csv",
+    "all_activity_runs.csv",
+    "all_activity_summary.csv",
+    "e2e_minus_replay.csv"
+  ],
+  "primary_questions": [
+    "Does frozen longer L1 membrane memory make l1_quantization_delta less negative?",
+    "After end-to-end retraining, does L1 spike Fixed250 BA rise without reducing L1 pre-reset BA?",
+    "Do longer membrane shifts improve L2 temporal representation and native BA without saturation?"
+  ],
+  "protocol_version": "d1_bb_l1_mem_shift_sweep_v1",
+  "readout": "time_shared_only",
+  "replay_runs": 12,
+  "rotation": 0,
+  "statistical_scope": "one locked cross-user split; seeds 11/23/37 are paired optimization replicates, not independent user splits",
+  "status": "PASS"
+}

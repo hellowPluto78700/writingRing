@@ -1,0 +1,114 @@
+{
+  "coding": "bb",
+  "dataset": "D1 postencode_mask only",
+  "experiment_id": "experiment_10_2_l1_membrane_memory",
+  "fold_roles": {
+    "0": "test",
+    "1": "val",
+    "2": "train",
+    "3": "train",
+    "4": "train"
+  },
+  "l1_beta": {
+    "1": 0.4999675576146916,
+    "2": 0.75,
+    "3": 0.875,
+    "4": 0.9375
+  },
+  "l1_mem_shifts": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "l1_tau_mem_ms": {
+    "1": 22.54,
+    "2": 54.31342963722199,
+    "3": 117.0136826471659,
+    "4": 242.10347130039656
+  },
+  "l2_beta": 0.4999675576146916,
+  "l2_mem_shift": 1,
+  "l2_tau_mem_ms": 22.54,
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "objective": "l2_wcce",
+  "paired_randomness": "For a fixed seed, model initialization and train-loader order are identical across all L1 membrane shifts.",
+  "protocol_version": "d1_bb_l1_mem_shift_sweep_v1",
+  "question": "Can longer L1 membrane memory convert subthreshold analog evidence into binary spike evidence without destroying downstream temporal representation?",
+  "readout": "time_shared",
+  "rotation": 0,
+  "split_samples": {
+    "test": 174,
+    "train": 510,
+    "val": 169
+  },
+  "split_users": {
+    "test": [
+      "user_1",
+      "user_15",
+      "user_18",
+      "user_20"
+    ],
+    "train": [
+      "user_0",
+      "user_11",
+      "user_13",
+      "user_14",
+      "user_16",
+      "user_19",
+      "user_3",
+      "user_4",
+      "user_5",
+      "user_7",
+      "user_8",
+      "user_9"
+    ],
+    "val": [
+      "user_10",
+      "user_12",
+      "user_2",
+      "user_6"
+    ]
+  },
+  "stage_a": {
+    "frozen_replay_runs": 12,
+    "source": "Exp10.2 shift_mem=1 baseline checkpoints",
+    "trained_parameters_changed": false
+  },
+  "stage_b": {
+    "baseline_runs": 3,
+    "e2e_runs_total": 12,
+    "long_mem_retrain_runs": 9
+  },
+  "synaptic_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "variant": "postencode_mask"
+}
