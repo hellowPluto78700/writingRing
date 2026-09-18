@@ -10,5 +10,5 @@ array_job=$(sbatch --parsable --dependency="afterok:${prepare_job}" --export=ALL
 finalizer_job=$(sbatch --parsable --dependency="afterok:${array_job}" --export=ALL scripts/bash_script/SNN_Bash/finalize_exp_10_1_cpu.bash)
 
 echo "Exp10.1 prepare: ${prepare_job}"
-echo "Exp10.1 A2 array: ${array_job}"
+echo "Exp10.1 36-run A2 array: ${array_job}"
 echo "Exp10.1 finalizer: ${finalizer_job}"
