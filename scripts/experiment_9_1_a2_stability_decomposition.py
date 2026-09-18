@@ -222,8 +222,9 @@ def _activity_snapshot(
     epoch: int,
 ) -> list[dict[str, Any]]:
     n = min(DIAGNOSTIC_SAMPLES, len(data.ytr))
-    X = torch.tensor(data.Xtr[:n], dtype=torch.float32, device=device)
-    lengths = torch.tensor(data.ltr[:n], dtype=torch.long, device=device)
+    indices = np.linspace(0, len(data.ytr) - 1, n, dtype=np.int64)
+    X = torch.tensor(data.Xtr[indices], dtype=torch.float32, device=device)
+    lengths = torch.tensor(data.ltr[indices], dtype=torch.long, device=device)
     model.eval()
     with torch.no_grad():
         trajectory = model.forward_trajectory(X)
