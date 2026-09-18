@@ -155,6 +155,15 @@ prepare
           -> Stage-A finalizer
 ```
 
+### Stage B only, after Stage A has been reviewed
+
+```bash
+bash scripts/bash_script/SNN_Bash/submit_exp_10_2_stage_b_cpu.bash
+```
+
+This submits only the nine end-to-end `shift_mem=2/3/4` runs and the full
+finalizer. It assumes the Stage-A baseline and replay artifacts already exist.
+
 ### Full Stage A + Stage B
 
 ```bash
