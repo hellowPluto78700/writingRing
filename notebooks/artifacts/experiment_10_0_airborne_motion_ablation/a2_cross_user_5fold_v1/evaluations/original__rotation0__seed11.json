@@ -1,0 +1,861 @@
+{
+  "best_epoch": 88,
+  "best_val_ba": 0.5251349345099344,
+  "best_val_objective_loss": 1.5100490771807158,
+  "bin_steps": 16,
+  "checkpoint": "notebooks/artifacts/experiment_10_0_airborne_motion_ablation/a2_cross_user_5fold_v1/checkpoints/original__rotation0__seed11.pt",
+  "contract": {
+    "architecture": "234x234",
+    "bias": false,
+    "ce_gain": 1.0,
+    "checkpoint_metric": "native validation balanced accuracy",
+    "checkpoint_tiebreak": "native validation objective loss",
+    "max_epochs": 100,
+    "min_epochs": 20,
+    "objective": "wcce",
+    "patience": 30,
+    "readout": "linear",
+    "regularization": "task_only",
+    "same_w_lif_beta": 0.5,
+    "same_w_lif_cap": 1,
+    "same_w_lif_threshold": 0.5,
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "source_method": "Exp7.3 A2_e2e_linear_wcce"
+  },
+  "dataset_roots": [
+    "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded",
+    "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded"
+  ],
+  "experiment_id": "experiment_10_0_airborne_motion_ablation",
+  "fs_hz": 64.0,
+  "history": "notebooks/artifacts/experiment_10_0_airborne_motion_ablation/a2_cross_user_5fold_v1/histories/original__rotation0__seed11.csv",
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "labels_hash": "022b1ed3ffb2ad5719555b8ecfd7610c334247a244cc227a2e8a90bc1ffb7891",
+  "loader_seed_contract": "exp73._raw_loaders(data, seed, ...); variant excluded",
+  "model_init_seed": 3218771927,
+  "n_bins": 16,
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.47126436781609193,
+      "balanced_accuracy": 0.45432163832899136,
+      "macro_f1": 0.4432634128020809,
+      "objective_loss": 1.549967086178133
+    },
+    "train": {
+      "accuracy": 0.8784313725490196,
+      "balanced_accuracy": 0.8792010416506272,
+      "macro_f1": 0.8808289016504283,
+      "objective_loss": 0.7093724935662513
+    },
+    "val": {
+      "accuracy": 0.5384615384615384,
+      "balanced_accuracy": 0.5251349345099344,
+      "macro_f1": 0.5141256670261739,
+      "objective_loss": 1.5100490771807158
+    }
+  },
+  "native_test_by_action": {
+    "action0": {
+      "accuracy": 0.49473684210526314,
+      "balanced_accuracy": 0.4719907407407407,
+      "macro_f1": 0.47256825412364517
+    },
+    "action1": {
+      "accuracy": 0.4430379746835443,
+      "balanced_accuracy": 0.44186507936507935,
+      "macro_f1": 0.40348424723424725
+    }
+  },
+  "native_test_diagnostics": {
+    "confusion_matrix": [
+      [
+        2,
+        0,
+        0,
+        1,
+        0,
+        5,
+        2,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        4,
+        2,
+        1,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        10,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        6,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        7,
+        0,
+        1,
+        2,
+        1,
+        0,
+        0,
+        0,
+        3
+      ],
+      [
+        1,
+        1,
+        0,
+        0,
+        8,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        2,
+        0,
+        1,
+        9,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        12,
+        0,
+        0,
+        3,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        2,
+        1,
+        0,
+        1,
+        0,
+        3,
+        0,
+        3,
+        3
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0,
+        1,
+        0,
+        2,
+        4,
+        0,
+        3,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        3,
+        0,
+        0,
+        0,
+        13,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0,
+        1,
+        5,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        6,
+        0,
+        1,
+        1,
+        0,
+        6
+      ]
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "per_class_recall": {
+      "A": 0.18181818181818182,
+      "B": 0.4,
+      "C": 0.5882352941176471,
+      "D": 0.4666666666666667,
+      "E": 0.6153846153846154,
+      "G": 0.5625,
+      "H": 0.7058823529411765,
+      "I": 0.0,
+      "J": 0.26666666666666666,
+      "K": 0.7647058823529411,
+      "L": 0.5,
+      "X": 0.4
+    }
+  },
+  "probe_count": 22,
+  "probe_evaluation_csv": "notebooks/artifacts/experiment_10_0_airborne_motion_ablation/a2_cross_user_5fold_v1/probe_evaluations/original__rotation0__seed11.csv",
+  "probe_feature_shapes": {
+    "test": {
+      "input__events__fixed250_count": [
+        174,
+        480
+      ],
+      "input__events__whole_count": [
+        174,
+        30
+      ],
+      "l1__post_reset__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l1__post_reset__whole_mean": [
+        174,
+        128
+      ],
+      "l1__pre_reset__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l1__pre_reset__whole_mean": [
+        174,
+        128
+      ],
+      "l1__spike__fixed250_count": [
+        174,
+        2048
+      ],
+      "l1__spike__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l1__spike__whole_count": [
+        174,
+        128
+      ],
+      "l1__spike__whole_mean": [
+        174,
+        128
+      ],
+      "l1__syn_current__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l1__syn_current__whole_mean": [
+        174,
+        128
+      ],
+      "l2__post_reset__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l2__post_reset__whole_mean": [
+        174,
+        128
+      ],
+      "l2__pre_reset__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l2__pre_reset__whole_mean": [
+        174,
+        128
+      ],
+      "l2__spike__fixed250_count": [
+        174,
+        2048
+      ],
+      "l2__spike__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l2__spike__whole_count": [
+        174,
+        128
+      ],
+      "l2__spike__whole_mean": [
+        174,
+        128
+      ],
+      "l2__syn_current__fixed250_ordered_mean": [
+        174,
+        2048
+      ],
+      "l2__syn_current__whole_mean": [
+        174,
+        128
+      ]
+    },
+    "train": {
+      "input__events__fixed250_count": [
+        510,
+        480
+      ],
+      "input__events__whole_count": [
+        510,
+        30
+      ],
+      "l1__post_reset__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l1__post_reset__whole_mean": [
+        510,
+        128
+      ],
+      "l1__pre_reset__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l1__pre_reset__whole_mean": [
+        510,
+        128
+      ],
+      "l1__spike__fixed250_count": [
+        510,
+        2048
+      ],
+      "l1__spike__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l1__spike__whole_count": [
+        510,
+        128
+      ],
+      "l1__spike__whole_mean": [
+        510,
+        128
+      ],
+      "l1__syn_current__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l1__syn_current__whole_mean": [
+        510,
+        128
+      ],
+      "l2__post_reset__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l2__post_reset__whole_mean": [
+        510,
+        128
+      ],
+      "l2__pre_reset__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l2__pre_reset__whole_mean": [
+        510,
+        128
+      ],
+      "l2__spike__fixed250_count": [
+        510,
+        2048
+      ],
+      "l2__spike__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l2__spike__whole_count": [
+        510,
+        128
+      ],
+      "l2__spike__whole_mean": [
+        510,
+        128
+      ],
+      "l2__syn_current__fixed250_ordered_mean": [
+        510,
+        2048
+      ],
+      "l2__syn_current__whole_mean": [
+        510,
+        128
+      ]
+    },
+    "val": {
+      "input__events__fixed250_count": [
+        169,
+        480
+      ],
+      "input__events__whole_count": [
+        169,
+        30
+      ],
+      "l1__post_reset__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l1__post_reset__whole_mean": [
+        169,
+        128
+      ],
+      "l1__pre_reset__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l1__pre_reset__whole_mean": [
+        169,
+        128
+      ],
+      "l1__spike__fixed250_count": [
+        169,
+        2048
+      ],
+      "l1__spike__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l1__spike__whole_count": [
+        169,
+        128
+      ],
+      "l1__spike__whole_mean": [
+        169,
+        128
+      ],
+      "l1__syn_current__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l1__syn_current__whole_mean": [
+        169,
+        128
+      ],
+      "l2__post_reset__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l2__post_reset__whole_mean": [
+        169,
+        128
+      ],
+      "l2__pre_reset__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l2__pre_reset__whole_mean": [
+        169,
+        128
+      ],
+      "l2__spike__fixed250_count": [
+        169,
+        2048
+      ],
+      "l2__spike__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l2__spike__whole_count": [
+        169,
+        128
+      ],
+      "l2__spike__whole_mean": [
+        169,
+        128
+      ],
+      "l2__syn_current__fixed250_ordered_mean": [
+        169,
+        2048
+      ],
+      "l2__syn_current__whole_mean": [
+        169,
+        128
+      ]
+    }
+  },
+  "probe_names": [
+    "input__events__whole_count",
+    "input__events__fixed250_count",
+    "l1__syn_current__whole_mean",
+    "l1__syn_current__fixed250_ordered_mean",
+    "l1__pre_reset__whole_mean",
+    "l1__pre_reset__fixed250_ordered_mean",
+    "l1__spike__whole_mean",
+    "l1__spike__fixed250_ordered_mean",
+    "l1__post_reset__whole_mean",
+    "l1__post_reset__fixed250_ordered_mean",
+    "l1__spike__whole_count",
+    "l1__spike__fixed250_count",
+    "l2__syn_current__whole_mean",
+    "l2__syn_current__fixed250_ordered_mean",
+    "l2__pre_reset__whole_mean",
+    "l2__pre_reset__fixed250_ordered_mean",
+    "l2__spike__whole_mean",
+    "l2__spike__fixed250_ordered_mean",
+    "l2__post_reset__whole_mean",
+    "l2__post_reset__fixed250_ordered_mean",
+    "l2__spike__whole_count",
+    "l2__spike__fixed250_count"
+  ],
+  "protocol_version": "a2_cross_user_5fold_v1",
+  "same_w_lif_metrics": {
+    "test": {
+      "accuracy": 0.43103448275862066,
+      "balanced_accuracy": 0.41723327734357146,
+      "macro_f1": 0.41696192404498184
+    },
+    "train": {
+      "accuracy": 0.788235294117647,
+      "balanced_accuracy": 0.7904653855322294,
+      "macro_f1": 0.7916825427264338
+    },
+    "val": {
+      "accuracy": 0.47928994082840237,
+      "balanced_accuracy": 0.48009317071817065,
+      "macro_f1": 0.46209628814379067
+    }
+  },
+  "same_w_lif_test_by_action": {
+    "action0": {
+      "accuracy": 0.43157894736842106,
+      "balanced_accuracy": 0.412962962962963,
+      "macro_f1": 0.42995949913519566
+    },
+    "action1": {
+      "accuracy": 0.43037974683544306,
+      "balanced_accuracy": 0.43839285714285703,
+      "macro_f1": 0.3988697705802968
+    }
+  },
+  "same_w_lif_test_diagnostics": {
+    "confusion_matrix": [
+      [
+        2,
+        0,
+        0,
+        1,
+        0,
+        5,
+        0,
+        0,
+        0,
+        1,
+        0,
+        2
+      ],
+      [
+        0,
+        5,
+        0,
+        3,
+        1,
+        1,
+        0,
+        0,
+        0,
+        1,
+        2,
+        2
+      ],
+      [
+        0,
+        0,
+        9,
+        0,
+        0,
+        1,
+        0,
+        2,
+        0,
+        0,
+        5,
+        0
+      ],
+      [
+        0,
+        2,
+        0,
+        5,
+        0,
+        0,
+        1,
+        1,
+        2,
+        1,
+        0,
+        3
+      ],
+      [
+        1,
+        1,
+        0,
+        0,
+        7,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        4,
+        0,
+        0,
+        7,
+        0,
+        2,
+        0,
+        0,
+        2,
+        1
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        1,
+        11,
+        0,
+        0,
+        0,
+        1,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0,
+        1,
+        0,
+        0,
+        6,
+        0,
+        1,
+        2
+      ],
+      [
+        0,
+        0,
+        1,
+        1,
+        0,
+        1,
+        0,
+        2,
+        4,
+        0,
+        4,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        12,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        5,
+        1
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        1,
+        1,
+        0,
+        8
+      ]
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "G",
+      "H",
+      "I",
+      "J",
+      "K",
+      "L",
+      "X"
+    ],
+    "per_class_recall": {
+      "A": 0.18181818181818182,
+      "B": 0.3333333333333333,
+      "C": 0.5294117647058824,
+      "D": 0.3333333333333333,
+      "E": 0.5384615384615384,
+      "G": 0.4375,
+      "H": 0.6470588235294118,
+      "I": 0.0,
+      "J": 0.26666666666666666,
+      "K": 0.7058823529411765,
+      "L": 0.5,
+      "X": 0.5333333333333333
+    }
+  },
+  "spec": {
+    "rotation": 0,
+    "seed": 11,
+    "variant": "original"
+  },
+  "split": {
+    "test_users": [
+      "user_1",
+      "user_15",
+      "user_18",
+      "user_20"
+    ],
+    "train_users": [
+      "user_0",
+      "user_11",
+      "user_13",
+      "user_14",
+      "user_16",
+      "user_19",
+      "user_3",
+      "user_4",
+      "user_5",
+      "user_7",
+      "user_8",
+      "user_9"
+    ],
+    "val_users": [
+      "user_10",
+      "user_12",
+      "user_2",
+      "user_6"
+    ]
+  },
+  "split_sample_hashes": {
+    "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+    "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+    "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+  },
+  "stopped_epoch": 100,
+  "timesteps": 256
+}

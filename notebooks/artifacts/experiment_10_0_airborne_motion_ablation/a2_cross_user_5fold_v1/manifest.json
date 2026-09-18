@@ -1,0 +1,75 @@
+{
+  "architecture": "234x234",
+  "architecture_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "combined_actions": [
+    0,
+    1
+  ],
+  "expected_run_count": 45,
+  "experiment_id": "experiment_10_0_airborne_motion_ablation",
+  "interpretation": {
+    "D0_minus_D1": "explicit airborne/reposition timestep evidence",
+    "D0_minus_D2": "total effect of removing airborne acceleration from representation",
+    "D1_minus_D2": "airborne acceleration influence on writing-period representation through encoder temporal context"
+  },
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "paired_contrasts": [
+    "D0_minus_D1",
+    "D1_minus_D2",
+    "D0_minus_D2"
+  ],
+  "primary_metric": "native_test_balanced_accuracy",
+  "primary_outputs": [
+    "run_metrics.csv",
+    "variant_split_level.csv",
+    "variant_summary.csv",
+    "paired_variant_deltas.csv",
+    "paired_variant_split_deltas.csv",
+    "paired_variant_summary.csv",
+    "probe_runs.csv",
+    "probe_split_level.csv",
+    "probe_summary.csv",
+    "probe_paired_variant_deltas.csv",
+    "probe_paired_variant_split_deltas.csv",
+    "probe_paired_variant_summary.csv"
+  ],
+  "primary_statistical_unit": "5 cross-user rotations; three seeds are averaged within each rotation",
+  "probe_count_per_run": 22,
+  "probe_run_count": 990,
+  "protocol_version": "a2_cross_user_5fold_v1",
+  "rotations": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "run_count": 45,
+  "status": "PASS",
+  "training_method": "Exp7.3 A2_e2e_linear_wcce",
+  "variant_definitions": {
+    "masked_accel_reencode": "D2 = m * Encoder(m * a)",
+    "original": "D0 = Encoder(a)",
+    "postencode_mask": "D1 = m * Encoder(a)"
+  },
+  "variants": [
+    "original",
+    "postencode_mask",
+    "masked_accel_reencode"
+  ]
+}

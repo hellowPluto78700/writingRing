@@ -1,0 +1,112 @@
+{
+  "architecture": "234x234",
+  "architecture_shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "combined_actions": [
+    0,
+    1
+  ],
+  "cross_user_split_unit": "user",
+  "dataset_roots": {
+    "masked_accel_reencode": [
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events_writing_motion_ablation/masked_accel_reencode/segmentation_padded",
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events_writing_motion_ablation/masked_accel_reencode/segmentation_padded"
+    ],
+    "original": [
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded",
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded"
+    ],
+    "postencode_mask": [
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events_writing_motion_ablation/postencode_mask/segmentation_padded",
+      "/home/zhaolongwei_umass_edu/projects/writingRing/outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events_writing_motion_ablation/postencode_mask/segmentation_padded"
+    ]
+  },
+  "expected_runs": 45,
+  "experiment_id": "experiment_10_0_airborne_motion_ablation",
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "loader_seed_contract": "exp73._raw_loaders(data, seed, ...); variant excluded",
+  "model_init_seed_contract": "exp73._e2e_pair_seed(seed, 'model_init'); variant excluded",
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "probe_C_grid": [
+    0.001,
+    0.01,
+    0.1,
+    1.0,
+    10.0
+  ],
+  "probe_count_per_run": 22,
+  "probe_names": [
+    "input__events__whole_count",
+    "input__events__fixed250_count",
+    "l1__syn_current__whole_mean",
+    "l1__syn_current__fixed250_ordered_mean",
+    "l1__pre_reset__whole_mean",
+    "l1__pre_reset__fixed250_ordered_mean",
+    "l1__spike__whole_mean",
+    "l1__spike__fixed250_ordered_mean",
+    "l1__post_reset__whole_mean",
+    "l1__post_reset__fixed250_ordered_mean",
+    "l1__spike__whole_count",
+    "l1__spike__fixed250_count",
+    "l2__syn_current__whole_mean",
+    "l2__syn_current__fixed250_ordered_mean",
+    "l2__pre_reset__whole_mean",
+    "l2__pre_reset__fixed250_ordered_mean",
+    "l2__spike__whole_mean",
+    "l2__spike__fixed250_ordered_mean",
+    "l2__post_reset__whole_mean",
+    "l2__post_reset__fixed250_ordered_mean",
+    "l2__spike__whole_count",
+    "l2__spike__fixed250_count"
+  ],
+  "protocol_version": "a2_cross_user_5fold_v1",
+  "question": "Measure explicit airborne-period evidence and airborne-induced encoder-context effects under a fixed Exp7.3 A2 classifier.",
+  "rotations": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "split_protocol": "Exp9.0 cross-user 5-fold assignment and rotations",
+  "total_samples": 853,
+  "total_users": 20,
+  "training_contract": "Exp7.3 A2: end-to-end Linear/WCCE, task-only, no bias",
+  "variant_definitions": {
+    "masked_accel_reencode": "D2 = m * Encoder(m * a)",
+    "original": "D0 = Encoder(a)",
+    "postencode_mask": "D1 = m * Encoder(a)"
+  },
+  "variants": [
+    "original",
+    "postencode_mask",
+    "masked_accel_reencode"
+  ]
+}
