@@ -577,7 +577,7 @@ def build_user(
                 dataset_id=dataset_id,
                 config=SegmentationVerificationConfig(
                     output_dpi=verification_dpi,
-                    overwrite=True,
+                    overwrite=overwrite,
                 ),
             )
             dataset_intervals = [
