@@ -1,10 +1,30 @@
 name: Exp7.3.3 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_3_affine_lif_substitution.py'
+      - 'scripts/experiment_7_3_3_affine_lif_substitution/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_3*'
+      - 'tests/test_experiment_7_3_3_affine_lif_substitution_contract.py'
+      - 'notebooks/experiment_7_3_3_affine_lif_substitution.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_3_2_affine_probe_bridge.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - '.github/workflows/ci-exp7-3-3.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_3_affine_lif_substitution.py'
+      - 'scripts/experiment_7_3_3_affine_lif_substitution/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_3*'
+      - 'tests/test_experiment_7_3_3_affine_lif_substitution_contract.py'
+      - 'notebooks/experiment_7_3_3_affine_lif_substitution.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_3_2_affine_probe_bridge.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - '.github/workflows/ci-exp7-3-3.yml'
 
 permissions:
   contents: read

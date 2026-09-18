@@ -1,10 +1,32 @@
 name: Exp7.2.6.4 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_2_6_4_output_interface_decomposition.py'
+      - 'scripts/experiment_7_2_6_4_output_interface_decomposition/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_2_6_4*'
+      - 'tests/test_experiment_7_2_6_4_output_interface_contract.py'
+      - 'notebooks/experiment_7_2_6_4_output_interface_decomposition.ipynb'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - 'scripts/experiment_7_2_6_1_sum_vs_mean_ce.py'
+      - 'scripts/experiment_7_2_6_3_linear_vs_lif_frozen_l2.py'
+      - '.github/workflows/ci-exp7-2-6-4.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_2_6_4_output_interface_decomposition.py'
+      - 'scripts/experiment_7_2_6_4_output_interface_decomposition/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_2_6_4*'
+      - 'tests/test_experiment_7_2_6_4_output_interface_contract.py'
+      - 'notebooks/experiment_7_2_6_4_output_interface_decomposition.ipynb'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_7_2_6_output_readout_loss_shaping.py'
+      - 'scripts/experiment_7_2_6_1_sum_vs_mean_ce.py'
+      - 'scripts/experiment_7_2_6_3_linear_vs_lif_frozen_l2.py'
+      - '.github/workflows/ci-exp7-2-6-4.yml'
 
 permissions:
   contents: read

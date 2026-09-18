@@ -1,10 +1,30 @@
 name: Exp7.3.1 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_1_frozen_l2_linear_optimization.py'
+      - 'scripts/experiment_7_3_1_frozen_l2_linear_optimization/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_1*'
+      - 'tests/test_experiment_7_3_1_frozen_l2_linear_optimization_contract.py'
+      - 'notebooks/experiment_7_3_1_frozen_l2_linear_optimization.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - '.github/workflows/ci-exp7-3-1.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_1_frozen_l2_linear_optimization.py'
+      - 'scripts/experiment_7_3_1_frozen_l2_linear_optimization/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_1*'
+      - 'tests/test_experiment_7_3_1_frozen_l2_linear_optimization_contract.py'
+      - 'notebooks/experiment_7_3_1_frozen_l2_linear_optimization.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - '.github/workflows/ci-exp7-3-1.yml'
 
 permissions:
   contents: read
