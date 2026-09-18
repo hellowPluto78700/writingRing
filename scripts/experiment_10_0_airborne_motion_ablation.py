@@ -968,6 +968,7 @@ def run_one(
             for path in _variant_roots(config.repo_root, spec.variant)
         ],
         "labels": list(data.labels),
+        "labels_hash": _sha_rows(data.labels),
         "fs_hz": float(data.fs),
         "timesteps": int(data.T),
         "bin_steps": int(data.bin_steps),
@@ -1020,6 +1021,7 @@ def _run_row(payload: Mapping[str, Any]) -> dict[str, Any]:
         "best_epoch": int(payload["best_epoch"]),
         "stopped_epoch": int(payload["stopped_epoch"]),
         "model_init_seed": int(payload["model_init_seed"]),
+        "labels_hash": payload["labels_hash"],
         "train_sample_hash": payload["split_sample_hashes"]["train"],
         "val_sample_hash": payload["split_sample_hashes"]["val"],
         "test_sample_hash": payload["split_sample_hashes"]["test"],
@@ -1095,6 +1097,7 @@ def _validate_pairing(runs: pd.DataFrame) -> None:
                 )
             for field in (
                 "model_init_seed",
+                "labels_hash",
                 "train_sample_hash",
                 "val_sample_hash",
                 "test_sample_hash",
@@ -1103,6 +1106,28 @@ def _validate_pairing(runs: pd.DataFrame) -> None:
                     raise RuntimeError(
                         f"Pairing mismatch {field} at rotation={rotation}, seed={seed}"
                     )
+
+
+def _validate_probe_pairing(probes: pd.DataFrame) -> None:
+    for rotation in ROTATIONS:
+        for seed in MODEL_SEEDS:
+            for probe in probe_names():
+                cell = probes[
+                    (probes.rotation == rotation)
+                    & (probes.seed == seed)
+                    & (probes.probe == probe)
+                ]
+                if set(cell.variant) != set(VARIANTS):
+                    raise RuntimeError(
+                        f"Incomplete probe cell rotation={rotation}, seed={seed}, "
+                        f"probe={probe}"
+                    )
+                for field in ("probe_seed", "feature_dim", "source", "state", "aggregation"):
+                    if cell[field].nunique(dropna=False) != 1:
+                        raise RuntimeError(
+                            f"Probe pairing mismatch {field}: rotation={rotation}, "
+                            f"seed={seed}, probe={probe}"
+                        )
 
 
 def _probe_paired_deltas(probes: pd.DataFrame) -> pd.DataFrame:
@@ -1244,6 +1269,7 @@ def finalize(config: Config) -> dict[str, Any]:
         raise RuntimeError(
             f"Expected {expected_probe_rows} probe rows, got {len(probes)}"
         )
+    _validate_probe_pairing(probes)
     probes.to_csv(config.results_dir / "probe_runs.csv", index=False)
 
     probe_metrics = [
