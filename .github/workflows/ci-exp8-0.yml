@@ -1,10 +1,40 @@
 name: Exp8.0 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep.py'
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep/**'
+      - 'scripts/bash_script/SNN_Bash/submit_exp_8_0_cpu.bash'
+      - 'scripts/bash_script/SNN_Bash/run_exp_8_0_cpu_array.bash'
+      - 'scripts/bash_script/SNN_Bash/finalize_exp_8_0_cpu.bash'
+      - 'tests/test_experiment_8_0_local_backbone_tau_sweep_contract.py'
+      - 'notebooks/experiment_8_0_local_backbone_tau_sweep.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - '.github/workflows/ci-exp8-0.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep.py'
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep/**'
+      - 'scripts/bash_script/SNN_Bash/submit_exp_8_0_cpu.bash'
+      - 'scripts/bash_script/SNN_Bash/run_exp_8_0_cpu_array.bash'
+      - 'scripts/bash_script/SNN_Bash/finalize_exp_8_0_cpu.bash'
+      - 'tests/test_experiment_8_0_local_backbone_tau_sweep_contract.py'
+      - 'notebooks/experiment_8_0_local_backbone_tau_sweep.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'scripts/experiment_5_0_local_evidence_objectives.py'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - '.github/workflows/ci-exp8-0.yml'
 
 permissions:
   contents: read
