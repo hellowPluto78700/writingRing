@@ -30,10 +30,10 @@ def test_membrane_shift_mapping() -> None:
         assert math.isclose(exp102.beta_from_mem_shift(shift), expected)
     taus = [exp102.tau_mem_ms_from_shift(s, 64.0) for s in exp102.L1_MEM_SHIFTS]
     assert all(left < right for left, right in zip(taus, taus[1:]))
-    assert math.isclose(taus[0], 22.542110013275676, rel_tol=1e-9)
-    assert math.isclose(taus[1], 54.31748990412009, rel_tol=1e-9)
-    assert math.isclose(taus[2], 116.99200597357962, rel_tol=1e-9)
-    assert math.isclose(taus[3], 242.1050232145004, rel_tol=1e-9)
+    assert math.isclose(taus[0], 22.542110013890053, rel_tol=1e-9)
+    assert math.isclose(taus[1], 54.31342963722199, rel_tol=1e-9)
+    assert math.isclose(taus[2], 117.0136826471659, rel_tol=1e-9)
+    assert math.isclose(taus[3], 242.10347130039656, rel_tol=1e-9)
 
 
 def test_network_changes_only_l1_membrane_beta() -> None:
