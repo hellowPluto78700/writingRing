@@ -1,0 +1,68 @@
+name: Exp10.1 CI
+
+on:
+  push:
+    paths:
+      - 'scripts/experiment_10_1_a2_backbone_coding_supervision.py'
+      - 'scripts/experiment_10_1_a2_backbone_coding_supervision/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_10_1*'
+      - 'tests/test_experiment_10_1_a2_backbone_coding_supervision_contract.py'
+      - 'docs/plans/EXP10_1_A2_BACKBONE_CODING_SUPERVISION.md'
+      - 'notebooks/experiment_10_1_a2_backbone_coding_supervision.ipynb'
+      - '.github/workflows/ci-exp10-1.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_10_1_a2_backbone_coding_supervision.py'
+      - 'scripts/experiment_10_1_a2_backbone_coding_supervision/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_10_1*'
+      - 'tests/test_experiment_10_1_a2_backbone_coding_supervision_contract.py'
+      - 'docs/plans/EXP10_1_A2_BACKBONE_CODING_SUPERVISION.md'
+      - 'notebooks/experiment_10_1_a2_backbone_coding_supervision.ipynb'
+      - '.github/workflows/ci-exp10-1.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp10-1-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install CPU test dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[test,snn]'
+
+      - name: Validate Exp10.1 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/prepare_exp_10_1_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_10_1_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_10_1_cpu.bash
+            scripts/bash_script/SNN_Bash/submit_exp_10_1_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
+      - name: Run Exp10.1 contract tests
+        run: |
+          python -m pytest -q \
+            tests/test_repository_source_syntax.py \
+            tests/test_experiment_10_1_a2_backbone_coding_supervision_contract.py
