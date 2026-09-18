@@ -1041,6 +1041,11 @@ def finalize(config: Config) -> dict[str, Any]:
         "l2_communication_delta",
         "l2_communication_whole_ba",
         "l2_temporal_ordering_gain",
+        "output_weight_fro_norm",
+        "output_weight_mean_abs",
+        "mean_abs_evidence_per_valid_step",
+        "mean_l2_evidence_norm_per_valid_step",
+        "mean_native_score_l2_norm",
     ]
     summary = (
         runs.groupby(
