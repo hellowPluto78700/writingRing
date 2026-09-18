@@ -1,10 +1,28 @@
 name: Exp7.3.2 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_2_affine_probe_bridge.py'
+      - 'scripts/experiment_7_3_2_affine_probe_bridge/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_2*'
+      - 'tests/test_experiment_7_3_2_affine_probe_bridge_contract.py'
+      - 'notebooks/experiment_7_3_2_affine_probe_bridge.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - '.github/workflows/ci-exp7-3-2.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_2_affine_probe_bridge.py'
+      - 'scripts/experiment_7_3_2_affine_probe_bridge/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_2*'
+      - 'tests/test_experiment_7_3_2_affine_probe_bridge_contract.py'
+      - 'notebooks/experiment_7_3_2_affine_probe_bridge.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - '.github/workflows/ci-exp7-3-2.yml'
 
 permissions:
   contents: read
