@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp11_0
-#SBATCH --array=0-17%18
+#SBATCH --array=0-35%36
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00
