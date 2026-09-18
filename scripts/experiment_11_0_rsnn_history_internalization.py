@@ -29,7 +29,7 @@ from scripts import experiment_10_2_2_valid_window_probes as exp1022
 
 
 EXPERIMENT_ID = "experiment_11_0_rsnn_history_internalization"
-PROTOCOL_VERSION = "d0_d1_l1mem2_rsnn_fusion_internalization_v2"
+PROTOCOL_VERSION = "d0_d1_l1mem2_context_fusion_factorial_v3"
 
 VARIANT_ORIGINAL = exp10.VARIANT_ORIGINAL
 VARIANT_POSTENCODE = exp10.VARIANT_POSTENCODE
@@ -49,6 +49,10 @@ TOPOLOGY_DIAGONAL = "diagonal"
 TOPOLOGY_DENSE = "dense"
 TOPOLOGIES = (TOPOLOGY_FF, TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE)
 
+FUSION_OFF = "off"
+FUSION_ON = "on"
+FUSION_MODES = (FUSION_OFF, FUSION_ON)
+
 CONTEXT_TAU_MS = exp1021.tau_mem_ms_from_shift(2)
 FUSION_TAU_MS = CONTEXT_TAU_MS
 COMMUNICATION_CAP = 1
@@ -60,7 +64,7 @@ PATIENCE = exp1021.PATIENCE
 BATCH_SIZE = exp1021.BATCH_SIZE
 SPLITS = exp1021.SPLITS
 
-LAYERS = ("l1", "rsnn", "fusion")
+LAYERS = ("l1", "rsnn", "readout")
 PROBE_ANALOG_STATE = "pre_reset"
 PROBE_COMMUNICATION_STATE = "communication"
 SUPPORTS = exp1022.SUPPORTS
@@ -71,7 +75,11 @@ PROBE_MAX_ITER = exp1022.PROBE_MAX_ITER
 
 EXPECTED_SOURCE_RUNS = len(MODEL_SEEDS)
 EXPECTED_RUNS = (
-    len(VARIANTS) * len(L1_INIT_MODES) * len(TOPOLOGIES) * len(MODEL_SEEDS)
+    len(VARIANTS)
+    * len(L1_INIT_MODES)
+    * len(TOPOLOGIES)
+    * len(FUSION_MODES)
+    * len(MODEL_SEEDS)
 )
 EXPECTED_PROBES_PER_RUN = len(LAYERS) * (
     len(SUPPORTS) * len(ANALOG_AGGREGATIONS)
@@ -94,11 +102,27 @@ class RunSpec:
     variant: str
     l1_init: str
     topology: str
+    fusion: str
     seed: int
 
     @property
     def key(self) -> str:
-        return f"{self.variant}__{self.l1_init}__{self.topology}__seed{self.seed}"
+        return (
+            f"{self.variant}__{self.l1_init}__{self.topology}"
+            f"__fusion_{self.fusion}__seed{self.seed}"
+        )
+
+    @property
+    def architecture_case(self) -> str:
+        if self.topology == TOPOLOGY_FF and self.fusion == FUSION_OFF:
+            return "A"
+        if self.topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE) and self.fusion == FUSION_OFF:
+            return "B"
+        if self.topology == TOPOLOGY_FF and self.fusion == FUSION_ON:
+            return "C"
+        if self.topology in (TOPOLOGY_DIAGONAL, TOPOLOGY_DENSE) and self.fusion == FUSION_ON:
+            return "D"
+        raise ValueError((self.topology, self.fusion))
 
     @property
     def rotation(self) -> int:
@@ -143,10 +167,11 @@ def source_specs() -> list[SourceSpec]:
 
 def run_specs() -> list[RunSpec]:
     return [
-        RunSpec(variant, l1_init, topology, seed)
+        RunSpec(variant, l1_init, topology, fusion, seed)
         for variant in VARIANTS
         for l1_init in L1_INIT_MODES
         for topology in TOPOLOGIES
+        for fusion in FUSION_MODES
         for seed in MODEL_SEEDS
     ]
 
@@ -165,6 +190,8 @@ def validate_spec(spec: RunSpec) -> None:
         raise ValueError(spec.l1_init)
     if spec.topology not in TOPOLOGIES:
         raise ValueError(spec.topology)
+    if spec.fusion not in FUSION_MODES:
+        raise ValueError(spec.fusion)
     if spec.seed not in MODEL_SEEDS:
         raise ValueError(spec.seed)
 
@@ -469,7 +496,7 @@ class DiagonalRecurrent(nn.Module):
 
 
 class Exp110Net(nn.Module):
-    """L1 local representation -> recurrent context -> feed-forward fusion."""
+    """L1 local representation -> context -> optional fusion -> shared Linear."""
 
     def __init__(
         self,
@@ -485,9 +512,18 @@ class Exp110Net(nn.Module):
 
         self.l1_input = nn.Linear(exp72.EXPECTED_CHANNELS, WIDTH, bias=False)
         self.rsnn_input = nn.Linear(WIDTH, WIDTH, bias=False)
-        self.fusion_local = nn.Linear(WIDTH, WIDTH, bias=False)
-        self.fusion_context = nn.Linear(WIDTH, WIDTH, bias=False)
         self.output_linear = nn.Linear(WIDTH, n_classes, bias=False)
+
+        if spec.fusion == FUSION_ON:
+            self.fusion_local: nn.Linear | None = nn.Linear(
+                WIDTH, WIDTH, bias=False
+            )
+            self.fusion_context: nn.Linear | None = nn.Linear(
+                WIDTH, WIDTH, bias=False
+            )
+        else:
+            self.fusion_local = None
+            self.fusion_context = None
 
         if spec.topology == TOPOLOGY_FF:
             self.recurrent: nn.Module = ZeroRecurrent()
@@ -505,28 +541,39 @@ class Exp110Net(nn.Module):
             surrogate_slope=exp72.SURROGATE_SLOPE,
         )
         context_beta = decay_from_tau_ms(CONTEXT_TAU_MS, fs)
-        fusion_beta = decay_from_tau_ms(FUSION_TAU_MS, fs)
         self.rsnn_lif = exp401.MacroMultiSpikeLIF(
             beta=context_beta,
             threshold=float(exp73.THRESHOLD),
             max_spikes_per_dt=COMMUNICATION_CAP,
             surrogate_slope=exp72.SURROGATE_SLOPE,
         )
-        self.fusion_lif = exp401.MacroMultiSpikeLIF(
-            beta=fusion_beta,
-            threshold=float(exp73.THRESHOLD),
-            max_spikes_per_dt=COMMUNICATION_CAP,
-            surrogate_slope=exp72.SURROGATE_SLOPE,
-        )
+
+        if spec.fusion == FUSION_ON:
+            self.fusion_lif: exp401.MacroMultiSpikeLIF | None = (
+                exp401.MacroMultiSpikeLIF(
+                    beta=decay_from_tau_ms(FUSION_TAU_MS, fs),
+                    threshold=float(exp73.THRESHOLD),
+                    max_spikes_per_dt=COMMUNICATION_CAP,
+                    surrogate_slope=exp72.SURROGATE_SLOPE,
+                )
+            )
+        else:
+            self.fusion_lif = None
 
         self.register_buffer("l1_alpha", exp811._alpha_vector("binary"))
         self.register_buffer(
             "rsnn_alpha",
-            torch.tensor(decay_from_tau_ms(CONTEXT_TAU_MS, fs), dtype=torch.float32),
+            torch.tensor(
+                decay_from_tau_ms(CONTEXT_TAU_MS, fs),
+                dtype=torch.float32,
+            ),
         )
         self.register_buffer(
             "fusion_alpha",
-            torch.tensor(decay_from_tau_ms(FUSION_TAU_MS, fs), dtype=torch.float32),
+            torch.tensor(
+                decay_from_tau_ms(FUSION_TAU_MS, fs),
+                dtype=torch.float32,
+            ),
         )
 
     def forward_trajectory(self, x: torch.Tensor) -> dict[str, Any]:
@@ -567,17 +614,32 @@ class Exp110Net(nn.Module):
             mem_rsnn = post_rsnn
             prev_rsnn = r_t
 
-            fusion_drive = self.fusion_local(z_t) + self.fusion_context(r_t)
-            syn_fusion = self.fusion_alpha * syn_fusion + fusion_drive
-            q_t, post_fusion, pre_fusion = self.fusion_lif(
-                syn_fusion, mem_fusion
-            )
-            mem_fusion = post_fusion
+            if self.spec.fusion == FUSION_ON:
+                if (
+                    self.fusion_local is None
+                    or self.fusion_context is None
+                    or self.fusion_lif is None
+                ):
+                    raise RuntimeError("Fusion modules missing for fusion=on")
+                fusion_drive = (
+                    self.fusion_local(z_t) + self.fusion_context(r_t)
+                )
+                syn_fusion = self.fusion_alpha * syn_fusion + fusion_drive
+                q_t, post_readout, pre_readout = self.fusion_lif(
+                    syn_fusion, mem_fusion
+                )
+                mem_fusion = post_readout
+                readout_syn = syn_fusion
+            else:
+                q_t = r_t
+                readout_syn = syn_rsnn
+                pre_readout = pre_rsnn
+                post_readout = post_rsnn
 
             for layer, syn, pre, spike, post in (
                 ("l1", syn_l1, pre_l1, z_t, post_l1),
                 ("rsnn", syn_rsnn, pre_rsnn, r_t, post_rsnn),
-                ("fusion", syn_fusion, pre_fusion, q_t, post_fusion),
+                ("readout", readout_syn, pre_readout, q_t, post_readout),
             ):
                 states[layer]["syn_current"].append(syn)
                 states[layer]["pre_reset"].append(pre)
@@ -599,9 +661,8 @@ class Exp110Net(nn.Module):
             "hidden": hidden,
             "rsnn_external_input": torch.stack(rsnn_external, dim=1),
             "rsnn_recurrent_input": torch.stack(rsnn_recurrent, dim=1),
-            "fusion_evidence": torch.stack(evidence, dim=1),
+            "readout_evidence": torch.stack(evidence, dim=1),
         }
-
 
 def _reset_linear(module: nn.Linear, seed: int, role: str) -> None:
     exp3.seed_all(exp73._e2e_pair_seed(seed, role))
@@ -613,11 +674,23 @@ def _initialize_paired(model: Exp110Net, spec: RunSpec) -> None:
     for module, role in (
         (model.l1_input, "exp11_l1_input_init"),
         (model.rsnn_input, "exp11_rsnn_input_init"),
-        (model.fusion_local, "exp11_fusion_local_init"),
-        (model.fusion_context, "exp11_fusion_context_init"),
         (model.output_linear, "exp11_output_init"),
     ):
         _reset_linear(module, spec.seed, role)
+
+    if spec.fusion == FUSION_ON:
+        if model.fusion_local is None or model.fusion_context is None:
+            raise RuntimeError("Fusion modules missing for fusion=on")
+        _reset_linear(
+            model.fusion_local,
+            spec.seed,
+            "exp11_fusion_local_init",
+        )
+        _reset_linear(
+            model.fusion_context,
+            spec.seed,
+            "exp11_fusion_context_init",
+        )
 
     exp3.seed_all(exp73._e2e_pair_seed(spec.seed, "exp11_recurrent_init"))
     paired_dense = nn.Linear(WIDTH, WIDTH, bias=False)
@@ -719,11 +792,11 @@ def _native_scores(
     X: torch.Tensor,
     lengths: torch.Tensor,
 ) -> torch.Tensor:
-    return _valid_mean(model.forward_trajectory(X)["fusion_evidence"], lengths)
+    return _valid_mean(model.forward_trajectory(X)["readout_evidence"], lengths)
 
 
 def _window_scores(model: Exp110Net, X: torch.Tensor) -> torch.Tensor:
-    return model.forward_trajectory(X)["fusion_evidence"].mean(dim=1)
+    return model.forward_trajectory(X)["readout_evidence"].mean(dim=1)
 
 
 def _evaluate_scores(
@@ -774,7 +847,7 @@ def _evaluate_lif_transfer(
         for X, y, lengths in loader:
             Xd = X.to(device=device, dtype=torch.float32)
             ld = lengths.to(device=device, dtype=torch.long)
-            evidence = model.forward_trajectory(Xd)["fusion_evidence"]
+            evidence = model.forward_trajectory(Xd)["readout_evidence"]
             spikes = exp81._output_lif_spikes(evidence)
             mask = exp1021._valid_mask(ld, spikes.shape[1]).to(
                 spikes.dtype
