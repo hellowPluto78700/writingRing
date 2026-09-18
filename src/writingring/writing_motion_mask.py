@@ -261,8 +261,9 @@ def build_recording_writing_mask(
                 recording_boundary_clipped_end=clipped_end,
             )
         )
-    if not intervals:
-        raise WritingMotionMaskError(f"dataset {dataset_id} has no reliable valid touch pairs")
+    # A completed source segment can still have no observable contact samples
+    # after the authoritative final Ring-boundary clipping.  In that case an
+    # all-zero recording writing mask is a valid derived representation.
     return mask, tuple(intervals), boundary
 
 

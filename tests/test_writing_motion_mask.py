@@ -144,6 +144,18 @@ def test_recording_touch_wholly_outside_range_is_ignored() -> None:
     assert np.count_nonzero(mask) > 0
 
 
+def test_recording_with_only_unobservable_touch_is_valid_all_zero() -> None:
+    events = _events().iloc[:2].copy()
+    events.loc[events["event_type"] == "press", "aligned_event_timestamp_us"] = 1100.0
+    events.loc[events["event_type"] == "lift", "aligned_event_timestamp_us"] = 1200.0
+    timestamps = np.arange(0.0, 1000.0, 100.0)
+    mask, intervals, _ = build_recording_writing_mask(
+        events, dataset_id=0, canonical_timestamps_us=timestamps, sampling_rate_hz=10_000.0
+    )
+    assert intervals == ()
+    assert not np.any(mask)
+
+
 def test_mask_and_padding_zero_airborne_samples() -> None:
     values = np.arange(18, dtype=np.float32).reshape(6, 3)
     mask = np.array([False, True, True, False, True, False])
