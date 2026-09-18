@@ -70,6 +70,345 @@ The Action-0 shell wrappers orchestrate preprocessing through padded artifacts.
 `python -m snn.train_action0` is a separate optional training entry point that
 consumes those padded packages.
 
+## Writing-only motion preprocessing: removing airborne/repositioning acceleration
+
+For experiments that separate **stroke-related writing motion** from
+**airborne/repositioning motion**, the repository provides a derived
+preprocessing stage:
+
+\`\`\`text
+scripts/bash_script/preprocessing_pipeline/build_writing_motion_variants.bash
+scripts/build_writing_motion_variants.py
+\`\`\`
+
+This stage starts from a **completed 64 Hz aligned-Board-event SpikeIMU
+dataset**. It does not re-run Ring–Board alignment or segmentation. The
+published source alignment, label ownership, segment sample geometry, and
+Board event audit tables are treated as authoritative.
+
+### Writing/contact mask definition
+
+A timestep is treated as writing/contact only while the Board reports a
+complete, valid, non-transient press/lift pair.
+
+For a recording with valid touch pairs
+
+\[
+(p_1,l_1), (p_2,l_2), \ldots,
+\]
+
+the recording-level writing mask is
+
+\[
+m_t = 1
+\iff
+t \in [p_1,l_1] \cup [p_2,l_2] \cup \cdots .
+\]
+
+Press and lift samples are both included. For a multi-stroke letter, the
+airborne gap between strokes therefore remains airborne. The implementation
+does **not** replace multiple strokes with one broad
+\`first_press -> last_lift\` interval.
+
+For example:
+
+\`\`\`text
+segment:
+|----------------------------------------------------|
+
+Board:
+       press1       lift1        press2       lift2
+          |-----------|             |-----------|
+
+writing mask:
+000000111111111111000000000000001111111111110000000
+
+airborne/reposition:
+^^^^^^              ^^^^^^^^^^^^^^              ^^^^^
+\`\`\`
+
+The time axis and original segment duration are preserved. Writing strokes are
+not concatenated after airborne samples are removed.
+
+The source Board-event segmentation can contain boundary corner cases created
+by carry-in handling, crossing-touch ownership, neighbor midpoint resolution,
+or recording truncation. The derived mask follows an
+**observable-intersection policy**:
+
+- a valid touch partially outside the observable Ring recording is clipped to
+  the available Ring sample range;
+- a valid touch wholly outside the Ring recording contributes no Ring samples;
+- an already assigned touch is intersected with the final published segment
+  slice;
+- the derived preprocessing never expands, shifts, or re-segments a source
+  segment to recover clipped samples.
+
+These cases are recorded in the generated interval CSVs and user reports
+rather than being silently hidden.
+
+### D0, D1, and D2 datasets
+
+The preprocessing produces two derived variants while retaining the original
+dataset as D0.
+
+#### D0 — original representation
+
+\[
+D_0 = Encoder(a)
+\]
+
+This is the original aligned-Board-event dataset. It is referenced rather than
+duplicated.
+
+#### D1 — remove airborne motion after encoding
+
+\[
+D_1(t) = m_t \, Encoder(a)_t
+\]
+
+The original encoded representation is kept unchanged during writing/contact
+samples and hard-zeroed outside the writing mask.
+
+For the current 36-channel SpikeIMU schema, the builder zeros **all
+input-visible motion channels** outside the writing mask:
+
+\`\`\`text
+30 polarity-split wavelet event channels
++ 3 physical acceleration channels
++ 3 physical gyroscope channels
+= 36 channels
+\`\`\`
+
+This avoids leaking airborne/repositioning information through the trailing
+physical IMU channels.
+
+D1 answers approximately:
+
+\[
+\text{How much classification information is directly present during
+airborne/repositioning periods?}
+\]
+
+A D0-vs-D1 performance difference measures the effect of removing those
+airborne-period samples while keeping writing-period encoded values unchanged.
+
+#### D2 — remove airborne acceleration before encoding, then re-encode
+
+\[
+a'_t = m_t a_t,
+\]
+
+followed by
+
+\[
+D_2(t) = m_t \, Encoder(a')_t.
+\]
+
+D2 is intentionally stricter than D1. Airborne acceleration is removed from
+the **64 Hz acceleration that is directly supplied to the Custom Wavelet
+encoder**, then the complete recording is encoded again using the exact source
+encoder specification.
+
+The implementation does **not** mask the original 200 Hz signal and then
+resample it, because resampling/filtering could mix airborne motion back across
+the press/lift boundaries.
+
+It also does **not** independently encode each final segment. Custom Wavelet
+encoding is run once on the complete masked recording so that encoder/filter
+state evolves continuously across the same recording timeline as D0.
+
+After re-encoding, D2 is masked once more:
+
+\[
+D_2(t) = 0 \quad \text{when } m_t=0,
+\]
+
+because a temporal filter can produce residual event activity immediately
+outside a contact interval even when its input is already zero there.
+
+D2 therefore measures the effect of airborne acceleration on the
+**writing-period encoded representation through encoder temporal context**.
+
+A useful interpretation is:
+
+\[
+D_0-D_1
+\]
+
+approximately isolates evidence carried directly by airborne/reposition
+timesteps, while
+
+\[
+D_1-D_2
+\]
+
+captures how airborne acceleration changes the representation produced during
+writing through the temporal encoder.
+
+### Source contract
+
+The current builder expects the source dataset to be:
+
+\`\`\`text
+64 Hz
+36-channel SpikeIMU
+30 event channels + 6 physical IMU channels
+polarity_split_wavelet_events_plus_imu_v1
+completed aligned-Board-event segmentation
+\`\`\`
+
+The D2 encoder is reconstructed from the source metadata. The source
+\`spike_encoder_spec_sha256\` must match the reconstructed encoder identity;
+the builder fails instead of silently using a different wavelet configuration.
+
+### Generated dataset layout
+
+If the source root is:
+
+\`\`\`text
+outputs/action0_wavelets_0e5_1_2_4_8_sr_64/
+  low-pass/
+    aligned-board-events/
+\`\`\`
+
+the default derived root is:
+
+\`\`\`text
+outputs/action0_wavelets_0e5_1_2_4_8_sr_64/
+  low-pass/
+    aligned-board-events_writing_motion_ablation/
+\`\`\`
+
+Its main structure is:
+
+\`\`\`text
+aligned-board-events_writing_motion_ablation/
+├── writing_motion_ablation_manifest.json
+├── user_reports/
+├── logs/
+│
+├── original_reference/                 # D0 metadata/reference only
+│   ├── dataset_reference.json
+│   └── annotations/
+│       └── user_*/
+│           └── action_*/
+│               ├── *_writing_mask.npy
+│               ├── *_writing_intervals.csv
+│               └── *_annotation_summary.json
+│
+├── postencode_mask/                    # D1 = m * Encoder(a)
+│   ├── recordings/
+│   ├── segmentation/
+│   └── segmentation_padded/
+│
+├── masked_accel_reencode/              # D2 = m * Encoder(m * a)
+│   ├── recordings/
+│   ├── segmentation/
+│   └── segmentation_padded/
+│
+└── writing_motion_verification/
+    └── user_*/
+        └── action_*/
+            ├── <dataset_id>_writing_motion_verification.png
+            └── <dataset_id>_writing_motion_verification.json
+\`\`\`
+
+Each D1/D2 segmented package retains the original source labels, segment
+ordering, segment lengths, and padding geometry. Additional mask artifacts are
+published alongside the derived data:
+
+\`\`\`text
+*_writing_mask.npy
+*_writing_intervals.csv
+*_padded_writing_mask.npy
+\`\`\`
+
+The repositioning mask can be obtained as
+
+\[
+\text{reposition\_mask}
+=
+\text{valid\_mask} \land \neg \text{writing\_mask}.
+\]
+
+### Verification plots
+
+The writing-motion verification is branch-independent because D1 and D2 use
+the same published writing mask and segment geometry.
+
+The plot follows the original Board-event segmentation verification visual
+contract:
+
+\`\`\`text
+blue line            Ring transient score
+red dashed line      valid Board press
+orange dashed line   valid Board lift
+thin red/orange      transient press/lift
+gray dashed line     timestamp label
+red label line       skipped label
+light green span     exported final segment
+dark green span      retained writing/contact interval
+green solid line     final segment start
+green dotted line    final segment end
+\`\`\`
+
+Panels are 10 s wide, like the original segmentation verification figure.
+Within a light-green exported segment, regions not covered by a darker writing
+span correspond to airborne/repositioning samples removed by D1/D2.
+
+The transient score is recomputed from the exact source-declared transient IMU
+channels using the same robust first-difference transient-score implementation
+used by the original segmentation pipeline. The verification code only
+visualizes already-published geometry; it does not redefine segmentation or
+the writing mask.
+
+### Running the preprocessing
+
+For Action 0, for example:
+
+\`\`\`bash
+MODE=submit \
+SLURM_MAX_CONCURRENCY=20 \
+WRITE_MASK_VERIFICATION=1 \
+bash scripts/bash_script/preprocessing_pipeline/build_writing_motion_variants.bash \
+  outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events
+\`\`\`
+
+For Action 1, pass the corresponding completed Action-1 source root. The
+builder infers the action from the source segmentation package; there is no
+separate \`ACTION=1\` flag:
+
+\`\`\`bash
+MODE=submit \
+SLURM_MAX_CONCURRENCY=20 \
+WRITE_MASK_VERIFICATION=1 \
+bash scripts/bash_script/preprocessing_pipeline/build_writing_motion_variants.bash \
+  outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events
+\`\`\`
+
+The launcher uses one CPU/Slurm array task per user and an \`afterok\`
+finalizer. To replace an existing or partial derived root, add:
+
+\`\`\`bash
+OVERWRITE_DEST=1
+\`\`\`
+
+The final dataset should not be treated as complete until
+
+\`\`\`text
+writing_motion_ablation_manifest.json
+\`\`\`
+
+exists with
+
+\`\`\`json
+{
+  "status": "PASS"
+}
+\`\`\`
+
+and the expected user count.
+
 The wrappers under `scripts/bash_script/action0_pipeline/` resolve their
 relative data, configuration, and output paths from the repository root, so
 the Action-0 commands can be launched using their repository path. The
