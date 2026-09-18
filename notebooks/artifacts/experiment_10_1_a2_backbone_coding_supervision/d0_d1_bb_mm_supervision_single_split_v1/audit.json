@@ -1,0 +1,108 @@
+{
+  "architecture": {
+    "input_channels": 30,
+    "l1_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l1_width": 128,
+    "l2_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l2_width": 128
+  },
+  "codings": {
+    "bb": {
+      "l1": "binary",
+      "l2": "binary"
+    },
+    "mm": {
+      "l1": "MT3",
+      "l2": "MT3"
+    }
+  },
+  "combined_actions": [
+    0,
+    1
+  ],
+  "cross_user_split_unit": "user",
+  "expected_runs": 36,
+  "experiment_id": "experiment_10_1_a2_backbone_coding_supervision",
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "loader_seed_contract": "exp73._raw_loaders(data, seed, ...); variant/coding/objective/rotation excluded",
+  "model_init_seed_contract": "exp73._e2e_pair_seed(seed, 'model_init'); variant/coding/objective/rotation excluded",
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "objectives": {
+    "l1_l2_joint": "CE(mean_t(W1 z1_t + W2 z2_t), y)",
+    "l2_wcce": "CE(mean_t(W2 z2_t), y)",
+    "l2_wcce_plus_0p1_l1_tsce": "CE(mean_t(W2 z2_t), y) + 0.1 * mean_valid_t CE(W1 z1_t, y); W1 is training-only at inference"
+  },
+  "probe_count_per_run": 22,
+  "probe_inventory": [
+    "input__events__whole_count",
+    "input__events__fixed250_count",
+    "l1__syn_current__whole_mean",
+    "l1__syn_current__fixed250_ordered_mean",
+    "l1__pre_reset__whole_mean",
+    "l1__pre_reset__fixed250_ordered_mean",
+    "l1__spike__whole_mean",
+    "l1__spike__fixed250_ordered_mean",
+    "l1__post_reset__whole_mean",
+    "l1__post_reset__fixed250_ordered_mean",
+    "l1__spike__whole_count",
+    "l1__spike__fixed250_count",
+    "l2__syn_current__whole_mean",
+    "l2__syn_current__fixed250_ordered_mean",
+    "l2__pre_reset__whole_mean",
+    "l2__pre_reset__fixed250_ordered_mean",
+    "l2__spike__whole_mean",
+    "l2__spike__fixed250_ordered_mean",
+    "l2__post_reset__whole_mean",
+    "l2__post_reset__fixed250_ordered_mean",
+    "l2__spike__whole_count",
+    "l2__spike__fixed250_count"
+  ],
+  "protocol_version": "d0_d1_bb_mm_supervision_single_split_v1",
+  "question": "Factorially test D0 versus D1, binary versus two-layer MT3 coding, and baseline/joint/L1-TSCE supervision while keeping a time-shared readout.",
+  "readout_scope": "time-shared only; no phase-aware readout",
+  "rotations": [
+    0
+  ],
+  "split_protocol": "Exp10.0/Exp9.0 cross-user fold assignment; rotation0 only (test fold0, validation fold1, train folds2/3/4)",
+  "threshold_multipliers": [
+    0.5,
+    1.0,
+    1.5
+  ],
+  "total_samples": 853,
+  "total_users": 20,
+  "tsce_lambda": 0.1,
+  "variant_definitions": {
+    "original": "D0 = Encoder(a)",
+    "postencode_mask": "D1 = m * Encoder(a)"
+  },
+  "variants": [
+    "original",
+    "postencode_mask"
+  ]
+}

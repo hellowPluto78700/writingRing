@@ -1,0 +1,62 @@
+{
+  "codings": [
+    "bb",
+    "mm"
+  ],
+  "expected_run_count": 36,
+  "experiment_id": "experiment_10_1_a2_backbone_coding_supervision",
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "objectives": [
+    "l2_wcce",
+    "l1_l2_joint",
+    "l2_wcce_plus_0p1_l1_tsce"
+  ],
+  "phase_aware": false,
+  "primary_contrasts": [
+    "D1_minus_D0",
+    "MM_minus_BB",
+    "Joint_minus_Baseline",
+    "L1TSCE_minus_Baseline",
+    "MT_x_Joint",
+    "MT_x_L1TSCE"
+  ],
+  "primary_metric": "native_test_balanced_accuracy",
+  "primary_outputs": [
+    "run_metrics.csv",
+    "condition_split_level.csv",
+    "condition_summary.csv",
+    "contrast_runs.csv",
+    "contrast_split_level.csv",
+    "contrast_summary.csv",
+    "probe_runs.csv",
+    "probe_split_level.csv",
+    "probe_summary.csv",
+    "information_path_runs.csv",
+    "information_path_split_level.csv",
+    "information_path_summary.csv",
+    "information_path_contrast_runs.csv",
+    "information_path_contrast_split_level.csv",
+    "information_path_contrast_summary.csv",
+    "activity_runs.csv",
+    "activity_summary.csv"
+  ],
+  "probe_count_per_run": 22,
+  "probe_run_count": 792,
+  "protocol_version": "d0_d1_bb_mm_supervision_single_split_v1",
+  "readout": "time-shared only",
+  "rotations": [
+    0
+  ],
+  "run_count": 36,
+  "statistical_scope": "one locked cross-user split (rotation0); seeds 11/23/37 are paired optimization replicates, not independent user splits",
+  "status": "PASS",
+  "tsce_lambda": 0.1,
+  "variants": [
+    "original",
+    "postencode_mask"
+  ]
+}
