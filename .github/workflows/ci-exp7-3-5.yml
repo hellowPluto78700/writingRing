@@ -1,10 +1,32 @@
 name: Exp7.3.5 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_7_3_5_hidden_state_information_loss.py'
+      - 'scripts/experiment_7_3_5_hidden_state_information_loss/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_5*'
+      - 'tests/test_experiment_7_3_5_hidden_state_information_loss_contract.py'
+      - 'notebooks/experiment_7_3_5_hidden_state_information_loss.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - '.github/workflows/ci-exp7-3-5.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_7_3_5_hidden_state_information_loss.py'
+      - 'scripts/experiment_7_3_5_hidden_state_information_loss/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_7_3_5*'
+      - 'tests/test_experiment_7_3_5_hidden_state_information_loss_contract.py'
+      - 'notebooks/experiment_7_3_5_hidden_state_information_loss.ipynb'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objectives.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - '.github/workflows/ci-exp7-3-5.yml'
 
 permissions:
   contents: read
