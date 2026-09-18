@@ -25,7 +25,7 @@ from scripts import experiment_10_0_airborne_motion_ablation as exp10
 
 
 EXPERIMENT_ID = "experiment_10_1_a2_backbone_coding_supervision"
-PROTOCOL_VERSION = "d0_d1_bb_mm_supervision_factorial_v1"
+PROTOCOL_VERSION = "d0_d1_bb_mm_supervision_single_split_v1"
 
 VARIANT_ORIGINAL = exp10.VARIANT_ORIGINAL
 VARIANT_POSTENCODE = exp10.VARIANT_POSTENCODE
@@ -41,7 +41,7 @@ OBJECTIVE_L1_TSCE = "l2_wcce_plus_0p1_l1_tsce"
 OBJECTIVES = (OBJECTIVE_BASELINE, OBJECTIVE_JOINT, OBJECTIVE_L1_TSCE)
 TSCE_LAMBDA = 0.1
 
-ROTATIONS = tuple(range(5))
+ROTATIONS = (0,)
 MODEL_SEEDS = (11, 23, 37)
 EXPECTED_RUNS = (
     len(VARIANTS) * len(CODINGS) * len(OBJECTIVES) * len(ROTATIONS) * len(MODEL_SEEDS)
@@ -217,7 +217,7 @@ def prepare_all(config: Config) -> dict[str, Any]:
             {
                 "rotation": rotation,
                 "test_fold": rotation,
-                "val_fold": (rotation + 1) % len(ROTATIONS),
+                "val_fold": (rotation + 1) % exp90.N_FOLDS,
                 "train_samples": int(counts.get("train", 0)),
                 "val_samples": int(counts.get("val", 0)),
                 "test_samples": int(counts.get("test", 0)),
@@ -271,7 +271,7 @@ def prepare_all(config: Config) -> dict[str, Any]:
         "model_seeds": list(MODEL_SEEDS),
         "expected_runs": EXPECTED_RUNS,
         "cross_user_split_unit": "user",
-        "split_protocol": "Exp10.0/Exp9.0 cross-user 5-fold assignment and rotations",
+        "split_protocol": "Exp10.0/Exp9.0 cross-user fold assignment; rotation0 only (test fold0, validation fold1, train folds2/3/4)",
         "architecture": {
             "input_channels": exp72.EXPECTED_CHANNELS,
             "l1_width": WIDTH,
@@ -1309,14 +1309,10 @@ def finalize(config: Config) -> dict[str, Any]:
         .reset_index()
     )
     split_level.to_csv(config.results_dir / "condition_split_level.csv", index=False)
-    split_summary = (
-        split_level.groupby(["variant", "coding", "objective"], sort=False)[
-            primary_metrics
-        ]
-        .agg(["count", "mean", "std"])
-        .reset_index()
-    )
-    _flatten_columns(split_summary).to_csv(
+    # With one locked user split, the three model seeds are optimization
+    # replicates. Summaries therefore aggregate paired seeds directly rather
+    # than treating the single rotation as a population-level replicate.
+    _flatten_columns(run_summary).to_csv(
         config.results_dir / "condition_summary.csv", index=False
     )
 
@@ -1339,13 +1335,14 @@ def finalize(config: Config) -> dict[str, Any]:
         .reset_index()
     )
     contrast_split.to_csv(config.results_dir / "contrast_split_level.csv", index=False)
+    contrast_group_cols = [
+        column
+        for column in ("contrast", "variant", "coding", "objective")
+        if column in contrasts.columns
+    ]
     contrast_summary = (
-        contrast_split.groupby(
-            [
-                column
-                for column in ("contrast", "variant", "coding", "objective")
-                if column in contrast_split.columns
-            ],
+        contrasts.groupby(
+            contrast_group_cols,
             dropna=False,
             sort=False,
         )[contrast_metric_cols]
@@ -1374,7 +1371,7 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     probe_split.to_csv(config.results_dir / "probe_split_level.csv", index=False)
     probe_summary = (
-        probe_split.groupby(
+        probes.groupby(
             ["variant", "coding", "objective", "probe"], sort=False
         )["test_balanced_accuracy"]
         .agg(["count", "mean", "std"])
@@ -1402,7 +1399,7 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     info_split.to_csv(config.results_dir / "information_path_split_level.csv", index=False)
     info_summary = (
-        info_split.groupby(["variant", "coding", "objective"], sort=False)[info_metrics]
+        info.groupby(["variant", "coding", "objective"], sort=False)[info_metrics]
         .agg(["count", "mean", "std"])
         .reset_index()
     )
@@ -1434,13 +1431,14 @@ def finalize(config: Config) -> dict[str, Any]:
         config.results_dir / "information_path_contrast_split_level.csv",
         index=False,
     )
+    info_contrast_group_cols = [
+        column
+        for column in ("contrast", "variant", "coding", "objective")
+        if column in info_contrasts.columns
+    ]
     info_contrast_summary = (
-        info_contrast_split.groupby(
-            [
-                column
-                for column in ("contrast", "variant", "coding", "objective")
-                if column in info_contrast_split.columns
-            ],
+        info_contrasts.groupby(
+            info_contrast_group_cols,
             dropna=False,
             sort=False,
         )[info_contrast_metrics]
@@ -1499,8 +1497,9 @@ def finalize(config: Config) -> dict[str, Any]:
         "readout": "time-shared only",
         "phase_aware": False,
         "primary_metric": "native_test_balanced_accuracy",
-        "primary_statistical_unit": (
-            "5 cross-user rotations; three seeds are averaged within each rotation"
+        "statistical_scope": (
+            "one locked cross-user split (rotation0); seeds 11/23/37 are paired "
+            "optimization replicates, not independent user splits"
         ),
         "primary_contrasts": [
             "D1_minus_D0",
