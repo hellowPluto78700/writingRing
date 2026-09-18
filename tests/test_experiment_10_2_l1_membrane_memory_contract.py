@@ -125,6 +125,7 @@ def test_slurm_arrays_and_dependencies() -> None:
     long_e2e = (root / 'run_exp_10_2_long_e2e_cpu_array.bash').read_text()
     replay = (root / 'run_exp_10_2_replay_cpu_array.bash').read_text()
     stage_a = (root / 'submit_exp_10_2_stage_a_cpu.bash').read_text()
+    stage_b = (root / 'submit_exp_10_2_stage_b_cpu.bash').read_text()
     full = (root / 'submit_exp_10_2_cpu.bash').read_text()
 
     assert '#SBATCH --array=0-2%3' in baseline
@@ -139,6 +140,8 @@ def test_slurm_arrays_and_dependencies() -> None:
 
     assert 'afterok:${baseline_job}' in stage_a
     assert 'afterok:${replay_job}' in stage_a
+    assert 'run_exp_10_2_long_e2e_cpu_array.bash' in stage_b
+    assert 'afterok:${long_job}' in stage_b
     assert 'afterok:${prepare_job}' in full
     assert 'afterok:${baseline_job}' in full
     assert 'afterok:${replay_job}:${long_job}' in full
