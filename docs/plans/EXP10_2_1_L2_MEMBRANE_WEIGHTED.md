@@ -121,6 +121,8 @@ For each hidden layer and synaptic-shift group, report:
 
 For Weighted31, near-zero P(count>=2) means the weighted channel is barely used. A large cap-hit fraction indicates an unhealthy burst regime.
 
+Because Weighted31 is not divided by 31, the finalizer also records output-weight Frobenius/mean-absolute norms, per-valid-timestep evidence magnitude, and native score norm. These diagnose whether an apparent accuracy change is accompanied by a pure logit-scale change.
+
 ## Training and pairing
 
 All 18 cases are independently end-to-end trained. There is no frozen-replay main branch because changing Binary to Weighted31 alters communication magnitude and subtractive reset.
