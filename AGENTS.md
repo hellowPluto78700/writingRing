@@ -23,9 +23,47 @@ Knowledge priority:
 
 When sources materially disagree, resolve the conflict instead of guessing.
 
+## Impact-driven CI and test selection
+
+CI and test validation MUST be selected from the files changed in the current
+task and the behavior those files can affect.
+
+Default rule:
+
+```text
+changed files -> dependency / behavior impact -> relevant CI checks
+```
+
+Required behavior:
+
+* Run the smallest set of CI checks or tests that meaningfully validates the
+  current change.
+* Run a CI check only when the modified files can affect the code, behavior,
+  contract, artifact, or workflow covered by that check.
+* Do not run unrelated CI checks merely because they exist in the repository.
+* Prefer file-, module-, or experiment-specific checks over broad repository
+  checks when the change is isolated to that scope.
+* Documentation-only changes do not require code CI unless a documentation
+  check specifically covers the changed files.
+* A change isolated to one experiment should normally run that experiment's
+  focused contract/tests, not unrelated experiment checks.
+* Expand validation when shared/core code is modified, including utilities,
+  dataset loaders, model components, training/evaluation infrastructure, or
+  other code imported by multiple experiments.
+* Also expand validation when dependency/environment/packaging/CI
+  configuration changes, when the impact surface is uncertain, when a focused
+  failure suggests a broader regression, or when the user explicitly requests
+  broader/full validation.
+* Select checks by transitive impact, not only by filename. A shared module
+  change may require multiple downstream checks even if the active task belongs
+  to only one experiment.
+* Before claiming completion, report which relevant checks were actually run.
+  If broader checks were intentionally not run because they are outside the
+  affected surface, do not imply that the full CI suite was executed.
+
 ## Mandatory fast checks before delivery
 
-For any change that creates or edits Python or Bash source, run the relevant fast checks before claiming the change is ready:
+For any change that creates or edits Python or Bash source, the repository source-syntax check is relevant and must be run before claiming the change is ready:
 
 ```bash
 python -m pytest -q tests/test_repository_source_syntax.py
