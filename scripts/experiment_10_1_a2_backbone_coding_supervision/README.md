@@ -118,6 +118,27 @@ Also saved:
 
 ## Representation diagnostics
 
+### Temporal-support requirement
+
+Every representation probe in this experiment must be reported in two matched
+temporal-support modes:
+
+1. **valid-length masked** — the current behavior: timesteps after
+   `valid_length` are excluded before whole-sequence or Fixed250 aggregation;
+2. **whole-window unmasked** — aggregate over the complete padded inference
+   window and do **not** zero/clear SNN synaptic current, membrane state, or
+   spikes after `valid_length`.
+
+For the whole-window version, the padded input may naturally be zero after the
+valid sample, but the SNN trajectory is allowed to continue evolving from its
+residual state. Fixed250 keeps the same absolute 250 ms bins in both modes.
+
+Historical finalized artifacts that only contain the valid-length-masked
+variant remain valid historical results. New or re-run probe evaluations must
+publish both variants with explicit names/metadata.
+
+
+
 Every checkpoint receives the same 22-probe inventory as Exp10.0:
 
 - input whole-count and Fixed250 count;
