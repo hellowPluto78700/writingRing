@@ -1411,8 +1411,13 @@ def run_one(
     source_l1 = _load_pretrained_l1(model, spec, frames, config)
     model = model.to(device)
 
+    trainable_parameters = [
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    ]
+    if not trainable_parameters:
+        raise RuntimeError(f"{spec.key}: no trainable parameters")
     optimizer = torch.optim.Adam(
-        model.parameters(),
+        trainable_parameters,
         lr=exp72.LR,
         weight_decay=exp72.WEIGHT_DECAY,
     )
