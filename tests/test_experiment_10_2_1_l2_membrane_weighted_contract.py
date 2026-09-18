@@ -103,6 +103,17 @@ def test_single_split_is_rotation0() -> None:
     assert all(roles[fold] == 'train' for fold in (2, 3, 4))
 
 
+def test_scale_diagnostics_are_recorded() -> None:
+    source = (REPO_ROOT / 'scripts' / 'experiment_10_2_1_l2_membrane_weighted.py').read_text()
+    for token in (
+        'output_weight_fro_norm',
+        'output_weight_mean_abs',
+        'mean_abs_evidence_per_valid_step',
+        'mean_l2_evidence_norm_per_valid_step',
+        'mean_native_score_l2_norm',
+    ):
+        assert token in source
+
 def test_activity_contract_contains_weighted_cost_metrics() -> None:
     source = (REPO_ROOT / 'scripts' / 'experiment_10_2_1_l2_membrane_weighted.py').read_text()
     for token in (
