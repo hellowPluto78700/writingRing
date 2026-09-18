@@ -1,10 +1,36 @@
 name: Exp8.0.1 CI
 
 on:
-  pull_request:
   push:
     branches:
       - main
+    paths:
+      - 'scripts/experiment_8_0_1_l1_l2_fusion_probe.py'
+      - 'scripts/experiment_8_0_1_l1_l2_fusion_probe/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_1*'
+      - 'tests/test_experiment_8_0_1_l1_l2_fusion_probe_contract.py'
+      - 'notebooks/experiment_8_0_1_l1_l2_fusion_probe.ipynb'
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep.py'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objective_comparison.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - '.github/workflows/ci-exp8-0-1.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiment_8_0_1_l1_l2_fusion_probe.py'
+      - 'scripts/experiment_8_0_1_l1_l2_fusion_probe/**'
+      - 'scripts/bash_script/SNN_Bash/*exp_8_0_1*'
+      - 'tests/test_experiment_8_0_1_l1_l2_fusion_probe_contract.py'
+      - 'notebooks/experiment_8_0_1_l1_l2_fusion_probe.ipynb'
+      - 'scripts/experiment_8_0_local_backbone_tau_sweep.py'
+      - 'scripts/experiment_7_3_training_strategy_decomposition.py'
+      - 'scripts/experiment_7_2_two_layer_tau_training.py'
+      - 'scripts/experiment_3_0_1_single_tau_objective_comparison.py'
+      - 'scripts/experiment_3_0_2_hidden_multitau_architectures.py'
+      - 'scripts/experiment_0_1_general_comparison.py'
+      - '.github/workflows/ci-exp8-0-1.yml'
 
 permissions:
   contents: read
