@@ -1,0 +1,261 @@
+{
+  "architecture": "30 -> L1(128) -> context(128) -> optional Fusion(128) -> Linear(12)",
+  "architecture_cases": {
+    "A": "L1 -> FF context -> Linear",
+    "B": "L1 -> recurrent context -> Linear",
+    "C": "L1 -> FF context -> Fusion(L1, context) -> Linear",
+    "D": "L1 -> recurrent context -> Fusion(L1, context) -> Linear"
+  },
+  "communication": "binary spikes in L1/context; Fusion also uses binary spikes when enabled",
+  "d0_source_training": {
+    "model": "Exp10.2.1 binary, L1 mem2, L2 mem1, WCCE",
+    "reason": "No existing D0 checkpoint matches the D1 pretrained-source dynamics, so Exp11.0 trains seed-matched D0 sources first.",
+    "required_runs": 3
+  },
+  "d1_source_checkpoints": {
+    "11": "notebooks/artifacts/experiment_10_2_1_l2_membrane_weighted/d1_l1mem2_l2mem123_binary_weighted31_v1/checkpoints/binary__l1mem2__l2mem1__seed11.pt",
+    "23": "notebooks/artifacts/experiment_10_2_1_l2_membrane_weighted/d1_l1mem2_l2mem123_binary_weighted31_v1/checkpoints/binary__l1mem2__l2mem1__seed23.pt",
+    "37": "notebooks/artifacts/experiment_10_2_1_l2_membrane_weighted/d1_l1mem2_l2mem123_binary_weighted31_v1/checkpoints/binary__l1mem2__l2mem1__seed37.pt"
+  },
+  "d1_source_manifest": {
+    "codings": [
+      "binary",
+      "weighted31"
+    ],
+    "dataset": "postencode_mask",
+    "expected_run_count": 18,
+    "experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+    "l1_mem_shift": 2,
+    "l2_mem_shifts": [
+      1,
+      2,
+      3
+    ],
+    "model_seeds": [
+      11,
+      23,
+      37
+    ],
+    "phase_aware_readout": false,
+    "primary_outputs": [
+      "run_metrics.csv",
+      "method_summary.csv",
+      "paired_contrasts.csv",
+      "paired_contrast_summary.csv",
+      "interaction_runs.csv",
+      "interaction_summary.csv",
+      "activity_runs.csv",
+      "activity_summary.csv",
+      "probe_runs.csv",
+      "probe_summary.csv"
+    ],
+    "protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+    "readout": "time_shared_only",
+    "rotation": 0,
+    "run_count": 18,
+    "statistical_scope": "one locked cross-user split; seeds 11/23/37 are paired optimization replicates, not independent user splits",
+    "status": "PASS",
+    "weighted_cap": 31
+  },
+  "exp10_2_2_probe_manifest": {
+    "checkpoint_count": 18,
+    "evaluation_only": true,
+    "experiment_id": "experiment_10_2_2_valid_window_probes",
+    "primary_outputs": [
+      "probe_runs.csv",
+      "probe_summary.csv",
+      "support_contrasts.csv",
+      "support_contrast_summary.csv",
+      "key_probe_contrasts.csv",
+      "key_probe_summary.csv"
+    ],
+    "probe_rows": 720,
+    "protocol_version": "exp10_2_1_checkpoints_valid_window_v1",
+    "reported_metrics": [
+      "accuracy",
+      "balanced_accuracy",
+      "macro_f1"
+    ],
+    "selection_metric": "validation balanced accuracy",
+    "snn_training": false,
+    "source_experiment_id": "experiment_10_2_1_l2_membrane_weighted",
+    "source_protocol_version": "d1_l1mem2_l2mem123_binary_weighted31_v1",
+    "statistical_scope": "one locked cross-user split; seeds are paired optimization replicates inherited from Exp10.2.1",
+    "status": "PASS",
+    "support_contrast_rows": 360,
+    "supports": [
+      "valid",
+      "window"
+    ]
+  },
+  "expected_main_runs": 108,
+  "expected_source_runs": 3,
+  "experiment_id": "experiment_11_0_rsnn_history_internalization",
+  "fusion_modes": [
+    "off",
+    "on"
+  ],
+  "fusion_recurrent": false,
+  "fusion_tau_mem_ms": 54.31342963722199,
+  "fusion_tau_syn_ms": 54.31342963722199,
+  "gradient_clip_norm": 1.0,
+  "l1_init_modes": [
+    "dynamics_only",
+    "pretrained_trainable",
+    "pretrained_frozen"
+  ],
+  "l1_mem_shift": 2,
+  "l1_synaptic_shifts": [
+    2,
+    3,
+    4
+  ],
+  "l1_tau_mem_ms": 54.31342963722199,
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "model_seeds": [
+    11,
+    23,
+    37
+  ],
+  "objective": "valid-length mean time-shared WCCE only",
+  "output": "single shared bias-free 128x12 Linear",
+  "pretrained_l1_contract": "D0 and D1 both use seed-matched source input->L1 weights. pretrained_trainable keeps the copied L1 weight trainable; pretrained_frozen sets requires_grad=False and excludes it from the optimizer.",
+  "primary_contrasts": [
+    "D1 minus D0 at identical L1-init/topology/fusion/seed",
+    "diagonal minus ff within each dataset/init/fusion",
+    "dense minus ff within each dataset/init/fusion",
+    "fusion on minus off within each dataset/init/topology",
+    "pretrained_trainable minus dynamics_only within dataset/topology/fusion",
+    "pretrained_frozen minus dynamics_only within dataset/topology/fusion",
+    "pretrained_trainable minus pretrained_frozen within dataset/topology/fusion",
+    "recurrence x fusion interaction: (D-C) minus (B-A)"
+  ],
+  "probe_count_per_run": 36,
+  "probe_layers": [
+    "l1",
+    "rsnn",
+    "readout"
+  ],
+  "probe_states": [
+    "pre_reset",
+    "communication"
+  ],
+  "protocol_version": "d0_d1_l1mem2_context_fusion_frozen_l1_v4",
+  "question": "Can recurrent context, Fusion remapping, or their interaction internalize the Fixed250 temporal information for both D0 and D1 while preserving a single time-shared output matrix?",
+  "rotation": 0,
+  "rsnn_tau_mem_ms": 54.31342963722199,
+  "rsnn_tau_syn_ms": 54.31342963722199,
+  "rsnn_topologies": [
+    "ff",
+    "diagonal",
+    "dense"
+  ],
+  "split_hashes_by_variant": {
+    "original": {
+      "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+      "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+      "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+    },
+    "postencode_mask": {
+      "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+      "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+      "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+    }
+  },
+  "split_samples_by_variant": {
+    "original": {
+      "test": 174,
+      "train": 510,
+      "val": 169
+    },
+    "postencode_mask": {
+      "test": 174,
+      "train": 510,
+      "val": 169
+    }
+  },
+  "split_users_by_variant": {
+    "original": {
+      "test": [
+        "user_1",
+        "user_15",
+        "user_18",
+        "user_20"
+      ],
+      "train": [
+        "user_0",
+        "user_11",
+        "user_13",
+        "user_14",
+        "user_16",
+        "user_19",
+        "user_3",
+        "user_4",
+        "user_5",
+        "user_7",
+        "user_8",
+        "user_9"
+      ],
+      "val": [
+        "user_10",
+        "user_12",
+        "user_2",
+        "user_6"
+      ]
+    },
+    "postencode_mask": {
+      "test": [
+        "user_1",
+        "user_15",
+        "user_18",
+        "user_20"
+      ],
+      "train": [
+        "user_0",
+        "user_11",
+        "user_13",
+        "user_14",
+        "user_16",
+        "user_19",
+        "user_3",
+        "user_4",
+        "user_5",
+        "user_7",
+        "user_8",
+        "user_9"
+      ],
+      "val": [
+        "user_10",
+        "user_12",
+        "user_2",
+        "user_6"
+      ]
+    }
+  },
+  "statistical_scope": "one locked cross-user split; seeds 11/23/37 are paired optimization replicates, not independent user splits",
+  "supports": [
+    "valid",
+    "window"
+  ],
+  "variant_definitions": {
+    "original": "D0 = Encoder(a)",
+    "postencode_mask": "D1 = m * Encoder(a)"
+  },
+  "variants": [
+    "original",
+    "postencode_mask"
+  ]
+}

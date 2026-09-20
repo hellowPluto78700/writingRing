@@ -1,0 +1,145 @@
+{
+  "activity": {
+    "l1": {
+      "dead_neuron_fraction": 0.0390625,
+      "mean_events_per_neuron_s": 5.116044162555791,
+      "mean_events_per_neuron_step": 0.07993819003993423,
+      "nonzero_fraction": 0.07993819003993423,
+      "post_valid_event_fraction": 0.06876610118761291
+    },
+    "readout": {
+      "dead_neuron_fraction": 0.015625,
+      "mean_events_per_neuron_s": 27.97797744890768,
+      "mean_events_per_neuron_step": 0.4371558976391825,
+      "nonzero_fraction": 0.4371558976391825,
+      "post_valid_event_fraction": 0.13541544735144317
+    },
+    "rsnn": {
+      "dead_neuron_fraction": 0.015625,
+      "mean_events_per_neuron_s": 27.97797744890768,
+      "mean_events_per_neuron_step": 0.4371558976391825,
+      "nonzero_fraction": 0.4371558976391825,
+      "post_valid_event_fraction": 0.13541544735144317
+    }
+  },
+  "best_epoch": 92,
+  "contract": {
+    "architecture": "30->L1(128)->context(128)->Linear(12)",
+    "architecture_case": "A",
+    "dataset": "original",
+    "fusion": "off",
+    "fusion_present": false,
+    "fusion_recurrent": false,
+    "fusion_tau_mem_ms": null,
+    "fusion_tau_syn_ms": null,
+    "gradient_clip_norm": 1.0,
+    "l1_init": "pretrained_frozen",
+    "l1_mem_shift": 2,
+    "l1_synaptic_shifts": [
+      2,
+      3,
+      4
+    ],
+    "l1_tau_mem_ms": 54.31342963722199,
+    "l1_trainable": false,
+    "objective": "valid-mean time-shared WCCE",
+    "readout": "single bias-free 128x12 Linear",
+    "rotation": 0,
+    "rsnn_recurrent_param_count": 0,
+    "rsnn_tau_mem_ms": 54.31342963722199,
+    "rsnn_tau_syn_ms": 54.31342963722199,
+    "rsnn_topology": "ff"
+  },
+  "experiment_id": "experiment_11_0_rsnn_history_internalization",
+  "l1_drift": {
+    "cosine_similarity_to_source": 1.0000000000000002,
+    "relative_frobenius_drift": 0.0,
+    "source_available": true
+  },
+  "lif_transfer_metrics": {
+    "test": {
+      "accuracy": 0.40804597701149425,
+      "balanced_accuracy": 0.39730492138580376,
+      "macro_f1": 0.3896162392064983
+    },
+    "train": {
+      "accuracy": 0.8,
+      "balanced_accuracy": 0.7997408341372415,
+      "macro_f1": 0.803832838996745
+    },
+    "val": {
+      "accuracy": 0.514792899408284,
+      "balanced_accuracy": 0.5095841658341658,
+      "macro_f1": 0.4980925997298779
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5229885057471264,
+      "balanced_accuracy": 0.5029327494401025,
+      "macro_f1": 0.48823130480527593,
+      "objective_loss": 1.4960465993004284
+    },
+    "train": {
+      "accuracy": 0.903921568627451,
+      "balanced_accuracy": 0.9027491537558774,
+      "macro_f1": 0.9049127613085544,
+      "objective_loss": 0.7000501055343479
+    },
+    "val": {
+      "accuracy": 0.5798816568047337,
+      "balanced_accuracy": 0.5766951798201797,
+      "macro_f1": 0.5620293322238402,
+      "objective_loss": 1.4507032385944614
+    }
+  },
+  "parameter_count": 21760,
+  "probe_count": 36,
+  "protocol_version": "d0_d1_l1mem2_context_fusion_frozen_l1_v4",
+  "recurrent_diagnostics": {
+    "mean_abs_external_input": 0.19941826164722443,
+    "mean_abs_recurrent_input": 0.0,
+    "recurrent_to_external_abs_ratio": 0.0,
+    "recurrent_weight_norm": 0.0
+  },
+  "source_l1": {
+    "best_epoch": 88,
+    "checkpoint": "notebooks/artifacts/experiment_11_0_rsnn_history_internalization/d0_d1_l1mem2_context_fusion_frozen_l1_v4/source_checkpoints/original__l1mem2__l2mem1__seed23.pt",
+    "l1_trainable": false,
+    "source_kind": "exp11_matched_d0_source"
+  },
+  "spec": {
+    "fusion": "off",
+    "l1_init": "pretrained_frozen",
+    "seed": 23,
+    "topology": "ff",
+    "variant": "original"
+  },
+  "split_sample_hashes": {
+    "test": "6aa99b2693032130ead2571c5580294337279e52f8d24a4b1ba43044567f3fb7",
+    "train": "10c1761c0467835296a525fd0bf71bcd5f8dc17f97d72d4befaebc1b8d1c03c6",
+    "val": "ce6bd79ae88e137fd8e292b1ddff024da7431459d2b9147ded368304720b60ab"
+  },
+  "stopped_epoch": 100,
+  "trainable_parameter_count": 17920,
+  "window_metrics": {
+    "test": {
+      "accuracy": 0.4827586206896552,
+      "balanced_accuracy": 0.4589326523150053,
+      "macro_f1": 0.44079389743604125,
+      "objective_loss": 1.8371855294567414
+    },
+    "train": {
+      "accuracy": 0.8274509803921568,
+      "balanced_accuracy": 0.8170022727548277,
+      "macro_f1": 0.82180633976616,
+      "objective_loss": 1.4853155748516906
+    },
+    "val": {
+      "accuracy": 0.47337278106508873,
+      "balanced_accuracy": 0.45591179653679653,
+      "macro_f1": 0.44149199565866226,
+      "objective_loss": 1.8335475533671632
+    }
+  }
+}
