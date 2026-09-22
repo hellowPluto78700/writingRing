@@ -640,6 +640,89 @@ def _probe_row(
     }
 
 
+def _all_true_mask(values: np.ndarray) -> np.ndarray:
+    return np.ones(values.shape[:2], dtype=bool)
+
+
+def _raw_softmax(values: np.ndarray) -> np.ndarray:
+    shifted = values - values.max(axis=-1, keepdims=True)
+    exp_values = np.exp(shifted / TEMPERATURE)
+    return exp_values / exp_values.sum(axis=-1, keepdims=True)
+
+
+def _fixed_transform_row(
+    name: str,
+    arrays: dict[str, np.ndarray],
+    split_data: dict[str, dict[str, np.ndarray]],
+    labels: dict[str, np.ndarray],
+    seed: int,
+) -> dict[str, Any]:
+    masks = {split: _all_true_mask(values) for split, values in arrays.items()}
+    features = {
+        split: _aggregate_masked(
+            arrays[split], masks[split], split_data[split]["lengths"]
+        )
+        for split in arrays
+    }
+    probe = _fit_feature_probe(features, labels, seed)
+    return _probe_row(
+        name,
+        0.0,
+        float("-inf"),
+        probe,
+        split_data,
+        masks,
+    )
+
+
+def _magnitude_only_features(
+    split_data: dict[str, dict[str, np.ndarray]],
+) -> dict[str, np.ndarray]:
+    features: dict[str, np.ndarray] = {}
+    for split, values in split_data.items():
+        activity = values["activity"]
+        lengths = values["lengths"]
+        valid = np.arange(activity.shape[1])[None, :] < lengths[:, None]
+        masked = np.where(valid, activity, 0.0)
+        summed = masked.sum(axis=1)
+        mean = summed / np.maximum(lengths, 1)
+        max_value = np.where(valid, activity, -np.inf).max(axis=1)
+        max_value[~np.isfinite(max_value)] = 0.0
+        features[split] = np.stack((summed, mean, max_value), axis=1)
+    return features
+
+
+def _count_only_features(
+    masks: dict[str, np.ndarray],
+    split_data: dict[str, dict[str, np.ndarray]],
+) -> dict[str, np.ndarray]:
+    features: dict[str, np.ndarray] = {}
+    for split, mask in masks.items():
+        values = split_data[split]
+        lengths = values["lengths"]
+        valid = np.arange(mask.shape[1])[None, :] < lengths[:, None]
+        active = mask & valid
+        counts = active.sum(axis=1).astype(np.float64)
+        total_magnitude = (
+            values["activity"] * active.astype(values["activity"].dtype)
+        ).sum(axis=1)
+        mean_interval = np.zeros(len(mask), dtype=np.float64)
+        for i in range(len(mask)):
+            positions = np.flatnonzero(active[i])
+            if len(positions) >= 2:
+                mean_interval[i] = float(np.diff(positions).mean())
+        features[split] = np.stack(
+            (
+                counts,
+                total_magnitude,
+                lengths.astype(np.float64),
+                mean_interval,
+            ),
+            axis=1,
+        )
+    return features
+
+
 def run_posthoc(
     spec: PosthocSpec,
     config: Config,
@@ -662,91 +745,207 @@ def run_posthoc(
         for split, loader in loaders.items()
     }
     labels = {split: values["y"] for split, values in split_data.items()}
-
-    train = split_data["train"]
-    train_valid = np.arange(train["confidence"].shape[1])[None, :] < train["lengths"][:, None]
-    train_conf = train["confidence"][train_valid]
     rows: list[dict[str, Any]] = []
 
-    dense_masks = {
-        split: np.ones_like(values["confidence"], dtype=bool)
-        for split, values in split_data.items()
-    }
-    dense_features = {
-        split: _aggregate_masked(values["routed"], dense_masks[split], values["lengths"])
-        for split, values in split_data.items()
-    }
-    dense_probe = _fit_feature_probe(
-        dense_features,
-        labels,
-        exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "dense_probe"),
-    )
-    rows.append(
-        _probe_row(
-            "r2_dense",
-            0.0,
-            float("-inf"),
-            dense_probe,
-            split_data,
-            dense_masks,
-        )
-    )
-
-    for quantile in SPARSITY_QUANTILES:
-        threshold = float(np.quantile(train_conf, quantile))
-
-        gate_masks = {
-            split: values["confidence"] > threshold
+    if spec.source_method == "r0b_analog":
+        fixed_arrays: dict[str, dict[str, np.ndarray]] = {
+            "r0_direct_l2": {
+                split: values["z"] for split, values in split_data.items()
+            },
+            "r0a_integrated_128d": {
+                split: values["h"] for split, values in split_data.items()
+            },
+            "r0b_analog_16d": {
+                split: values["s"] for split, values in split_data.items()
+            },
+            "r1_main_what_posthoc": {
+                split: values["q"] for split, values in split_data.items()
+            },
+            "r2_main_activity_x_what_posthoc": {
+                split: values["activity"][..., None] * values["q"]
+                for split, values in split_data.items()
+            },
+            "r1_legacy_raw_softmax_posthoc": {
+                split: _raw_softmax(values["s"])
+                for split, values in split_data.items()
+            },
+            "r2_legacy_rms_x_raw_softmax_posthoc": {
+                split: np.sqrt(np.mean(values["s"] ** 2, axis=-1))[..., None]
+                * _raw_softmax(values["s"])
+                for split, values in split_data.items()
+            },
+        }
+        for name, arrays in fixed_arrays.items():
+            rows.append(
+                _fixed_transform_row(
+                    name,
+                    arrays,
+                    split_data,
+                    labels,
+                    exp3.dseed(
+                        spec.seed,
+                        EXPERIMENT_ID,
+                        spec.key,
+                        "fixed_transform",
+                        name,
+                    ),
+                )
+            )
+    else:
+        dense_masks = {
+            split: np.ones_like(values["confidence"], dtype=bool)
             for split, values in split_data.items()
         }
-        gate_features = {
-            split: _aggregate_masked(values["routed"], gate_masks[split], values["lengths"])
+        dense_features = {
+            split: _aggregate_masked(
+                values["routed"], dense_masks[split], values["lengths"]
+            )
             for split, values in split_data.items()
         }
-        gate_probe = _fit_feature_probe(
-            gate_features,
+        dense_probe = _fit_feature_probe(
+            dense_features,
             labels,
-            exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "r3", str(quantile)),
+            exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "dense_probe"),
         )
         rows.append(
             _probe_row(
-                "r3_gate",
-                quantile,
-                threshold,
-                gate_probe,
+                "r2_dense",
+                0.0,
+                float("-inf"),
+                dense_probe,
                 split_data,
-                gate_masks,
+                dense_masks,
             )
         )
 
-        peak_masks = {
-            split: _peak_mask(
-                values["normalized"],
-                values["winner"],
-                values["lengths"],
-                threshold,
+        hard_token = {
+            split: values["activity"][..., None]
+            * np.eye(PRIMITIVE_WIDTH, dtype=np.float32)[values["winner"]]
+            for split, values in split_data.items()
+        }
+        rows.append(
+            _fixed_transform_row(
+                "r2_hard_token",
+                hard_token,
+                split_data,
+                labels,
+                exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "hard_token"),
             )
-            for split, values in split_data.items()
-        }
-        peak_features = {
-            split: _aggregate_masked(values["routed"], peak_masks[split], values["lengths"])
-            for split, values in split_data.items()
-        }
-        peak_probe = _fit_feature_probe(
-            peak_features,
+        )
+
+        magnitude_features = _magnitude_only_features(split_data)
+        magnitude_probe = _fit_feature_probe(
+            magnitude_features,
             labels,
-            exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "r4", str(quantile)),
+            exp3.dseed(spec.seed, EXPERIMENT_ID, spec.key, "magnitude_only"),
         )
         rows.append(
-            _probe_row(
-                "r4_peak",
+            {
+                "representation": "magnitude_only",
+                "quantile": 0.0,
+                "threshold": float("-inf"),
+                "test_ba": float(
+                    magnitude_probe["test"]["balanced_accuracy"]
+                ),
+                "test_accuracy": float(magnitude_probe["test"]["accuracy"]),
+                "test_macro_f1": float(magnitude_probe["test"]["macro_f1"]),
+                "active_fraction_test": 1.0,
+                "events_per_sample_test_mean": float("nan"),
+                "zero_event_fraction_test": 0.0,
+            }
+        )
+
+        train = split_data["train"]
+        train_valid = (
+            np.arange(train["confidence"].shape[1])[None, :]
+            < train["lengths"][:, None]
+        )
+        train_conf = train["confidence"][train_valid]
+        for quantile in SPARSITY_QUANTILES:
+            threshold = float(np.quantile(train_conf, quantile))
+
+            gate_masks = {
+                split: values["confidence"] > threshold
+                for split, values in split_data.items()
+            }
+            gate_features = {
+                split: _aggregate_masked(
+                    values["routed"], gate_masks[split], values["lengths"]
+                )
+                for split, values in split_data.items()
+            }
+            gate_probe = _fit_feature_probe(
+                gate_features,
+                labels,
+                exp3.dseed(
+                    spec.seed, EXPERIMENT_ID, spec.key, "r3", str(quantile)
+                ),
+            )
+            rows.append(
+                _probe_row(
+                    "r3_gate",
+                    quantile,
+                    threshold,
+                    gate_probe,
+                    split_data,
+                    gate_masks,
+                )
+            )
+
+            peak_masks = {
+                split: _peak_mask(
+                    values["normalized"],
+                    values["winner"],
+                    values["lengths"],
+                    threshold,
+                )
+                for split, values in split_data.items()
+            }
+            peak_features = {
+                split: _aggregate_masked(
+                    values["routed"], peak_masks[split], values["lengths"]
+                )
+                for split, values in split_data.items()
+            }
+            peak_probe = _fit_feature_probe(
+                peak_features,
+                labels,
+                exp3.dseed(
+                    spec.seed, EXPERIMENT_ID, spec.key, "r4", str(quantile)
+                ),
+            )
+            rows.append(
+                _probe_row(
+                    "r4_peak",
+                    quantile,
+                    threshold,
+                    peak_probe,
+                    split_data,
+                    peak_masks,
+                )
+            )
+
+            count_features = _count_only_features(peak_masks, split_data)
+            count_probe = _fit_feature_probe(
+                count_features,
+                labels,
+                exp3.dseed(
+                    spec.seed,
+                    EXPERIMENT_ID,
+                    spec.key,
+                    "r4_count_only",
+                    str(quantile),
+                ),
+            )
+            count_row = _probe_row(
+                "r4_count_only",
                 quantile,
                 threshold,
-                peak_probe,
+                count_probe,
                 split_data,
                 peak_masks,
             )
-        )
+            rows.append(count_row)
 
     frame = pd.DataFrame(rows)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -756,14 +955,19 @@ def run_posthoc(
         "protocol_version": PROTOCOL_VERSION,
         "spec": asdict(spec),
         "source_dense_checkpoint": source_spec.key,
-        "threshold_source": "training confidence quantiles",
+        "threshold_source": (
+            "training confidence quantiles"
+            if spec.source_method != "r0b_analog"
+            else "not applicable"
+        ),
         "quantiles": list(SPARSITY_QUANTILES),
-        "selection_training": "posthoc only; encoder and primitive projection frozen",
+        "selection_training": (
+            "posthoc only; encoder and primitive projection frozen"
+        ),
         "rows": rows,
     }
     _save_json(output_path, payload)
     return payload
-
 
 def _dense_row(payload: dict[str, Any]) -> dict[str, Any]:
     spec = payload["spec"]
