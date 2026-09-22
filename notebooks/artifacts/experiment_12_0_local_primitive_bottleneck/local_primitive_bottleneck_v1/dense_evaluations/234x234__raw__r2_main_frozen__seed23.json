@@ -1,0 +1,143 @@
+{
+  "best_epoch": 91,
+  "contract": {
+    "aggregation": "valid_timestep_sum",
+    "architecture": "234x234",
+    "backbone_lr_ratio": 0.0,
+    "backbone_start": "Exp7.3 A2 pretrained checkpoint",
+    "backbone_trainable": false,
+    "beta": 0.9375,
+    "classifier_bias": false,
+    "primitive_projection_bias": false,
+    "primitive_width": 16,
+    "random_seeds": [
+      11,
+      23,
+      37
+    ],
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "single_user_split": true,
+    "temperature": 1.0
+  },
+  "diagnostics": {
+    "test": {
+      "activity_mean": 5.644927978515625,
+      "activity_std": 3.5949676036834717,
+      "confidence_mean": 0.22122922539710999,
+      "confidence_std": 0.20347610116004944,
+      "entropy_mean": 2.5371079444885254,
+      "entropy_std": 0.11363535374403,
+      "primitive_effective_k": 3.1882574558258057,
+      "primitive_used_count": 15.0,
+      "spread_mean": 8.93167781829834,
+      "spread_std": 5.930229663848877
+    },
+    "train": {
+      "activity_mean": 5.904683589935303,
+      "activity_std": 3.5336122512817383,
+      "confidence_mean": 0.27864405512809753,
+      "confidence_std": 1.9017974138259888,
+      "entropy_mean": 2.516935348510742,
+      "entropy_std": 0.1358933299779892,
+      "primitive_effective_k": 3.33170747756958,
+      "primitive_used_count": 15.0,
+      "spread_mean": 9.274054527282715,
+      "spread_std": 5.914656162261963
+    },
+    "val": {
+      "activity_mean": 5.104199409484863,
+      "activity_std": 3.6732568740844727,
+      "confidence_mean": 0.19969618320465088,
+      "confidence_std": 0.197042316198349,
+      "entropy_mean": 2.5414979457855225,
+      "entropy_std": 0.119961217045784,
+      "primitive_effective_k": 3.6358935832977295,
+      "primitive_used_count": 14.0,
+      "spread_mean": 8.01977825164795,
+      "spread_std": 6.151937961578369
+    }
+  },
+  "experiment_id": "experiment_12_0_local_primitive_bottleneck",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5205479452054794,
+      "balanced_accuracy": 0.5209949772449772,
+      "macro_f1": 0.49603083371782425,
+      "objective_loss": 1.8639261297983667
+    },
+    "train": {
+      "accuracy": 0.8605851979345955,
+      "balanced_accuracy": 0.8555177383858331,
+      "macro_f1": 0.8552156130781401,
+      "objective_loss": 0.43295066168919694
+    },
+    "val": {
+      "accuracy": 0.5158730158730159,
+      "balanced_accuracy": 0.5088023088023088,
+      "macro_f1": 0.5029855677991363,
+      "objective_loss": 1.764049768447876
+    }
+  },
+  "protocol_version": "local_primitive_bottleneck_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6164383561643836,
+          "balanced_accuracy": 0.6055305805305805,
+          "macro_f1": 0.6114296861203555
+        },
+        "train": {
+          "accuracy": 0.9948364888123924,
+          "balanced_accuracy": 0.9949115971174795,
+          "macro_f1": 0.9950930778169301
+        },
+        "val": {
+          "accuracy": 0.6031746031746031,
+          "balanced_accuracy": 0.5963804713804713,
+          "macro_f1": 0.6122524285472417
+        }
+      },
+      "probe_C": 0.1
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.6027397260273972,
+          "balanced_accuracy": 0.5878697691197691,
+          "macro_f1": 0.5918189327859674
+        },
+        "train": {
+          "accuracy": 0.9036144578313253,
+          "balanced_accuracy": 0.8985211802679326,
+          "macro_f1": 0.9048353299108571
+        },
+        "val": {
+          "accuracy": 0.5714285714285714,
+          "balanced_accuracy": 0.5597342472342473,
+          "macro_f1": 0.5645234023352685
+        }
+      },
+      "probe_C": 0.01
+    }
+  },
+  "spec": {
+    "method": "r2_main_frozen",
+    "seed": 23,
+    "temporal_mode": "raw"
+  },
+  "stopped_epoch": 100
+}

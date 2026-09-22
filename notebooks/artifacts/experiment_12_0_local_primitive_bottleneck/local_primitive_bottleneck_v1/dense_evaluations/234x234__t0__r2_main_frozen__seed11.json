@@ -1,0 +1,143 @@
+{
+  "best_epoch": 45,
+  "contract": {
+    "aggregation": "valid_timestep_sum",
+    "architecture": "234x234",
+    "backbone_lr_ratio": 0.0,
+    "backbone_start": "Exp7.3 A2 pretrained checkpoint",
+    "backbone_trainable": false,
+    "beta": 0.9375,
+    "classifier_bias": false,
+    "primitive_projection_bias": false,
+    "primitive_width": 16,
+    "random_seeds": [
+      11,
+      23,
+      37
+    ],
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "single_user_split": true,
+    "temperature": 1.0
+  },
+  "diagnostics": {
+    "test": {
+      "activity_mean": 0.5497538447380066,
+      "activity_std": 0.26065605878829956,
+      "confidence_mean": 0.46682268381118774,
+      "confidence_std": 0.44951286911964417,
+      "entropy_mean": 2.346957206726074,
+      "entropy_std": 0.22047732770442963,
+      "primitive_effective_k": 11.98657512664795,
+      "primitive_used_count": 16.0,
+      "spread_mean": 0.32916736602783203,
+      "spread_std": 0.163323774933815
+    },
+    "train": {
+      "activity_mean": 0.5474224090576172,
+      "activity_std": 0.2507210373878479,
+      "confidence_mean": 0.48590391874313354,
+      "confidence_std": 0.45956823229789734,
+      "entropy_mean": 2.3253018856048584,
+      "entropy_std": 0.2156289964914322,
+      "primitive_effective_k": 12.303424835205078,
+      "primitive_used_count": 16.0,
+      "spread_mean": 0.331317663192749,
+      "spread_std": 0.15693815052509308
+    },
+    "val": {
+      "activity_mean": 0.49942585825920105,
+      "activity_std": 0.27246662974357605,
+      "confidence_mean": 0.45357954502105713,
+      "confidence_std": 0.44741004705429077,
+      "entropy_mean": 2.351222038269043,
+      "entropy_std": 0.22430278360843658,
+      "primitive_effective_k": 12.014778137207031,
+      "primitive_used_count": 16.0,
+      "spread_mean": 0.30536088347435,
+      "spread_std": 0.16876310110092163
+    }
+  },
+  "experiment_id": "experiment_12_0_local_primitive_bottleneck",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.4863013698630137,
+      "balanced_accuracy": 0.4713848651348651,
+      "macro_f1": 0.45646676152040727,
+      "objective_loss": 1.3785947724564436
+    },
+    "train": {
+      "accuracy": 0.9087779690189329,
+      "balanced_accuracy": 0.9039434563137766,
+      "macro_f1": 0.9059371973930087,
+      "objective_loss": 0.5488651368683669
+    },
+    "val": {
+      "accuracy": 0.5317460317460317,
+      "balanced_accuracy": 0.5287818662818663,
+      "macro_f1": 0.5248735597467482,
+      "objective_loss": 1.4339369535446167
+    }
+  },
+  "protocol_version": "local_primitive_bottleneck_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.589041095890411,
+          "balanced_accuracy": 0.5716290653790653,
+          "macro_f1": 0.5583087341844147
+        },
+        "train": {
+          "accuracy": 0.9845094664371773,
+          "balanced_accuracy": 0.9831529280216821,
+          "macro_f1": 0.98455832882428
+        },
+        "val": {
+          "accuracy": 0.6031746031746031,
+          "balanced_accuracy": 0.5978896103896104,
+          "macro_f1": 0.5927301572509541
+        }
+      },
+      "probe_C": 0.01
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5958904109589042,
+          "balanced_accuracy": 0.5758297258297258,
+          "macro_f1": 0.5647219342648474
+        },
+        "train": {
+          "accuracy": 0.9328743545611016,
+          "balanced_accuracy": 0.9312395565165112,
+          "macro_f1": 0.9341769235894811
+        },
+        "val": {
+          "accuracy": 0.5714285714285714,
+          "balanced_accuracy": 0.5579184704184704,
+          "macro_f1": 0.5578608181389512
+        }
+      },
+      "probe_C": 0.01
+    }
+  },
+  "spec": {
+    "method": "r2_main_frozen",
+    "seed": 11,
+    "temporal_mode": "t0"
+  },
+  "stopped_epoch": 75
+}

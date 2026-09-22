@@ -1,0 +1,143 @@
+{
+  "best_epoch": 72,
+  "contract": {
+    "aggregation": "valid_timestep_sum",
+    "architecture": "234x234",
+    "backbone_lr_ratio": 0.1,
+    "backbone_start": "Exp7.3 A2 pretrained checkpoint",
+    "backbone_trainable": true,
+    "beta": 0.9375,
+    "classifier_bias": false,
+    "primitive_projection_bias": false,
+    "primitive_width": 16,
+    "random_seeds": [
+      11,
+      23,
+      37
+    ],
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "single_user_split": true,
+    "temperature": 1.0
+  },
+  "diagnostics": {
+    "test": {
+      "activity_mean": 5.569718837738037,
+      "activity_std": 3.4982311725616455,
+      "confidence_mean": 0.18235169351100922,
+      "confidence_std": 0.1950337141752243,
+      "entropy_mean": 2.5245678424835205,
+      "entropy_std": 0.12173806875944138,
+      "primitive_effective_k": 6.208225250244141,
+      "primitive_used_count": 14.0,
+      "spread_mean": 6.960194110870361,
+      "spread_std": 4.586099147796631
+    },
+    "train": {
+      "activity_mean": 5.8475117683410645,
+      "activity_std": 3.44944429397583,
+      "confidence_mean": 1.1718659400939941,
+      "confidence_std": 45.87740707397461,
+      "entropy_mean": 2.5094809532165527,
+      "entropy_std": 0.1295938789844513,
+      "primitive_effective_k": 6.903768539428711,
+      "primitive_used_count": 16.0,
+      "spread_mean": 7.096247673034668,
+      "spread_std": 4.516249656677246
+    },
+    "val": {
+      "activity_mean": 5.022895812988281,
+      "activity_std": 3.5477664470672607,
+      "confidence_mean": 0.19481535255908966,
+      "confidence_std": 0.21281303465366364,
+      "entropy_mean": 2.5268073081970215,
+      "entropy_std": 0.12959414720535278,
+      "primitive_effective_k": 6.120968818664551,
+      "primitive_used_count": 16.0,
+      "spread_mean": 6.248621463775635,
+      "spread_std": 4.718626499176025
+    }
+  },
+  "experiment_id": "experiment_12_0_local_primitive_bottleneck",
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.5,
+      "balanced_accuracy": 0.4933531746031745,
+      "macro_f1": 0.4879971794421642,
+      "objective_loss": 2.297970961218011
+    },
+    "train": {
+      "accuracy": 0.9345955249569707,
+      "balanced_accuracy": 0.9317669922238845,
+      "macro_f1": 0.9342906415631823,
+      "objective_loss": 0.2896314674728709
+    },
+    "val": {
+      "accuracy": 0.47619047619047616,
+      "balanced_accuracy": 0.4647847522847523,
+      "macro_f1": 0.4621067204400538,
+      "objective_loss": 2.122816562652588
+    }
+  },
+  "protocol_version": "local_primitive_bottleneck_v1",
+  "representation_probes": {
+    "l2_fixed250_linear": {
+      "feature_dim": 2048,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5821917808219178,
+          "balanced_accuracy": 0.5679313741813742,
+          "macro_f1": 0.5734943124875868
+        },
+        "train": {
+          "accuracy": 0.9948364888123924,
+          "balanced_accuracy": 0.9950023741690409,
+          "macro_f1": 0.9950948403429826
+        },
+        "val": {
+          "accuracy": 0.5873015873015873,
+          "balanced_accuracy": 0.5755050505050504,
+          "macro_f1": 0.5870294044619381
+        }
+      },
+      "probe_C": 0.1
+    },
+    "l2_wholecount_linear": {
+      "feature_dim": 128,
+      "metrics": {
+        "test": {
+          "accuracy": 0.5616438356164384,
+          "balanced_accuracy": 0.5554174991674993,
+          "macro_f1": 0.5454057683662946
+        },
+        "train": {
+          "accuracy": 0.9569707401032702,
+          "balanced_accuracy": 0.9565320003408209,
+          "macro_f1": 0.9578736004718231
+        },
+        "val": {
+          "accuracy": 0.5555555555555556,
+          "balanced_accuracy": 0.538437950937951,
+          "macro_f1": 0.5494059181559181
+        }
+      },
+      "probe_C": 0.1
+    }
+  },
+  "spec": {
+    "method": "r2_main_e2e",
+    "seed": 37,
+    "temporal_mode": "raw"
+  },
+  "stopped_epoch": 100
+}
