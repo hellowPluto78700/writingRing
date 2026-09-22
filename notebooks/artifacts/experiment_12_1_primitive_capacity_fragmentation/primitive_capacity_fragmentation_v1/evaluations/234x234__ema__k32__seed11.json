@@ -1,0 +1,240 @@
+{
+  "best_epoch": 20,
+  "contract": {
+    "aggregation": "valid_timestep_sum",
+    "architecture": "234x234",
+    "backbone_start": "Exp7.3 A2 pretrained checkpoint",
+    "backbone_trainable": false,
+    "classifier_bias": false,
+    "no_fixed_or_sliding_window_in_primitive_assignment": true,
+    "primitive_projection_bias": false,
+    "primitive_widths": [
+      16,
+      32,
+      64,
+      128
+    ],
+    "random_seeds": [
+      11,
+      23,
+      37
+    ],
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "stroke_annotations": "weak press/lift boundaries used for diagnosis only; no semantic stroke identity labels",
+    "temporal_modes": [
+      "t0",
+      "ema"
+    ],
+    "training_representation": "analog s_t = W_p h_t"
+  },
+  "experiment_id": "experiment_12_1_primitive_capacity_fragmentation",
+  "fragmentation": {
+    "test": {
+      "norm": {
+        "flicker_switches_per_stroke": 0.7027027027027027,
+        "fragmented_stroke_fraction": 0.7972972972972973,
+        "gesture_count": 146.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 0.003298368326441429,
+        "mean_dominant_slot_purity": 0.7124598270255829,
+        "mean_slots_per_stroke": 2.699324324324324,
+        "mean_switches_per_stroke": 2.2635135135135136,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.2635135135135136,
+        "primitive_effective_k": 7.802977866934231,
+        "stroke_count": 296.0,
+        "sustained_fragmented_stroke_fraction": 0.5506756756756757,
+        "sustained_switches_per_stroke": 0.7432432432432432,
+        "winner_run_length_mean": 7.618012422360248,
+        "winner_run_length_median": 4.0,
+        "within_stroke_js_mean": 0.003453571251787029,
+        "within_stroke_switch_rate_per_transition": 0.09486054084666572
+      },
+      "raw": {
+        "flicker_switches_per_stroke": 0.7027027027027027,
+        "fragmented_stroke_fraction": 0.7972972972972973,
+        "gesture_count": 146.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 2.3222358041566043e-05,
+        "mean_dominant_slot_purity": 0.7124598270255829,
+        "mean_slots_per_stroke": 2.699324324324324,
+        "mean_switches_per_stroke": 2.2635135135135136,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.2635135135135136,
+        "primitive_effective_k": 7.802977866934231,
+        "stroke_count": 296.0,
+        "sustained_fragmented_stroke_fraction": 0.5506756756756757,
+        "sustained_switches_per_stroke": 0.7432432432432432,
+        "winner_run_length_mean": 7.618012422360248,
+        "winner_run_length_median": 4.0,
+        "within_stroke_js_mean": 2.66328278098678e-05,
+        "within_stroke_switch_rate_per_transition": 0.09486054084666572
+      }
+    },
+    "train": {
+      "norm": {
+        "flicker_switches_per_stroke": 0.6773378264532435,
+        "fragmented_stroke_fraction": 0.7674810446503791,
+        "gesture_count": 581.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 0.002698036986476425,
+        "mean_dominant_slot_purity": 0.7323816567188055,
+        "mean_slots_per_stroke": 2.5096882898062343,
+        "mean_switches_per_stroke": 2.1196293176074135,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.1196293176074135,
+        "primitive_effective_k": 7.592326081471342,
+        "stroke_count": 1187.0,
+        "sustained_fragmented_stroke_fraction": 0.5703454085930918,
+        "sustained_switches_per_stroke": 0.8399326032013479,
+        "winner_run_length_mean": 10.447745071563597,
+        "winner_run_length_median": 6.0,
+        "within_stroke_js_mean": 0.0018283692068759452,
+        "within_stroke_switch_rate_per_transition": 0.06709154422548733
+      },
+      "raw": {
+        "flicker_switches_per_stroke": 0.6773378264532435,
+        "fragmented_stroke_fraction": 0.7674810446503791,
+        "gesture_count": 581.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 2.2528486326368816e-05,
+        "mean_dominant_slot_purity": 0.7323816567188055,
+        "mean_slots_per_stroke": 2.5096882898062343,
+        "mean_switches_per_stroke": 2.1196293176074135,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.1196293176074135,
+        "primitive_effective_k": 7.592326081471342,
+        "stroke_count": 1187.0,
+        "sustained_fragmented_stroke_fraction": 0.5703454085930918,
+        "sustained_switches_per_stroke": 0.8399326032013479,
+        "winner_run_length_mean": 10.447745071563597,
+        "winner_run_length_median": 6.0,
+        "within_stroke_js_mean": 2.366468435482203e-05,
+        "within_stroke_switch_rate_per_transition": 0.06709154422548733
+      }
+    },
+    "val": {
+      "norm": {
+        "flicker_switches_per_stroke": 0.7709923664122137,
+        "fragmented_stroke_fraction": 0.7824427480916031,
+        "gesture_count": 126.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 0.003222562332955743,
+        "mean_dominant_slot_purity": 0.7349331430636132,
+        "mean_slots_per_stroke": 2.633587786259542,
+        "mean_switches_per_stroke": 2.2519083969465647,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.2519083969465647,
+        "primitive_effective_k": 7.9082814347536825,
+        "stroke_count": 262.0,
+        "sustained_fragmented_stroke_fraction": 0.5152671755725191,
+        "sustained_switches_per_stroke": 0.7404580152671756,
+        "winner_run_length_mean": 8.321596244131456,
+        "winner_run_length_median": 4.0,
+        "within_stroke_js_mean": 0.0033233794564105066,
+        "within_stroke_switch_rate_per_transition": 0.08640890451083773
+      },
+      "raw": {
+        "flicker_switches_per_stroke": 0.7709923664122137,
+        "fragmented_stroke_fraction": 0.7824427480916031,
+        "gesture_count": 126.0,
+        "gestures_with_stroke_fraction": 1.0,
+        "global_q_js_mean": 2.0927342485647686e-05,
+        "mean_dominant_slot_purity": 0.7349331430636132,
+        "mean_slots_per_stroke": 2.633587786259542,
+        "mean_switches_per_stroke": 2.2519083969465647,
+        "median_slots_per_stroke": 2.0,
+        "predicted_runs_per_true_stroke": 3.2519083969465647,
+        "primitive_effective_k": 7.9082814347536825,
+        "stroke_count": 262.0,
+        "sustained_fragmented_stroke_fraction": 0.5152671755725191,
+        "sustained_switches_per_stroke": 0.7404580152671756,
+        "winner_run_length_mean": 8.321596244131456,
+        "winner_run_length_median": 4.0,
+        "within_stroke_js_mean": 2.3255819346695156e-05,
+        "within_stroke_switch_rate_per_transition": 0.08640890451083773
+      }
+    }
+  },
+  "native_metrics": {
+    "test": {
+      "accuracy": 0.4589041095890411,
+      "balanced_accuracy": 0.441050616050616,
+      "macro_f1": 0.42836445468024414,
+      "objective_loss": 2.5072719560910577
+    },
+    "train": {
+      "accuracy": 0.8743545611015491,
+      "balanced_accuracy": 0.8715160469933317,
+      "macro_f1": 0.8702073496909556,
+      "objective_loss": 0.39515931745301835
+    },
+    "val": {
+      "accuracy": 0.5079365079365079,
+      "balanced_accuracy": 0.5136664261664262,
+      "macro_f1": 0.5128721897924603,
+      "objective_loss": 1.9858263731002808
+    }
+  },
+  "protocol_version": "primitive_capacity_fragmentation_v1",
+  "r4_csv": "/home/zhaolongwei_umass_edu/projects/writingRing/notebooks/artifacts/experiment_12_1_primitive_capacity_fragmentation/primitive_capacity_fragmentation_v1/r4/234x234__ema__k32__seed11.csv",
+  "representation_probe_csv": "/home/zhaolongwei_umass_edu/projects/writingRing/notebooks/artifacts/experiment_12_1_primitive_capacity_fragmentation/primitive_capacity_fragmentation_v1/representation_probes/234x234__ema__k32__seed11.csv",
+  "spec": {
+    "primitive_width": 32,
+    "seed": 11,
+    "temporal_mode": "ema"
+  },
+  "stopped_epoch": 50,
+  "svd": {
+    "condition_number_nonzero": 2.8128206453598694,
+    "effective_rank": 30.89947871387147,
+    "rank": 32,
+    "singular_values": [
+      0.8595997484658802,
+      0.8352113446146361,
+      0.7761151198924127,
+      0.7491807413278759,
+      0.7322041311872699,
+      0.7282397879647613,
+      0.7106141029646715,
+      0.6958323603877046,
+      0.6736685818754323,
+      0.6529581857464501,
+      0.6455237244835688,
+      0.6327949173386965,
+      0.6167341040054563,
+      0.6044321869259194,
+      0.5761530836448133,
+      0.5605169318486198,
+      0.5542942021156451,
+      0.5370762943326243,
+      0.5357352407455248,
+      0.498996212897405,
+      0.4896167064137867,
+      0.4752626859718283,
+      0.46625765961343474,
+      0.45408445996083563,
+      0.43607962640567793,
+      0.41730196083410426,
+      0.4064633807534618,
+      0.38835613909690475,
+      0.3749641306746729,
+      0.36256100737012376,
+      0.32384674056200824,
+      0.3056006254376393
+    ],
+    "stable_rank": 14.773644387306533
+  },
+  "transition_matrix_npz": "/home/zhaolongwei_umass_edu/projects/writingRing/notebooks/artifacts/experiment_12_1_primitive_capacity_fragmentation/primitive_capacity_fragmentation_v1/transition_matrices/234x234__ema__k32__seed11.npz"
+}

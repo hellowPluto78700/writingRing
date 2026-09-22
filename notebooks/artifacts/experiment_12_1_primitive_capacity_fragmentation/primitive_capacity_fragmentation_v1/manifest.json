@@ -1,0 +1,44 @@
+{
+  "architecture": "234x234",
+  "array_strategy": "one independent (temporal_mode, K, seed) run per one-CPU Slurm task",
+  "decomposition_summary": "decomposition_summary.csv",
+  "experiment_id": "experiment_12_1_primitive_capacity_fragmentation",
+  "notes": {
+    "backbone": "Exp7.3 A2 L1/L2 is identical and frozen for every run.",
+    "k_sparse": "No automatic K_sparse is declared because the acceptable BA tolerance is intentionally not hard-coded; inspect the finalized BA/event/fragmentation Pareto tables.",
+    "no_rsnn": "Exp12.1 diagnoses capacity and within-stroke phase fragmentation before adding any recurrent contextualizer.",
+    "r4": "R4 remains a post-hoc same-primitive confidence-peak probe; no refractory and no selection training.",
+    "raw_removed": "Exp12.1 retains T0 and EMA only."
+  },
+  "primitive_widths": [
+    16,
+    32,
+    64,
+    128
+  ],
+  "protocol_version": "primitive_capacity_fragmentation_v1",
+  "run_count": 24,
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "status": "PASS",
+  "temporal_modes": [
+    "t0",
+    "ema"
+  ],
+  "weak_stroke_supervision": "press/lift start/end and stroke count are used only for fragmentation evaluation; stroke semantic identity is unavailable"
+}
