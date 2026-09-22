@@ -13,5 +13,5 @@ finalizer_job=$(sbatch --parsable --dependency="afterok:${post_job}" --export=AL
   scripts/bash_script/SNN_Bash/finalize_exp_12_0_cpu.bash)
 
 echo "Exp12.0 dense 36-run CPU array: ${dense_job}"
-echo "Exp12.0 post-hoc 18-run CPU array: ${post_job}"
+echo "Exp12.0 post-hoc 27-run CPU array: ${post_job}"
 echo "Exp12.0 finalizer: ${finalizer_job}"
