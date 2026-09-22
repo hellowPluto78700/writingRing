@@ -3,7 +3,8 @@
 #SBATCH --array=0-26%27
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=12G
-#SBATCH --time=08:00:00
+#SBATCH --time=02:00:00
+#SBATCH --deadline=2026-09-23T05:00:00
 #SBATCH --output=exp12_0_post_%A_%a.out
 #SBATCH --error=exp12_0_post_%A_%a.err
 

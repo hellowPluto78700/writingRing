@@ -3,7 +3,8 @@
 #SBATCH --array=0-35%36
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=14G
-#SBATCH --time=30:00:00
+#SBATCH --time=12:00:00
+#SBATCH --deadline=2026-09-23T05:00:00
 #SBATCH --output=exp12_0_dense_%A_%a.out
 #SBATCH --error=exp12_0_dense_%A_%a.err
 
