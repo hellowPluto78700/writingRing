@@ -195,10 +195,10 @@ class PrimitiveBottleneckNet(nn.Module):
     ) -> dict[str, torch.Tensor]:
         s = projection(h)
         centered = s - s.mean(dim=-1, keepdim=True)
-        spread = torch.sqrt(centered.square().mean(dim=-1) + EPS)
+        spread = torch.sqrt(centered.square().mean(dim=-1))
         normalized = centered / spread.unsqueeze(-1).clamp_min(EPS)
         q = F.softmax(normalized / TEMPERATURE, dim=-1)
-        activity = torch.sqrt(h.square().mean(dim=-1) + EPS)
+        activity = torch.sqrt(h.square().mean(dim=-1))
         top2 = torch.topk(normalized, k=2, dim=-1).values
         confidence = top2[..., 0] - top2[..., 1]
         winner = q.argmax(dim=-1)
