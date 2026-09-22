@@ -62,6 +62,21 @@ def _assert_finite_trainable_state(model: nn.Module, *, gradients: bool) -> None
             raise RuntimeError(f"Non-finite {kind} detected: {name}")
 
 
+def _model_state_is_finite(state_dict: dict[str, torch.Tensor]) -> bool:
+    return all(
+        not torch.is_tensor(value) or bool(torch.isfinite(value).all())
+        for value in state_dict.values()
+    )
+
+
+def _checkpoint_model_state_is_finite(path: Path) -> bool:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    state_dict = payload.get("model_state_dict")
+    if not isinstance(state_dict, dict):
+        return False
+    return _model_state_is_finite(state_dict)
+
+
 @dataclass(frozen=True)
 class DenseSpec:
     temporal_mode: str
@@ -377,7 +392,8 @@ def run_dense(
     eval_path = _path(config.results_dir, "dense_evaluations", spec.key, ".json")
     checkpoint_path = _path(config.results_dir, "dense_checkpoints", spec.key, ".pt")
     if eval_path.exists() and checkpoint_path.exists() and not force:
-        return json.loads(eval_path.read_text(encoding="utf-8"))
+        if _checkpoint_model_state_is_finite(checkpoint_path):
+            return json.loads(eval_path.read_text(encoding="utf-8"))
 
     device = torch.device(config.device)
     torch.set_num_threads(config.threads)
@@ -541,7 +557,13 @@ def _load_dense_model(
     if not checkpoint_path.exists():
         raise FileNotFoundError(checkpoint_path)
     payload = torch.load(checkpoint_path, map_location=config.device, weights_only=False)
-    model.load_state_dict(payload["model_state_dict"], strict=True)
+    state_dict = payload["model_state_dict"]
+    if not _model_state_is_finite(state_dict):
+        raise RuntimeError(
+            f"Non-finite dense checkpoint for {spec.key}: {checkpoint_path}. "
+            "Rerun the corresponding dense task with the current Exp12.0 code."
+        )
+    model.load_state_dict(state_dict, strict=True)
     model.eval()
     return model, data
 

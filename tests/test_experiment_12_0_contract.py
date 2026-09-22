@@ -108,3 +108,19 @@ def test_zero_spread_primitive_components_have_finite_backward() -> None:
     assert torch.isfinite(h.grad).all()
     assert projection.weight.grad is not None
     assert torch.isfinite(projection.weight.grad).all()
+
+
+def test_checkpoint_finite_state_detection(tmp_path) -> None:
+    good = {"weight": torch.tensor([1.0, 2.0])}
+    bad = {"weight": torch.tensor([1.0, float("nan")])}
+
+    assert exp12._model_state_is_finite(good)
+    assert not exp12._model_state_is_finite(bad)
+
+    good_path = tmp_path / "good.pt"
+    bad_path = tmp_path / "bad.pt"
+    torch.save({"model_state_dict": good}, good_path)
+    torch.save({"model_state_dict": bad}, bad_path)
+
+    assert exp12._checkpoint_model_state_is_finite(good_path)
+    assert not exp12._checkpoint_model_state_is_finite(bad_path)
