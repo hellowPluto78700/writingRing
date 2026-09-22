@@ -13,7 +13,7 @@ def test_exp12_contract_dimensions_and_counts() -> None:
     assert exp12.PRIMITIVE_WIDTH == 16
     assert exp12.TEMPORAL_MODES == ("t0", "raw", "ema")
     assert len(exp12.dense_specs()) == 36
-    assert len(exp12.posthoc_specs()) == 18
+    assert len(exp12.posthoc_specs()) == 27
 
 
 def test_raw_and_ema_have_identical_kernel_shape_up_to_scale() -> None:
