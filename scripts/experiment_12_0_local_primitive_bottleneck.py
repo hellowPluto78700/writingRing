@@ -39,6 +39,29 @@ POSTHOC_SOURCES = ("r0b_analog", "r2_main_frozen", "r2_main_e2e")
 SPARSITY_QUANTILES = (0.20, 0.40, 0.60, 0.80, 0.90)
 
 
+def _zero_preserving_rms(values: torch.Tensor, dim: int) -> torch.Tensor:
+    mean_square = values.square().mean(dim=dim)
+    safe_root = torch.sqrt(mean_square.clamp_min(EPS))
+    return torch.where(mean_square > EPS, safe_root, torch.zeros_like(mean_square))
+
+
+def _assert_finite_tensor(name: str, value: torch.Tensor) -> None:
+    if not torch.isfinite(value).all():
+        raise RuntimeError(f"Non-finite tensor detected: {name}")
+
+
+def _assert_finite_trainable_state(model: nn.Module, *, gradients: bool) -> None:
+    kind = "gradient" if gradients else "parameter"
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        value = parameter.grad if gradients else parameter
+        if gradients and value is None:
+            continue
+        if value is not None and not torch.isfinite(value).all():
+            raise RuntimeError(f"Non-finite {kind} detected: {name}")
+
+
 @dataclass(frozen=True)
 class DenseSpec:
     temporal_mode: str
@@ -195,10 +218,10 @@ class PrimitiveBottleneckNet(nn.Module):
     ) -> dict[str, torch.Tensor]:
         s = projection(h)
         centered = s - s.mean(dim=-1, keepdim=True)
-        spread = torch.sqrt(centered.square().mean(dim=-1))
+        spread = _zero_preserving_rms(centered, dim=-1)
         normalized = centered / spread.unsqueeze(-1).clamp_min(EPS)
         q = F.softmax(normalized / TEMPERATURE, dim=-1)
-        activity = torch.sqrt(h.square().mean(dim=-1))
+        activity = _zero_preserving_rms(h, dim=-1)
         top2 = torch.topk(normalized, k=2, dim=-1).values
         confidence = top2[..., 0] - top2[..., 1]
         winner = q.argmax(dim=-1)
@@ -407,8 +430,11 @@ def run_dense(
             optimizer.zero_grad(set_to_none=True)
             tr = model.forward_trajectory(X)
             loss, _ = _loss_scores(tr["evidence"], lengths, y)
+            _assert_finite_tensor("training loss", loss)
             loss.backward()
+            _assert_finite_trainable_state(model, gradients=True)
             optimizer.step()
+            _assert_finite_trainable_state(model, gradients=False)
             train_loss_sum += float(loss.detach()) * len(y)
             n_total += len(y)
 
@@ -423,9 +449,16 @@ def run_dense(
                 "val_loss": float(val_metrics["objective_loss"]),
             }
         )
+        val_ba = float(val_metrics["balanced_accuracy"])
+        val_loss = float(val_metrics["objective_loss"])
+        if not math.isfinite(val_ba) or not math.isfinite(val_loss):
+            raise RuntimeError(
+                f"Non-finite validation metric for {spec.key}: "
+                f"balanced_accuracy={val_ba}, objective_loss={val_loss}"
+            )
         if exp73._checkpoint_improved(val_metrics, best_ba, best_loss):
-            best_ba = float(val_metrics["balanced_accuracy"])
-            best_loss = float(val_metrics["objective_loss"])
+            best_ba = val_ba
+            best_loss = val_loss
             best_epoch = epoch
             best_state = {
                 key: value.detach().cpu().clone()
