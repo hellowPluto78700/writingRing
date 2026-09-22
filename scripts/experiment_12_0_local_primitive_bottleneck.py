@@ -358,7 +358,7 @@ def run_dense(
 
     device = torch.device(config.device)
     torch.set_num_threads(config.threads)
-    exp3.seed_all(exp3.dseed(spec.seed, EXPERIMENT_ID, spec.temporal_mode, spec.method))
+    exp3.seed_all(exp3.dseed(spec.seed, EXPERIMENT_ID, spec.temporal_mode, "dense_pair"))
     model, data = _load_model(spec, config)
 
     head_params = list(model.primitive_projection.parameters()) + list(
@@ -558,26 +558,30 @@ def _aggregate_masked(
     return (routed * active[..., None]).sum(axis=1)
 
 
+def _same_primitive_margin(normalized: np.ndarray, k: int) -> np.ndarray:
+    selected = normalized[..., k]
+    others = np.delete(normalized, k, axis=-1)
+    return selected - others.max(axis=-1)
+
+
 def _peak_mask(
-    confidence: np.ndarray,
+    normalized: np.ndarray,
     winner: np.ndarray,
     lengths: np.ndarray,
     threshold: float,
 ) -> np.ndarray:
-    n, steps = confidence.shape
+    n, steps, _ = normalized.shape
     out = np.zeros((n, steps), dtype=bool)
     for i in range(n):
         stop = int(lengths[i])
         for t in range(2, stop):
             candidate = t - 1
             k = int(winner[i, candidate])
-            if confidence[i, candidate] <= threshold:
+            margins = _same_primitive_margin(normalized[i, :stop], k)
+            center = float(margins[candidate])
+            if center <= threshold:
                 continue
-            same_prev = int(winner[i, candidate - 1]) == k
-            same_next = int(winner[i, t]) == k
-            left = confidence[i, candidate - 1] if same_prev else -np.inf
-            right = confidence[i, t] if same_next else -np.inf
-            if confidence[i, candidate] > left and confidence[i, candidate] >= right:
+            if center > float(margins[candidate - 1]) and center >= float(margins[t]):
                 out[i, candidate] = True
     return out
 
