@@ -1,0 +1,58 @@
+name: CI Exp12.0
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/experiment_12_0_local_primitive_bottleneck.py'
+      - 'scripts/bash_script/SNN_Bash/*exp_12_0*.bash'
+      - 'tests/test_experiment_12_0_contract.py'
+      - '.github/workflows/ci-exp12-0.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/experiment_12_0_local_primitive_bottleneck.py'
+      - 'scripts/bash_script/SNN_Bash/*exp_12_0*.bash'
+      - 'tests/test_experiment_12_0_contract.py'
+      - '.github/workflows/ci-exp12-0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exp12-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install CPU test dependencies
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[test,snn]'
+
+      - name: Validate Exp12.0 Slurm scripts
+        run: |
+          scripts=(
+            scripts/bash_script/SNN_Bash/submit_exp_12_0_cpu.bash
+            scripts/bash_script/SNN_Bash/run_exp_12_0_dense_cpu_array.bash
+            scripts/bash_script/SNN_Bash/run_exp_12_0_posthoc_cpu_array.bash
+            scripts/bash_script/SNN_Bash/finalize_exp_12_0_cpu.bash
+          )
+          for script in "${scripts[@]}"; do
+            test -f "$script"
+            bash -n "$script"
+          done
+
+      - name: Run focused Exp12.0 checks
+        run: |
+          python -m pytest -q             tests/test_repository_source_syntax.py             tests/test_experiment_12_0_contract.py
