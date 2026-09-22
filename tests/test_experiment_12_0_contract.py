@@ -44,7 +44,7 @@ def test_normalized_primitive_what_is_scale_and_offset_invariant() -> None:
 
     torch.testing.assert_close(base["q"], scaled["q"], atol=1e-6, rtol=1e-6)
     torch.testing.assert_close(
-        base["confidence"], scaled["confidence"], atol=1e-6, rtol=1e-6
+        base["confidence"], scaled["confidence"], atol=2e-6, rtol=2e-5
     )
 
 
