@@ -190,6 +190,15 @@ Submit from the repository root:
 bash scripts/bash_script/SNN_Bash/submit_exp_12_1_cpu.bash
 ```
 
+Concurrency can be lowered without editing the batch file:
+
+```bash
+SLURM_MAX_CONCURRENCY=12 \
+  bash scripts/bash_script/SNN_Bash/submit_exp_12_1_cpu.bash
+```
+
+The submit wrapper rejects values above the repository-wide 50-task limit.
+
 To inspect the exact task mapping without submitting:
 
 ```bash
@@ -211,6 +220,7 @@ Important finalized tables:
 - `capacity_fragmentation_summary.csv`
 - `representation_runs.csv`
 - `representation_summary.csv`
+- `decomposition_summary.csv` (explicit softmax, magnitude, and hard-token deltas)
 - `r4_runs.csv`
 - `r4_summary.csv`
 - `best_softmax_by_k.csv`
@@ -237,3 +247,11 @@ recurrent contextualizer or a same-stroke consistency training loss. Those are
 appropriate follow-ups only if this experiment shows that increased K recovers
 classification information while systematically increasing within-stroke
 fragmentation.
+
+
+## Required checks
+
+```bash
+python -m pytest -q tests/test_experiment_12_1_contract.py
+python -m pytest -q tests/test_repository_source_syntax.py
+```
