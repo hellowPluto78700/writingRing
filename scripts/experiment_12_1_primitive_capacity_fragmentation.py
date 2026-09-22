@@ -627,6 +627,7 @@ def _stroke_fragmentation_metrics(
     sustained_switches = 0
     flicker_switches = 0
     total_switches = 0
+    transition_steps = 0
 
     for sample_index, row in enumerate(frame.itertuples(index=False)):
         stop = int(lengths[sample_index])
@@ -639,6 +640,7 @@ def _stroke_fragmentation_metrics(
             if len(seq) == 0:
                 continue
             stroke_count += 1
+            transition_steps += max(len(seq) - 1, 0)
             counts = np.bincount(seq, minlength=width)
             unique_slots.append(int(np.count_nonzero(counts)))
             purities.append(float(counts.max() / max(len(seq), 1)))
@@ -686,14 +688,6 @@ def _stroke_fragmentation_metrics(
                 )
                 js_values.extend(js.tolist())
 
-    transition_steps = max(sum(lengths - 1 for lengths in [
-        [end - start + 1 for _, start, end in _stroke_intervals_for_sample(
-            row,
-            stroke_index,
-            int(lengths[index]),
-        )]
-        for index, row in enumerate(frame.itertuples(index=False))
-    ]), 0)
     metrics = {
         "gesture_count": float(gesture_count),
         "gestures_with_stroke_fraction": float(
@@ -835,8 +829,18 @@ def _r4_rows(
     stroke_index: dict[tuple[str, str, int], tuple[tuple[int, int, int], ...]],
     labels: dict[str, np.ndarray],
 ) -> list[dict[str, Any]]:
+    # Keep Exp12.0 R4 selection unchanged: every representation uses the
+    # normalized primitive-space winner margin and same-primitive peak rule.
+    # Only WHAT (raw/normalized softmax) and HOW-MUCH (RMS(h)/RMS(s)) vary.
     definitions = (
-        ("r2_mh_qraw", "q_raw", "s", "winner_raw", "confidence_raw", "magnitude_h"),
+        (
+            "r2_mh_qraw",
+            "q_raw",
+            "normalized",
+            "winner_norm",
+            "confidence_norm",
+            "magnitude_h",
+        ),
         (
             "r2_mh_qnorm",
             "q_norm",
@@ -845,7 +849,14 @@ def _r4_rows(
             "confidence_norm",
             "magnitude_h",
         ),
-        ("r2_ms_qraw", "q_raw", "s", "winner_raw", "confidence_raw", "magnitude_s"),
+        (
+            "r2_ms_qraw",
+            "q_raw",
+            "normalized",
+            "winner_norm",
+            "confidence_norm",
+            "magnitude_s",
+        ),
         (
             "r2_ms_qnorm",
             "q_norm",
