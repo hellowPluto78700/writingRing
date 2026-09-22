@@ -35,7 +35,7 @@ PATIENCE = exp73.PATIENCE
 
 TEMPORAL_MODES = ("t0", "raw", "ema")
 DENSE_METHODS = ("r0b_analog", "r1_what", "r2_main_frozen", "r2_main_e2e")
-POSTHOC_SOURCES = ("r2_main_frozen", "r2_main_e2e")
+POSTHOC_SOURCES = ("r0b_analog", "r2_main_frozen", "r2_main_e2e")
 SPARSITY_QUANTILES = (0.20, 0.40, 0.60, 0.80, 0.90)
 
 
@@ -519,6 +519,10 @@ def _extract_primitive_split(
     device: torch.device,
 ) -> dict[str, np.ndarray]:
     routed_all: list[np.ndarray] = []
+    z_all: list[np.ndarray] = []
+    h_all: list[np.ndarray] = []
+    s_all: list[np.ndarray] = []
+    normalized_all: list[np.ndarray] = []
     q_all: list[np.ndarray] = []
     activity_all: list[np.ndarray] = []
     confidence_all: list[np.ndarray] = []
@@ -531,6 +535,10 @@ def _extract_primitive_split(
             tr = model.forward_trajectory(X.to(device))
             p = tr["primitive"]
             routed_all.append(tr["routed"].cpu().numpy())
+            z_all.append(tr["z"].cpu().numpy())
+            h_all.append(tr["h"].cpu().numpy())
+            s_all.append(p["s"].cpu().numpy())
+            normalized_all.append(p["normalized"].cpu().numpy())
             q_all.append(p["q"].cpu().numpy())
             activity_all.append(p["activity"].cpu().numpy())
             confidence_all.append(p["confidence"].cpu().numpy())
@@ -539,6 +547,10 @@ def _extract_primitive_split(
             lengths_all.append(lengths.numpy())
     return {
         "routed": np.concatenate(routed_all),
+        "z": np.concatenate(z_all),
+        "h": np.concatenate(h_all),
+        "s": np.concatenate(s_all),
+        "normalized": np.concatenate(normalized_all),
         "q": np.concatenate(q_all),
         "activity": np.concatenate(activity_all),
         "confidence": np.concatenate(confidence_all),
@@ -709,7 +721,7 @@ def run_posthoc(
 
         peak_masks = {
             split: _peak_mask(
-                values["confidence"],
+                values["normalized"],
                 values["winner"],
                 values["lengths"],
                 threshold,
