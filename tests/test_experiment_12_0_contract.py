@@ -84,3 +84,27 @@ def test_zero_primitive_spread_produces_uniform_what_and_zero_confidence() -> No
     torch.testing.assert_close(
         components["activity"], torch.zeros_like(components["activity"])
     )
+
+
+def test_zero_preserving_rms_has_finite_zero_gradient() -> None:
+    values = torch.zeros(2, 3, exp12.HIDDEN_WIDTH, requires_grad=True)
+    rms = exp12._zero_preserving_rms(values, dim=-1)
+    torch.testing.assert_close(rms, torch.zeros_like(rms))
+    rms.sum().backward()
+    assert values.grad is not None
+    assert torch.isfinite(values.grad).all()
+    torch.testing.assert_close(values.grad, torch.zeros_like(values.grad))
+
+
+def test_zero_spread_primitive_components_have_finite_backward() -> None:
+    h = torch.zeros(2, 4, exp12.HIDDEN_WIDTH, requires_grad=True)
+    projection = torch.nn.Linear(
+        exp12.HIDDEN_WIDTH, exp12.PRIMITIVE_WIDTH, bias=False
+    )
+    components = exp12.PrimitiveBottleneckNet.primitive_components(h, projection)
+    objective = components["q"].sum() + components["activity"].sum()
+    objective.backward()
+    assert h.grad is not None
+    assert torch.isfinite(h.grad).all()
+    assert projection.weight.grad is not None
+    assert torch.isfinite(projection.weight.grad).all()
