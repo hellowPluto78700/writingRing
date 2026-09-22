@@ -1300,6 +1300,80 @@ def finalize(config: Config) -> dict[str, Any]:
         config.results_dir / "representation_summary.csv", index=False
     )
 
+    decomposition_rows: list[dict[str, Any]] = []
+    for temporal_mode in TEMPORAL_MODES:
+        for primitive_width in PRIMITIVE_WIDTHS:
+            subset = representation_summary[
+                (representation_summary["temporal_mode"] == temporal_mode)
+                & (
+                    representation_summary["primitive_width"]
+                    == primitive_width
+                )
+            ]
+
+            def metric(name: str, field: str) -> float:
+                rows = subset[subset["representation"] == name]
+                if len(rows) != 1:
+                    raise ValueError(
+                        f"Expected one finalized {name} row for "
+                        f"{temporal_mode}/K={primitive_width}, got {len(rows)}"
+                    )
+                return float(rows.iloc[0][field])
+
+            for what, r1_name in (
+                ("raw", "r1_raw_what"),
+                ("norm", "r1_norm_what"),
+            ):
+                for magnitude, stem in (("h", "mh"), ("s", "ms")):
+                    soft_name = f"r2_m{magnitude}_q{what}"
+                    hard_name = f"{soft_name}_hard"
+                    row = {
+                        "temporal_mode": temporal_mode,
+                        "primitive_width": primitive_width,
+                        "what": what,
+                        "magnitude": magnitude,
+                        "r0b_val_ba_mean": metric(
+                            "r0b_analog_k", "val_ba_mean"
+                        ),
+                        "r0b_test_ba_mean": metric(
+                            "r0b_analog_k", "test_ba_mean"
+                        ),
+                        "r1_val_ba_mean": metric(r1_name, "val_ba_mean"),
+                        "r1_test_ba_mean": metric(r1_name, "test_ba_mean"),
+                        "r2_val_ba_mean": metric(soft_name, "val_ba_mean"),
+                        "r2_test_ba_mean": metric(
+                            soft_name, "test_ba_mean"
+                        ),
+                        "hard_val_ba_mean": metric(
+                            hard_name, "val_ba_mean"
+                        ),
+                        "hard_test_ba_mean": metric(
+                            hard_name, "test_ba_mean"
+                        ),
+                    }
+                    row["delta_softmax_val_pp"] = 100.0 * (
+                        row["r1_val_ba_mean"] - row["r0b_val_ba_mean"]
+                    )
+                    row["delta_softmax_test_pp"] = 100.0 * (
+                        row["r1_test_ba_mean"] - row["r0b_test_ba_mean"]
+                    )
+                    row["delta_magnitude_val_pp"] = 100.0 * (
+                        row["r2_val_ba_mean"] - row["r1_val_ba_mean"]
+                    )
+                    row["delta_magnitude_test_pp"] = 100.0 * (
+                        row["r2_test_ba_mean"] - row["r1_test_ba_mean"]
+                    )
+                    row["delta_hard_val_pp"] = 100.0 * (
+                        row["r2_val_ba_mean"] - row["hard_val_ba_mean"]
+                    )
+                    row["delta_hard_test_pp"] = 100.0 * (
+                        row["r2_test_ba_mean"] - row["hard_test_ba_mean"]
+                    )
+                    decomposition_rows.append(row)
+    pd.DataFrame(decomposition_rows).to_csv(
+        config.results_dir / "decomposition_summary.csv", index=False
+    )
+
     r4 = pd.concat(r4_frames, ignore_index=True)
     r4.to_csv(config.results_dir / "r4_runs.csv", index=False)
     r4_summary = (
@@ -1354,6 +1428,7 @@ def finalize(config: Config) -> dict[str, Any]:
         "primitive_widths": list(PRIMITIVE_WIDTHS),
         "temporal_modes": list(TEMPORAL_MODES),
         "run_count": len(run_specs()),
+        "decomposition_summary": "decomposition_summary.csv",
         "array_strategy": (
             "one independent (temporal_mode, K, seed) run per one-CPU Slurm task"
         ),
