@@ -1953,7 +1953,30 @@ def _concat_required(
         )
     if len(paths) != expected:
         raise RuntimeError(f"{label}: expected {expected} paths, got {len(paths)}")
-    return pd.concat([pd.read_csv(path) for path in paths], ignore_index=True)
+
+    frames: list[pd.DataFrame] = []
+    empty_paths: list[Path] = []
+    for path in paths:
+        try:
+            frame = pd.read_csv(path)
+        except pd.errors.EmptyDataError:
+            empty_paths.append(path)
+            continue
+        if frame.empty and len(frame.columns) == 0:
+            empty_paths.append(path)
+            continue
+        frames.append(frame)
+
+    if not frames:
+        raise ValueError(
+            f"{label}: all {len(paths)} required artifacts are empty; "
+            "no eligible rows were produced"
+        )
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined.attrs["empty_artifact_count"] = len(empty_paths)
+    combined.attrs["empty_artifacts"] = [str(path) for path in empty_paths]
+    return combined
 
 
 def finalize(config: Config) -> dict[str, Any]:
@@ -2156,6 +2179,9 @@ def finalize(config: Config) -> dict[str, Any]:
         "scramble_gap_ms": list(SCRAMBLE_GAP_MS),
         "scramble_scales": list(SCRAMBLE_SCALES),
         "files": files,
+        "empty_artifacts": {
+            "D_stroke_scrambling": int(d.attrs.get("empty_artifact_count", 0)),
+        },
     }
     _save_json(config.results_dir / "manifest.json", manifest)
     return manifest

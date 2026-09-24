@@ -116,6 +116,19 @@ def test_submit_chain_serializes_subexperiments_and_caps_concurrency() -> None:
     assert 'afterok:${e_job}' in submit
 
 
+def test_concat_required_skips_legal_empty_artifacts(tmp_path) -> None:
+    empty = tmp_path / "empty.csv"
+    empty.write_text("\n", encoding="utf-8")
+    valid = tmp_path / "valid.csv"
+    valid.write_text("scale,value\nstroke,0.5\n", encoding="utf-8")
+
+    combined = exp13._concat_required([empty, valid], expected=2, label="D")
+    assert len(combined) == 1
+    assert combined.iloc[0]["scale"] == "stroke"
+    assert combined.attrs["empty_artifact_count"] == 1
+    assert combined.attrs["empty_artifacts"] == [str(empty)]
+
+
 def test_notebook_is_analysis_only() -> None:
     text = (
         REPO_ROOT / 'notebooks' / 'experiment_13_hierarchical_temporal_representation.ipynb'
