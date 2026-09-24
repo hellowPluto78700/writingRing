@@ -94,6 +94,18 @@ def test_c2_source_contract_keeps_c1_as_epoch_zero_candidate() -> None:
     assert "optimizer = torch.optim.Adam(" in block
 
 
+def test_training_creates_history_parent_before_csv_write() -> None:
+    source = (
+        REPO_ROOT / "scripts" / "experiment_7_3_9_pretrained_a2_depth_extension.py"
+    ).read_text(encoding="utf-8")
+    c1 = source[source.index("def run_c1("):source.index("def run_c2(")]
+    c2 = source[source.index("def run_c2("):source.index("def _load_case_model(")]
+    for block in (c1, c2):
+        assert "history_path = _history_path(" in block
+        assert "history_path.parent.mkdir(parents=True, exist_ok=True)" in block
+        assert "pd.DataFrame(history).to_csv(history_path, index=False)" in block
+
+
 def test_slurm_arrays_and_dependency_chain() -> None:
     root = REPO_ROOT / "scripts" / "bash_script" / "SNN_Bash"
     assert "#SBATCH --array=0-2%3" in (

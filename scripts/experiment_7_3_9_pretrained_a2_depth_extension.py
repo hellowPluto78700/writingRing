@@ -566,10 +566,9 @@ def run_c1(
         },
         checkpoint_path,
     )
-    pd.DataFrame(history).to_csv(
-        _history_path(config.results_dir, spec.case, spec.seed),
-        index=False,
-    )
+    history_path = _history_path(config.results_dir, spec.case, spec.seed)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(history).to_csv(history_path, index=False)
 
     payload = {
         "experiment_id": EXPERIMENT_ID,
@@ -710,10 +709,9 @@ def run_c2(
         },
         checkpoint_path,
     )
-    pd.DataFrame(history).to_csv(
-        _history_path(config.results_dir, spec.case, spec.seed),
-        index=False,
-    )
+    history_path = _history_path(config.results_dir, spec.case, spec.seed)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(history).to_csv(history_path, index=False)
 
     payload = {
         "experiment_id": EXPERIMENT_ID,
