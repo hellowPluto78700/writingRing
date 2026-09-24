@@ -1,0 +1,91 @@
+{
+  "architecture_3layer": {
+    "output": "bias-free Linear 128->12",
+    "shifts": [
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ],
+      [
+        2,
+        3,
+        4
+      ]
+    ],
+    "widths": [
+      128,
+      128,
+      128
+    ]
+  },
+  "cases": {
+    "C0_a2_2layer": "reuse Exp7.3 A2 checkpoint; no retraining",
+    "C1_frozen_a2_train_l3": "A2 W1/W2/Wout frozen; insert 128-neuron (2,3,4) L3 and train W3 only",
+    "C2_c1_init_e2e_3layer": "load selected C1 checkpoint; fresh Adam; epoch 0 is C1 candidate; unfreeze W1/W2/W3/Wout"
+  },
+  "counts": {
+    "native_rows": 9,
+    "new_training_runs": 6,
+    "probe_rows": 96,
+    "probe_tasks": 9
+  },
+  "experiment_id": "experiment_7_3_9_pretrained_a2_depth_extension",
+  "files": {
+    "bias_contrasts": "bias_contrasts.csv",
+    "depth_contrasts": "depth_contrasts.csv",
+    "layer_contrasts": "layer_contrasts.csv",
+    "native_runs": "native_runs.csv",
+    "native_summary": "native_summary.csv",
+    "probe_runs": "probe_runs.csv",
+    "probe_summary": "probe_summary.csv",
+    "temporal_contrasts": "temporal_contrasts.csv"
+  },
+  "probes": {
+    "C_grid": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "affine": "Exp7.3 StandardScaler(mean+scale) + intercept",
+    "bias_modes": [
+      "affine",
+      "no_bias"
+    ],
+    "no_bias": "train-only scale without centering + fit_intercept=False",
+    "representations": [
+      "wholecount",
+      "fixed250"
+    ]
+  },
+  "protocol_version": "pretrained_a2_depth_extension_v1",
+  "question": "Can a third 128-neuron (2,3,4) SNN layer improve an already trained Exp7.3 A2 hierarchy, first with the A2 backbone/output frozen and then with full end-to-end WCCE adaptation?",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "source": {
+    "architecture": "234x234",
+    "experiment_id": "experiment_7_3_training_strategy_decomposition",
+    "method": "A2_e2e_linear_wcce",
+    "objective": "wcce",
+    "protocol_version": "training_strategy_decomposition_v1"
+  },
+  "training": {
+    "c2_epoch0_candidate": true,
+    "c2_optimizer_state_reused": false,
+    "checkpoint_rule": "validation native BA primary, WCCE loss tiebreak",
+    "max_epochs": 100,
+    "min_epochs": 20,
+    "objective": "Exp7.3 A2 WCCE using valid-time mean Linear evidence",
+    "patience": 30
+  }
+}
