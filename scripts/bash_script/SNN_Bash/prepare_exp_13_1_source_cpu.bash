@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=exp13_1_prep
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=00:30:00
+#SBATCH --output=exp13_1_prep_%A.out
+#SBATCH --error=exp13_1_prep_%A.err
+
+set -eo pipefail
+source /etc/profile
+set -u
+REPO_ROOT="${REPO_ROOT:-$PWD}"
+cd "$REPO_ROOT"
+module load conda/latest
+eval "$(conda shell.bash hook)"
+if conda env list | awk '{print $1}' | grep -qx writingring-gpu; then
+  conda activate writingring-gpu
+else
+  conda activate writingring-viz
+fi
+export CUDA_VISIBLE_DEVICES=""
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
+
+python -u -m scripts.experiment_13_1_abstraction_generalization   --device cpu --threads 1   --user-permutations "${USER_PERMUTATIONS:-100}"   prepare-source
