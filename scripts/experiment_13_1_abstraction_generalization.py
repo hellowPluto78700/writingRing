@@ -873,7 +873,6 @@ def _fit_logistic(
         max_iter=PROBE_MAX_ITER,
         random_state=int(seed),
         solver="lbfgs",
-        multi_class="auto",
     )
     classifier.fit(train_scaled, y_train)
     return scaler, classifier
