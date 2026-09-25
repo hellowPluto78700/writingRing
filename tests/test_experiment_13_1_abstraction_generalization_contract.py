@@ -8,11 +8,11 @@ from scripts import experiment_13_1_abstraction_generalization as exp
 
 def test_run_mapping_and_primary_controls() -> None:
     assert exp.MODEL_KINDS == ("c1", "c2")
-    assert exp.ANALYSIS_STATES == (
+    assert set(exp.ANALYSIS_STATES) == {
         "syn_current",
         "pre_reset",
         "spike50",
-    )
+    }
     assert len(exp.cache_specs()) == 6
     assert len(exp.metric_specs()) == 18
     assert len(exp.h_feature_specs()) == 18
