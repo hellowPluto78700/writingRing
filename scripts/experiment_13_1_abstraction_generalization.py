@@ -1146,15 +1146,17 @@ def run_h_feature(
         )
         for phase in H_PHASES:
             steps = exp13._phase_steps(lengths, phase)
+            history_steps = max(
+                1,
+                int(round(spec.history_ms * float(data.fs) / 1000.0)),
+            )
             features = exp13._suffix_features(
                 model,
                 X,
                 np.arange(len(X), dtype=np.int64),
                 steps,
-                spec.history_ms,
-                float(data.fs),
-                config.batch_size,
-                device,
+                history_steps,
+                _exp13_config(config),
             )
             phase_key = f"p{int(round(phase * 100)):03d}"
             for layer, states in features.items():
