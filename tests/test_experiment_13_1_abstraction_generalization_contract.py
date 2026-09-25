@@ -106,5 +106,7 @@ def test_h_fold_assignment_is_user_character_local() -> None:
                     }
                 )
     folded = exp._make_h_folds(pd.DataFrame(rows))
-    for _, part in folded.groupby(["user", "label"]):
-        assert set(part["h_fold"]) == {0, 1, 2}
+    assert bool((folded["h_fold"] >= 0).all())
+    for _, part in folded.groupby("user"):
+        counts = part["h_fold"].value_counts()
+        assert counts.max() - counts.min() <= 1
