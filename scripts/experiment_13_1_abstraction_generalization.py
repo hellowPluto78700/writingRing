@@ -238,13 +238,24 @@ def _sample_manifest(
 def _make_h_folds(train_manifest: pd.DataFrame) -> pd.DataFrame:
     out = train_manifest.copy()
     out["h_fold"] = -1
-    for _, indexes in out.groupby(["user", "label"]).groups.items():
+    user_fold_counts: dict[str, np.ndarray] = {
+        str(user): np.zeros(H_ID_FOLDS, dtype=np.int64)
+        for user in sorted(out["user"].unique())
+    }
+    for (user, _), indexes in out.groupby(
+        ["user", "label"],
+        sort=True,
+    ).groups.items():
         ordered = sorted(
             list(indexes),
             key=lambda index: str(out.loc[index, "sample_id"]),
         )
+        counts = user_fold_counts[str(user)]
+        start_fold = int(np.argmin(counts))
         for order, index in enumerate(ordered):
-            out.loc[index, "h_fold"] = order % H_ID_FOLDS
+            fold = (start_fold + order) % H_ID_FOLDS
+            out.loc[index, "h_fold"] = fold
+            counts[fold] += 1
     if bool((out["h_fold"] < 0).any()):
         raise RuntimeError("Missing H fold assignment")
     return out
