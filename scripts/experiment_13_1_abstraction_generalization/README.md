@@ -40,7 +40,9 @@ Balanced pair strata are generated once and reused for all seeds:
 
 - SC_SU: same character, same user;
 - SC_CU: same character, cross user;
-- DC_CU: different character, cross user with duration-matched negatives.
+- DC_CU: different character, cross user. Negative target classes are selected
+  with globally balanced class usage first, then duration-matched within the
+  selected class.
 
 The principal geometry statistic is:
 
@@ -85,9 +87,16 @@ seen users compared with held-out users.
 C2 reuses existing Exp13 A2 history-truncation features. C1 adds only the
 missing 3 seeds x 6 history durations = 18 feature tasks.
 
-History durations are 50, 100, 250, 500, 750, and 1000 ms. A common eligibility
-mask requires at least 64 previous timesteps so all history conditions are
-evaluated on the same samples. 75% and 100% phase are primary; 50% is secondary.
+History comparison uses a phase-specific common eligibility mask so every
+reported condition at a given phase is evaluated on the same samples while
+retaining all 12 classes:
+
+- 50% phase: 50, 100, 250, 500 ms (common mask requires 500 ms);
+- 75% phase: 50, 100, 250, 500, 750 ms (common mask requires 750 ms);
+- 100% phase: 50, 100, 250, 500, 750, 1000 ms (common mask requires 1000 ms).
+
+The implementation hard-fails if either ID/OOD evaluation or any ID-CV fold
+loses a class. 75% and 100% remain primary; 50% is secondary.
 
 Within the training-user population, deterministic user x character folds
 produce held-out sequences from seen users (ID-CV). The same frozen SNN
@@ -147,3 +156,16 @@ missing runs.
 python -m pytest -q tests/test_experiment_13_1_abstraction_generalization_contract.py
 python -m pytest -q tests/test_repository_source_syntax.py
 ```
+
+### Re-running only the protocol-fixed stages
+
+If trajectory caches, G probes, and C1 history features already exist, the F/H
+protocol fix can be recomputed without rerunning those expensive stages:
+
+```bash
+bash scripts/bash_script/SNN_Bash/rerun_exp_13_1_protocol_fix_cpu.bash
+```
+
+This regenerates the pair/source manifests, force-reruns F geometry and H
+ID/OOD probes, and then rebuilds the final summaries. Existing F trajectory
+caches, G results, and C1/C2 history features are reused.
