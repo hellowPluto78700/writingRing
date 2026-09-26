@@ -26,4 +26,9 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 
-python -u -m scripts.experiment_13_1_abstraction_generalization   --device cpu --threads 1 h   --array-task-id "${SLURM_ARRAY_TASK_ID:?}"
+extra_args=()
+if [[ "${FORCE:-0}" == "1" ]]; then
+  extra_args+=(--force)
+fi
+
+python -u -m scripts.experiment_13_1_abstraction_generalization   --device cpu --threads 1 "${extra_args[@]}" h   --array-task-id "${SLURM_ARRAY_TASK_ID:?}"

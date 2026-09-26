@@ -30,7 +30,11 @@ ANALYSIS_STATES = exp13.ANALYSIS_STATES
 PHASES = (0.25, 0.50, 0.75, 1.00)
 H_PHASES = (0.50, 0.75, 1.00)
 HISTORY_MS = exp13.HISTORY_MS
-H_COMMON_HISTORY_STEPS = 64
+H_HISTORY_MS_BY_PHASE = {
+    0.50: (50, 100, 250, 500),
+    0.75: (50, 100, 250, 500, 750),
+    1.00: HISTORY_MS,
+}
 ALIGNMENT_STEPS = 64
 DTW_BAND_FRACTION = 0.20
 PAIR_CAP_PER_STRATUM = 1
@@ -286,9 +290,6 @@ def _pair_row(
 def _make_pair_manifest(
     sample_manifest: pd.DataFrame,
 ) -> pd.DataFrame:
-    rng = np.random.default_rng(
-        exp3.dseed(0, EXPERIMENT_ID, "pair_manifest")
-    )
     rows: list[dict[str, Any]] = []
     for domain in ("train", "test"):
         frame = sample_manifest[
@@ -298,6 +299,10 @@ def _make_pair_manifest(
         by_user = {
             user: group.reset_index(drop=True)
             for user, group in frame.groupby("user", sort=True)
+        }
+        negative_label_counts = {
+            str(label): 0
+            for label in sorted(frame["label"].unique())
         }
 
         for user, group in by_user.items():
@@ -339,26 +344,71 @@ def _make_pair_manifest(
                     )
                     for _, a, b in candidates[:PAIR_CAP_PER_STRATUM]:
                         rows.append(_pair_row(domain, "SC_CU", a, b))
-                        negative = group_b[group_b["label"] != label].copy()
-                        if negative.empty:
+                        negative_labels = sorted(
+                            set(group_b["label"]) - {label}
+                        )
+                        if not negative_labels:
                             continue
-                        negative["duration_delta"] = (
-                            negative["valid_length"].astype(int)
-                            - int(a["valid_length"])
-                        ).abs()
-                        best_delta = int(negative["duration_delta"].min())
-                        top = negative[
-                            negative["duration_delta"] == best_delta
-                        ].sort_values("sample_id")
-                        pick = int(
-                            rng.integers(0, max(1, min(len(top), 3)))
+                        min_count = min(
+                            negative_label_counts.get(
+                                negative_label,
+                                0,
+                            )
+                            for negative_label in negative_labels
+                        )
+                        balanced_labels = [
+                            negative_label
+                            for negative_label in negative_labels
+                            if negative_label_counts.get(
+                                negative_label,
+                                0,
+                            )
+                            == min_count
+                        ]
+                        negative_candidates = []
+                        for negative_label in balanced_labels:
+                            negative_part = group_b[
+                                group_b["label"] == negative_label
+                            ].copy()
+                            negative_part["duration_delta"] = (
+                                negative_part[
+                                    "valid_length"
+                                ].astype(int)
+                                - int(a["valid_length"])
+                            ).abs()
+                            negative_part = negative_part.sort_values(
+                                ["duration_delta", "sample_id"]
+                            )
+                            best = negative_part.iloc[0].to_dict()
+                            negative_candidates.append(
+                                (
+                                    int(best["duration_delta"]),
+                                    str(negative_label),
+                                    str(best["sample_id"]),
+                                    best,
+                                )
+                            )
+                        _, selected_label, _, selected = min(
+                            negative_candidates,
+                            key=lambda item: (
+                                item[0],
+                                item[1],
+                                item[2],
+                            ),
+                        )
+                        negative_label_counts[selected_label] = (
+                            negative_label_counts.get(
+                                selected_label,
+                                0,
+                            )
+                            + 1
                         )
                         rows.append(
                             _pair_row(
                                 domain,
                                 "DC_CU",
                                 a,
-                                top.iloc[pick].to_dict(),
+                                selected,
                             )
                         )
     frame = pd.DataFrame(rows)
@@ -428,6 +478,12 @@ def prepare_source(config: Config) -> dict[str, Any]:
         "dtw_band_fraction": DTW_BAND_FRACTION,
         "history_ms": list(HISTORY_MS),
         "h_phases": list(H_PHASES),
+        "h_history_ms_by_phase": {
+            str(phase): list(history_values)
+            for phase, history_values
+            in H_HISTORY_MS_BY_PHASE.items()
+        },
+        "sample_rate_hz": float(data.fs),
         "user_permutations": config.user_permutations,
         "sources": sources,
         "task_counts": {
@@ -1336,6 +1392,41 @@ def _h_path(config: Config, spec: MetricSpec) -> Path:
     )
 
 
+def _history_steps(
+    history_ms: int,
+    sample_rate_hz: float,
+) -> int:
+    return max(
+        1,
+        int(round(history_ms * sample_rate_hz / 1000.0)),
+    )
+
+
+def _history_eligible(
+    anchor_steps: np.ndarray,
+    history_steps: int,
+) -> np.ndarray:
+    return np.asarray(anchor_steps, dtype=np.int64) + 1 >= int(
+        history_steps
+    )
+
+
+def _assert_class_coverage(
+    name: str,
+    y: np.ndarray,
+    expected_classes: np.ndarray,
+) -> None:
+    actual = np.unique(np.asarray(y, dtype=np.int64))
+    expected = np.unique(
+        np.asarray(expected_classes, dtype=np.int64)
+    )
+    if not np.array_equal(actual, expected):
+        raise ValueError(
+            f"{name}: class coverage mismatch; "
+            f"expected={expected.tolist()} actual={actual.tolist()}"
+        )
+
+
 def run_h(
     spec: MetricSpec,
     config: Config,
@@ -1381,6 +1472,14 @@ def run_h(
         cache["test__lengths"],
         dtype=np.int64,
     )
+    source_manifest = json.loads(
+        (config.results_dir / "source_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    sample_rate_hz = float(source_manifest["sample_rate_hz"])
+    expected_train_classes = np.unique(train_y)
+    expected_test_classes = np.unique(test_y)
 
     rows: list[dict[str, Any]] = []
     for layer in ("L1", "L2", "L3"):
@@ -1393,20 +1492,30 @@ def run_h(
                 test_lengths,
                 phase,
             )
-            train_eligible = (
-                train_steps >= H_COMMON_HISTORY_STEPS
+            phase_histories = H_HISTORY_MS_BY_PHASE[phase]
+            max_history_ms = int(phase_histories[-1])
+            required_history_steps = _history_steps(
+                max_history_ms,
+                sample_rate_hz,
             )
-            test_eligible = (
-                test_steps >= H_COMMON_HISTORY_STEPS
+            train_eligible = _history_eligible(
+                train_steps,
+                required_history_steps,
             )
-            if int(train_eligible.sum()) < len(
-                np.unique(train_y)
-            ):
-                continue
-            if int(test_eligible.sum()) < len(
-                np.unique(test_y)
-            ):
-                continue
+            test_eligible = _history_eligible(
+                test_steps,
+                required_history_steps,
+            )
+            _assert_class_coverage(
+                f"H train phase={phase}",
+                train_y[train_eligible],
+                expected_train_classes,
+            )
+            _assert_class_coverage(
+                f"H test phase={phase}",
+                test_y[test_eligible],
+                expected_test_classes,
+            )
 
             full_train = _full_phase_matrix(
                 cache,
@@ -1425,6 +1534,17 @@ def run_h(
             y_train = train_y[train_eligible]
             y_test = test_y[test_eligible]
             folds = fold_values[train_eligible]
+            for fold in range(H_ID_FOLDS):
+                _assert_class_coverage(
+                    f"H ID-train phase={phase} fold={fold}",
+                    y_train[folds != fold],
+                    expected_train_classes,
+                )
+                _assert_class_coverage(
+                    f"H ID-val phase={phase} fold={fold}",
+                    y_train[folds == fold],
+                    expected_train_classes,
+                )
             probe_seed = exp3.dseed(
                 spec.seed,
                 EXPERIMENT_ID,
@@ -1451,7 +1571,7 @@ def run_h(
             ] = [
                 ("full", None, full_train, full_test)
             ]
-            for history_ms in HISTORY_MS:
+            for history_ms in phase_histories:
                 source = _history_feature_path(
                     config,
                     spec.model_kind,
@@ -1509,6 +1629,14 @@ def run_h(
                         "primary_phase": phase >= 0.75,
                         "condition": condition,
                         "history_ms": history_ms,
+                        "max_history_ms_for_phase": max_history_ms,
+                        "required_history_steps": required_history_steps,
+                        "train_class_count": len(
+                            np.unique(y_train)
+                        ),
+                        "test_class_count": len(
+                            np.unique(y_test)
+                        ),
                         "selected_C": selected_C,
                         "id_ba": id_ba,
                         "ood_ba": ood_ba,
@@ -1891,6 +2019,11 @@ def finalize(config: Config) -> dict[str, Any]:
                 "ID gain minus OOD gain relative to 50 ms"
             ),
             "primary_phases": [0.75, 1.0],
+            "phase_history_ms": {
+                str(phase): list(history_values)
+                for phase, history_values
+                in H_HISTORY_MS_BY_PHASE.items()
+            },
         },
         "artifacts": {
             "F_pair_summary": (
