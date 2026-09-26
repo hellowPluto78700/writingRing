@@ -18,7 +18,11 @@ def test_run_mapping_and_primary_controls() -> None:
     assert len(exp.h_feature_specs()) == 18
     assert exp.HISTORY_MS == (50, 100, 250, 500, 750, 1000)
     assert exp.H_PHASES == (0.50, 0.75, 1.00)
-    assert exp.H_COMMON_HISTORY_STEPS == 64
+    assert exp.H_HISTORY_MS_BY_PHASE == {
+        0.50: (50, 100, 250, 500),
+        0.75: (50, 100, 250, 500, 750),
+        1.00: (50, 100, 250, 500, 750, 1000),
+    }
 
 
 def test_bounded_dtw_identity_symmetry_and_fixed_identity() -> None:
@@ -110,3 +114,74 @@ def test_h_fold_assignment_is_user_character_local() -> None:
     for _, part in folded.groupby("user"):
         counts = part["h_fold"].value_counts()
         assert counts.max() - counts.min() <= 1
+
+
+def test_history_eligibility_counts_complete_history() -> None:
+    anchor_steps = np.asarray([0, 15, 31, 47, 63, 64])
+    assert exp._history_steps(500, 64.0) == 32
+    assert exp._history_steps(750, 64.0) == 48
+    assert exp._history_steps(1000, 64.0) == 64
+
+    eligible_32 = exp._history_eligible(anchor_steps, 32)
+    assert eligible_32.tolist() == [
+        False,
+        False,
+        True,
+        True,
+        True,
+        True,
+    ]
+    eligible_64 = exp._history_eligible(anchor_steps, 64)
+    assert eligible_64.tolist() == [
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+    ]
+
+
+def test_class_coverage_contract_rejects_missing_class() -> None:
+    expected = np.asarray([0, 1, 2])
+    exp._assert_class_coverage(
+        "complete",
+        np.asarray([0, 1, 2, 2]),
+        expected,
+    )
+    try:
+        exp._assert_class_coverage(
+            "missing",
+            np.asarray([0, 1, 1]),
+            expected,
+        )
+    except ValueError as exc:
+        assert "class coverage mismatch" in str(exc)
+    else:
+        raise AssertionError("missing class should fail coverage check")
+
+
+def test_dc_cu_negative_labels_are_balanced() -> None:
+    rows = []
+    index = 0
+    for user in ("u0", "u1", "u2"):
+        for label_index, label in enumerate(("A", "B", "C", "D")):
+            for repeat in range(2):
+                rows.append(
+                    {
+                        "split": "train",
+                        "sample_index": index,
+                        "sample_id": f"{user}_{label}_{repeat}",
+                        "user": user,
+                        "action": "0",
+                        "label": label,
+                        "y": label_index,
+                        "source_segment_index": index,
+                        "valid_length": 80 + label_index + repeat,
+                    }
+                )
+                index += 1
+    frame = exp._make_pair_manifest(pd.DataFrame(rows))
+    negative = frame[frame["relation"] == "DC_CU"]
+    counts = negative["label_j"].value_counts()
+    assert counts.max() - counts.min() <= 1
