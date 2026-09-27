@@ -1,0 +1,56 @@
+name: Core benchmark v1 CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core_benchmark_v1/**'
+      - 'tests/test_core_benchmark_v1_contract.py'
+      - '.github/workflows/ci-core-benchmark-v1.yml'
+      - 'snn/accel_reconstruction_eval/datasets.py'
+      - 'snn/action0_dataset.py'
+      - 'src/writingring/segment_padding.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'pyproject.toml'
+  pull_request:
+    paths:
+      - 'core_benchmark_v1/**'
+      - 'tests/test_core_benchmark_v1_contract.py'
+      - '.github/workflows/ci-core-benchmark-v1.yml'
+      - 'snn/accel_reconstruction_eval/datasets.py'
+      - 'snn/action0_dataset.py'
+      - 'src/writingring/segment_padding.py'
+      - 'scripts/experiment_4_0_1_multispike_macro_lif.py'
+      - 'pyproject.toml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-benchmark-v1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install CPU and notebook test dependencies
+        run: |
+          python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e '.[test,snn]' scikit-learn==1.6.1 nbformat nbclient ipykernel
+      - name: Check source syntax, focused contracts, and notebook execution
+        run: |
+          python -m pytest -q tests/test_repository_source_syntax.py tests/test_core_benchmark_v1_contract.py

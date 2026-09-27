@@ -1,0 +1,112 @@
+{
+  "version": "core_benchmark_v1.0",
+  "profile": "production",
+  "dataset_roots": [
+    "outputs/action0_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded",
+    "outputs/action1_wavelets_0e5_1_2_4_8_sr_64/low-pass/aligned-board-events/segmentation_padded"
+  ],
+  "labels": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "X"
+  ],
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "split_seed": 12345,
+  "train_fraction": 0.7,
+  "val_fraction": 0.15,
+  "train_users": [],
+  "val_users": [],
+  "test_users": [],
+  "fs": 64.0,
+  "input_channels": 30,
+  "total_channels": 36,
+  "steps": 256,
+  "width": 128,
+  "synaptic_update": "unnormalized",
+  "input_drive_scale": 1.0,
+  "tau_mem_ms": 22.54,
+  "threshold": 0.5,
+  "surrogate_slope": 25.0,
+  "batch_size": 128,
+  "max_epochs": 100,
+  "min_epochs": 20,
+  "patience": 30,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0,
+  "auxiliary_weight": 0.1,
+  "wcce_reduction": "valid_mean_logits",
+  "tsce_reduction": "per_sample_valid_mean",
+  "native_bias": false,
+  "c_grid": [
+    0.001,
+    0.01,
+    0.1,
+    1.0,
+    10.0,
+    100.0
+  ],
+  "probe_max_iter": 3000,
+  "probe_tol": 0.0001,
+  "fixed_ms": 250.0,
+  "relative_bins": 10,
+  "shuffle_seeds": [
+    101,
+    211,
+    307,
+    401,
+    503
+  ],
+  "probe_states": [
+    "spike",
+    "pre_reset"
+  ],
+  "depth_controls": false,
+  "membrane_sweep": false,
+  "readout_adaptation": true,
+  "output_betas": [
+    1.0,
+    0.5
+  ],
+  "readout_thresholds": [
+    0.125,
+    0.25,
+    0.5,
+    1.0,
+    2.0
+  ],
+  "diagnostics": true,
+  "diagnostic_cases": [
+    "O0",
+    "D1"
+  ],
+  "lags": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    48,
+    64
+  ],
+  "history_ms": [
+    50.0,
+    100.0,
+    250.0,
+    500.0,
+    1000.0
+  ]
+}
