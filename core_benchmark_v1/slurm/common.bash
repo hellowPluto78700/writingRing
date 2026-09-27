@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Sourced by every compute-node job; never depend on the submit shell's Python.
 set -eo pipefail
+# Parent launchers enable nounset. Unity's /etc/profile reads variables that may
+# legitimately be unset, so suspend nounset only while the system profile loads.
+set +u
 source /etc/profile
 set -u
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
