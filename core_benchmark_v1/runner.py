@@ -18,6 +18,8 @@ def repo_root() -> Path:
 def required_artifacts(run: Run, p: Protocol) -> list[str]:
     if run.kind == 'readout':
         return ['readout.json', 'predictions.npz', 'provenance.json'] + (['head.pt', 'history.json'] if p.readout_adaptation else [])
+    if run.kind == 'e2e_readout':
+        return ['initial.pt', 'checkpoint.pt', 'history.json', 'readout.json', 'predictions.npz', 'provenance.json']
     return ['initial.pt', 'checkpoint.pt', 'history.json', 'native.json', 'traces.npz',
             'probes.json', 'probe_search.json', 'probe_decoders.npz', 'probe_predictions.npz',
             'diagnostics.json', 'provenance.json']
@@ -77,6 +79,9 @@ def run_one(root: Path, run_key: str, *, evaluation_only: bool = False, reevalua
         if run.kind == 'readout':
             from .readout import run_readout
             run_readout(directory, root, run, p, lock, arrays, evaluation_only=evaluation_only)
+        elif run.kind == 'e2e_readout':
+            from .e2e_readout import run_e2e_readout
+            run_e2e_readout(directory, root, run, p, lock, arrays, evaluation_only=evaluation_only)
         else:
             from .training import extract, load_model, train
             from .probes import run_probes
@@ -106,8 +111,9 @@ def plan(p: Protocol) -> dict[str, Any]:
     specs = runs(p)
     return {'protocol_hash': p.fingerprint, 'profile': p.profile,
             'backbone_training_runs': sum(r.kind == 'backbone' for r in specs),
-            'readout_tasks': sum(r.kind == 'readout' for r in specs),
+            'readout_tasks': sum(r.kind in ('readout', 'e2e_readout') for r in specs),
             'readout_training_runs': sum(r.kind == 'readout' and p.readout_adaptation for r in specs),
+            'e2e_readout_training_runs': sum(r.kind == 'e2e_readout' for r in specs),
             'phase_counts': {str(phase): len(phase_runs(p, phase)) for phase in (1, 2, 3)},
             'aliases': aliases(), 'runs': [{'key': r.key, **asdict(r)} for r in specs]}
 
