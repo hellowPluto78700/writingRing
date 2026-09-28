@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-VERSION = "core_benchmark_v1.0"
+VERSION = "core_benchmark_v1.1"
 SPLITS = ("train", "val", "test")
 BLOCKS = ("01_objective", "02_tau", "03_depth", "04_readout")
 TAUS = {
@@ -182,6 +182,9 @@ def runs(p: Protocol) -> list[Run]:
         if p.membrane_sweep:
             for case, tau in (("M1", 54.0), ("M2", 117.0), ("M3", 242.0)):
                 result.append(Run(case, seed, "07_membrane", l1_tau_mem_ms=tau))
+        # Full end-to-end LIF control is independent of O0 training but uses the
+        # same paired initialization, architecture, WCCE reduction and optimizer.
+        result.append(Run("R_LIF_E2E", seed, "04_readout", kind="e2e_readout", beta=0.5))
         for beta in p.output_betas:
             name = "R_IF" if beta == 1 else "R_LIF"
             result.append(Run(name, seed, "04_readout", kind="readout", parent_case="O0", phase=2, beta=beta))
