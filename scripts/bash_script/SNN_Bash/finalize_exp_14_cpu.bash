@@ -3,7 +3,9 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=00:30:00
-set -euo pipefail
+set -eo pipefail
+source /etc/profile
+set -u
 cd "${REPO_ROOT:-$PWD}"
 module load conda/latest
 eval "$(conda shell.bash hook)"
