@@ -184,10 +184,15 @@ class ProjectionHead(nn.Module):
             nn.Linear(PROJECTION_HIDDEN, PROJECTION_DIM),
         )
         for name, parameter in self.named_parameters():
-            generator = torch.Generator().manual_seed(paired_seed(seed, f"exp14:projection:{name}"))
-            bound = 1.0 / math.sqrt(parameter.shape[1])
             with torch.no_grad():
-                parameter.uniform_(-bound, bound, generator=generator)
+                if parameter.ndim == 1:
+                    parameter.zero_()
+                else:
+                    generator = torch.Generator().manual_seed(
+                        paired_seed(seed, f"exp14:projection:{name}")
+                    )
+                    bound = 1.0 / math.sqrt(parameter.shape[1])
+                    parameter.uniform_(-bound, bound, generator=generator)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.normalize(self.net(x), dim=-1)
