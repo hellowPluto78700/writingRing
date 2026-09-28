@@ -83,7 +83,7 @@ def plot_readout(frame: pd.DataFrame) -> None:
     x = np.arange(len(frame))
     ax.errorbar(x, 100 * frame.test_ba_mean, yerr=100 * frame.test_ba_std.fillna(0), marker='o', linestyle='none', capsize=3)
     ax.set_xticks(x, frame['case'] + '/' + frame['mode'], rotation=35, ha='right')
-    ax.set(ylabel='Test balanced accuracy (%)', title='Readout-only conversion and W adaptation', ylim=(0, 102))
+    ax.set(ylabel='Test balanced accuracy (%)', title='Readout conversion, W adaptation, and full E2E LIF control', ylim=(0, 102))
     ax.grid(axis='y', alpha=0.3)
     fig.tight_layout()
     plt.show()
