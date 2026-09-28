@@ -248,6 +248,12 @@ def test_full_pipeline_manifest_and_frozen_depth(smoke_root: Path) -> None:
     assert e2e['training_scope'] == 'full_end_to_end'
     e2e_checkpoint = load_torch(smoke_root / 'runs/R_LIF_E2E__seed11/checkpoint.pt')
     assert e2e_checkpoint['paired_o0_initialization_verified'] is True
+    o0_initial = load_torch(smoke_root / 'runs/O0__seed11/initial.pt')['model_state_dict']
+    e2e_initial = load_torch(smoke_root / 'runs/R_LIF_E2E__seed11/initial.pt')['model_state_dict']
+    assert o0_initial.keys() == e2e_initial.keys()
+    assert all(torch.equal(o0_initial[name], e2e_initial[name]) for name in o0_initial)
+    gains = pd.read_csv(smoke_root / 'aggregate/readout_gains.csv')
+    assert 'e2e_realization_loss' in set(gains.contrast)
     native = pd.read_csv(smoke_root / 'aggregate/native_summary.csv')
     assert set(native.test_ba_count) == {1}
 
