@@ -31,15 +31,16 @@ REPO = Path(__file__).resolve().parents[1]
 def test_primary_manifest_and_true_dependencies() -> None:
     p = Protocol()
     manifest = runs(p)
-    assert len(manifest) == 33
-    assert len(phase_runs(p, 1)) == 27
+    assert len(manifest) == 36
+    assert len(phase_runs(p, 1)) == 30
     assert len(phase_runs(p, 2)) == 6
     assert not phase_runs(p, 3)
     assert len({r.key for r in manifest}) == len(manifest)
     assert set(aliases().values()) == {'O0'}
     assert set(r.case for r in manifest if r.kind == 'backbone') == {'O0', 'O1', 'O2', 'O3', 'T1', 'T2', 'T3', 'T4', 'D1'}
+    assert set(r.case for r in manifest if r.kind == 'e2e_readout') == {'R_LIF_E2E'}
     optional = runs(replace(p, depth_controls=True, membrane_sweep=True))
-    assert len(optional) == 48
+    assert len(optional) == 51
     assert all(r.parent_key is None or next(parent.phase for parent in optional if parent.key == r.parent_key) < r.phase for r in optional)
 
 
@@ -78,7 +79,7 @@ def test_paired_initialization_does_not_depend_on_auxiliary_or_depth() -> None:
     p = smoke_protocol()
     selected = {r.case: r for r in runs(p)}
     base = BenchmarkNet(selected['O0'], p)
-    for case in ('O1', 'O2', 'O3', 'T1', 'T3', 'D1'):
+    for case in ('O1', 'O2', 'O3', 'T1', 'T3', 'D1', 'R_LIF_E2E'):
         candidate = BenchmarkNet(selected[case], p)
         for name, weight in base.named_parameters():
             assert torch.equal(weight, dict(candidate.named_parameters())[name]), (case, name)
@@ -225,7 +226,7 @@ def smoke_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
         for run in phase_runs(p, phase):
             assert run_one(root, run.key)['status'] == 'PASS'
     report = finalize(root, REPO)
-    assert report['completed_runs'] == 16
+    assert report['completed_runs'] == 17
     assert report['probe_rows'] == 620
     return root
 
@@ -242,6 +243,11 @@ def test_full_pipeline_manifest_and_frozen_depth(smoke_root: Path) -> None:
         if name.startswith(('layers.0.', 'layers.1.')):
             assert torch.equal(source[name], frozen[name])
     assert read_json(smoke_root / 'runs/R_IF__seed11/readout.json')['same_W_verified']
+    e2e = read_json(smoke_root / 'runs/R_LIF_E2E__seed11/readout.json')
+    assert [row['mode'] for row in e2e['rows']] == ['R3_e2e_LIF', 'R4_e2e_accumulator_swap']
+    assert e2e['training_scope'] == 'full_end_to_end'
+    e2e_checkpoint = load_torch(smoke_root / 'runs/R_LIF_E2E__seed11/checkpoint.pt')
+    assert e2e_checkpoint['paired_o0_initialization_verified'] is True
     native = pd.read_csv(smoke_root / 'aggregate/native_summary.csv')
     assert set(native.test_ba_count) == {1}
 
@@ -293,7 +299,7 @@ def test_slurm_dry_run_is_deduplicated_and_dependency_safe() -> None:
     env = {**os.environ, 'DRY_RUN': '1', 'SLURM_MAX_CONCURRENCY': '20'}
     result = subprocess.run(['bash', 'core_benchmark_v1/slurm/submit.bash'], cwd=REPO, env=env, capture_output=True, text=True, check=True)
     output = result.stdout + result.stderr
-    assert '--array=0-26%20' in output
+    assert '--array=0-29%20' in output
     assert '--array=0-5%6' in output
     assert 'afterok:DRY_prepare' in output and 'afterok:DRY_phase1' in output and 'afterok:DRY_phase2' in output
     assert 'phase 3:' not in output
