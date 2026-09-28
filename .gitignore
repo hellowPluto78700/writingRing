@@ -11,6 +11,21 @@ dist/
 outputs/
 notebooks/artifacts/experiment_C_frequency_ablation/
 
+# Benchmark runtime products are reproducible and stay local.
+core_benchmark_v1/results/
+
+# Slurm/runtime logs are not source artifacts.
+*.out
+*.err
+
+# Exp13.1 large/recomputable intermediates. Keep compact summaries/manifests.
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/trajectories/
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/*_features/
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/pair_runs/
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/retrieval_runs/
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/probe_runs/
+notebooks/artifacts/experiment_13_1_abstraction_generalization/**/*_all_runs.csv
+
 # Local raw data and download archives are not project source.
 data/
 data_sample/
