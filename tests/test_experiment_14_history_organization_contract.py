@@ -50,6 +50,18 @@ def test_cross_user_supcon_requires_cross_user_positives_and_backpropagates() ->
     assert torch.isfinite(raw.grad).all()
 
 
+def test_projection_head_initialization_handles_bias_parameters() -> None:
+    left = exp.ProjectionHead(seed=11, input_dim=128)
+    right = exp.ProjectionHead(seed=11, input_dim=128)
+    for (left_name, left_parameter), (right_name, right_parameter) in zip(
+        left.named_parameters(), right.named_parameters(), strict=True
+    ):
+        assert left_name == right_name
+        assert torch.equal(left_parameter, right_parameter)
+        if left_parameter.ndim == 1:
+            assert torch.count_nonzero(left_parameter) == 0
+
+
 def test_auxiliary_schedule_has_warmup_ramp_and_plateau() -> None:
     target = 0.3
     assert exp._aux_weight(target, 1) == 0.0
