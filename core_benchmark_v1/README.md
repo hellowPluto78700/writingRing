@@ -9,9 +9,9 @@ A standardized measurement framework, separate from the historical Exp7.x-13.x a
 | `01_objective` | O0 WCCE; O1 TSCE; O2 WCCE + 0.1 L1 WCCE; O3 WCCE + 0.1 L1 TSCE | 12 |
 | `02_tau` | T1 123/234; T2 123/123; T3 123/345; T4 234/345 | 12 |
 | `03_depth` | D1: 234/234/234, end-to-end | 3 |
-| `04_readout` | R_IF beta=1; R_LIF beta=0.5, on each O0 checkpoint | 6 readout tasks |
+| `04_readout` | R_IF beta=1; R_LIF beta=0.5 on O0; R_LIF_E2E full-network beta=0.5 control | 9 readout tasks |
 
-There are **27 primary backbone training runs plus 6 readout tasks**. Each readout task includes same-W evaluation, validation-only threshold calibration, and (by default) one output-W-only training run. All use seeds **11, 23, 37**. `REF`, `T0`, `D0`, `R0`, and optional `M0` are aliases of the **same O0 checkpoint**, not additional runs.
+There are **27 primary backbone training runs plus 9 readout tasks**. Six O0-derived readout tasks include same-W evaluation, validation-only threshold calibration, and (by default) one output-W-only training run. Three additional `R_LIF_E2E` tasks train the complete two-layer network through a beta=0.5 LIF output from the same paired initialization as O0. All use seeds **11, 23, 37**. `REF`, `T0`, `D0`, `R0`, and optional `M0` are aliases of the **same O0 checkpoint**, not additional runs.
 
 O0 is the fixed anchor: 30 event channels -> 128 L1 (234) -> 128 L2 (234) -> bias-free accumulator. Objectives, tau configurations and depth are compared against this anchor independently. No winner from one block is used to select the next block. A later selected-factor composition study is intentionally outside this benchmark.
 
@@ -101,8 +101,10 @@ These are changes in decoder-accessible classification under controlled represen
 - `R1_sameW_fixed`: original W, threshold 0.5, IF beta=1 or LIF beta=0.5.
 - `R1_sameW_calibrated`: original W; threshold chosen using validation BA from `[0.125, 0.25, 0.5, 1, 2]`, preferring the native/nearest threshold in ties.
 - `R2_adaptW`: same frozen hidden spikes; initialize W from O0, train **only W** using CE of valid output spike counts. The calibrated threshold stays fixed. Selection uses validation spike-count BA then spike-count CE, with epoch zero included.
+- `R3_e2e_LIF`: independent full-network control with the same 234->234 architecture, paired parameter initialization, loader randomness, optimizer, WCCE valid-mean reduction, training budget, beta=0.5, threshold=0.5, alpha_out=0 and bias-free W as O0 except that the final accumulator is replaced by the output LIF during both training and inference. L1, L2 and W are all trainable. Checkpoint selection uses validation LIF BA, then validation valid-mean output-spike CE, then earliest epoch.
+- `R4_e2e_accumulator_swap`: no retraining. Evaluate the selected R3 checkpoint using the exact same hidden layers and W, but bypass the output LIF and accumulate the analog `Wz[t]` evidence. The paired R4-R3 contrast isolates the residual spike-realization loss after the network has already adapted end-to-end to the LIF interface.
 
-Output spike dynamics have **alpha_out=0**, so evidence is injected directly into the membrane; there is no additional output synaptic filter. Both use immediate subtractive reset, signed unclamped membrane, and binary cap one. All-zero and tied outputs are reported. Ties use the first class index consistently. No hidden SNN gradient exists in R2 because training uses cached hidden spikes. A remaining analog/spike gap is not claimed to be a fundamental impossibility result. E2E training through a spike output is intentionally outside the primary benchmark.
+Output spike dynamics have **alpha_out=0**, so evidence is injected directly into the membrane; there is no additional output synaptic filter. Both use immediate subtractive reset, signed unclamped membrane, and binary cap one. All-zero and tied outputs are reported. Ties use the first class index consistently. No hidden SNN gradient exists in R2 because training uses cached hidden spikes; R3 explicitly supplies that missing full-network gradient path. A remaining R4-R3 gap is therefore the cleanest controlled estimate here of output-LIF realization loss after E2E adaptation, not a fundamental impossibility result.
 
 ## New temporal diagnostics
 
@@ -127,7 +129,7 @@ DRY_RUN=1 bash core_benchmark_v1/slurm/submit.bash
 SLURM_MAX_CONCURRENCY=50 bash core_benchmark_v1/slurm/submit.bash
 ```
 
-Submission uses one preparation job, a **27-task phase-1 array** containing all independent Objective/Tau/Depth cases, a **6-task phase-2 readout array**, and an `afterok` finalizer. Optional D2 joins phase 2; optional D3 uses phase 3; optional membrane runs join phase 1. Phase barriers are conservative checkpoint dependencies and keep total simultaneous benchmark CPU tasks within the requested cap (never above 50). They are not scientific winner-selection stages.
+Submission uses one preparation job, a **30-task phase-1 array** containing all independent Objective/Tau/Depth cases plus the three independent R_LIF_E2E runs, a **6-task phase-2 O0-derived readout array**, and an `afterok` finalizer. Optional D2 joins phase 2; optional D3 uses phase 3; optional membrane runs join phase 1. Phase barriers are conservative checkpoint dependencies and keep total simultaneous benchmark CPU tasks within the requested cap (never above 50). They are not scientific winner-selection stages.
 
 Each array task performs `train -> selected checkpoint -> native evaluation -> probes -> optional diagnostics -> atomic completion marker`. Evaluation functions are separate and reusable. The finalizer **only** consumes completed artifacts; missing runs, mismatched metadata, incomplete probe coordinates and altered artifact hashes fail closed. A rerun can reuse a completed training checkpoint and redo evaluation without retraining. Interrupted unfinished training restarts that run; there is no unvalidated optimizer-resume path.
 
