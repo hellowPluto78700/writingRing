@@ -80,10 +80,27 @@ def readout_gains(readout: pd.DataFrame) -> pd.DataFrame:
             ('fixed_conversion_loss', 'R0_accumulator', 'R1_sameW_fixed'),
             ('calibrated_conversion_loss', 'R0_accumulator', 'R1_sameW_calibrated'),
             ('W_adaptation_gain', 'R2_adaptW', 'R1_sameW_calibrated'),
-            ('remaining_gap', 'R0_accumulator', 'R2_adaptW')):
+            ('remaining_gap', 'R0_accumulator', 'R2_adaptW'),
+            ('e2e_realization_loss', 'R4_e2e_accumulator_swap', 'R3_e2e_LIF')):
             if left in lookup.index and right in lookup.index:
                 rows.append({'case': case, 'seed': seed, 'beta': beta, 'contrast': name,
                     **{f'{split}_delta': float(lookup.loc[left, f'{split}_ba'] - lookup.loc[right, f'{split}_ba']) for split in SPLITS}})
+    # Paired cross-case contrasts for beta=0.5. These separate the benefit of
+    # full E2E adaptation from the residual LIF realization loss.
+    baseline = readout[(readout['case'] == 'R_LIF') & (readout['beta'] == 0.5)]
+    e2e = readout[(readout['case'] == 'R_LIF_E2E') & (readout['beta'] == 0.5)]
+    for seed in sorted(set(baseline['seed']) & set(e2e['seed'])):
+        b = baseline[baseline['seed'] == seed].set_index('mode')
+        e = e2e[e2e['seed'] == seed].set_index('mode')
+        pairs = (
+            ('e2e_LIF_gain_vs_sameW_calibrated', e, 'R3_e2e_LIF', b, 'R1_sameW_calibrated'),
+            ('e2e_LIF_gain_vs_W_adapted', e, 'R3_e2e_LIF', b, 'R2_adaptW'),
+            ('e2e_accumulator_swap_gain_vs_O0', e, 'R4_e2e_accumulator_swap', b, 'R0_accumulator'),
+        )
+        for name, left_frame, left_mode, right_frame, right_mode in pairs:
+            if left_mode in left_frame.index and right_mode in right_frame.index:
+                rows.append({'case': 'R_LIF_E2E', 'seed': seed, 'beta': 0.5, 'contrast': name,
+                    **{f'{split}_delta': float(left_frame.loc[left_mode, f'{split}_ba'] - right_frame.loc[right_mode, f'{split}_ba']) for split in SPLITS}})
     return pd.DataFrame(rows)
 
 
@@ -106,9 +123,10 @@ def finalize(root: Path, repo: Path) -> dict[str, Any]:
             child = load_torch(directory / ('head.pt' if run.kind == 'readout' else 'checkpoint.pt'))
             if child['parent_checkpoint_hash'] != file_hash(root / 'runs' / run.parent_key / 'checkpoint.pt'):
                 raise ValueError(f'Stale parent checkpoint: {run.key}')
-        if run.kind == 'readout':
+        if run.kind in ('readout', 'e2e_readout'):
             payload = read_json(directory / 'readout.json')
-            if len(payload['rows']) != (4 if p.readout_adaptation else 3):
+            expected_rows = 2 if run.kind == 'e2e_readout' else (4 if p.readout_adaptation else 3)
+            if len(payload['rows']) != expected_rows:
                 raise ValueError(f'Incomplete readout rows: {run.key}')
             if any(row['run_key'] != run.key or row['case'] != run.case or row['seed'] != run.seed for row in payload['rows']):
                 raise ValueError(f'Readout row identity mismatch: {run.key}')
@@ -181,7 +199,8 @@ def finalize(root: Path, repo: Path) -> dict[str, Any]:
         write_csv(tables[name], summary_root / '04_readout' / f'{name}.csv')
     report = {'status': 'PASS', 'identity': lock['identity'], 'profile': p.profile,
               'expected_runs': len(expected), 'completed_runs': len(expected), 'backbone_runs': len(native),
-              'readout_runs': len({r['run_key'] for r in readout_rows}), 'probe_rows': len(probes),
+              'readout_runs': len({r['run_key'] for r in readout_rows}),
+              'e2e_readout_runs': sum(r.kind == 'e2e_readout' for r in expected), 'probe_rows': len(probes),
               'aliases': lock['aliases'], 'model_seeds': list(p.seeds),
               'uncertainty_scope': 'model-seed variability on one locked user split, not cross-split uncertainty',
               'shuffle_averaging': 'replicates averaged within model seed before seed statistics',
