@@ -1,0 +1,58 @@
+{
+  "F": {
+    "alignments": [
+      "fixed_normalized_time",
+      "bounded_DTW"
+    ],
+    "primary_metrics": [
+      "DC_CU / SC_CU distance ratio",
+      "cross-user nearest-medoid balanced accuracy"
+    ],
+    "question": "How does cross-user task geometry vary with depth?"
+  },
+  "G": {
+    "primary_metric": "user-ID BA minus within-character permutation BA",
+    "question": "How much user identity remains after character residualization?"
+  },
+  "H": {
+    "phase_history_ms": {
+      "0.5": [
+        50,
+        100,
+        250,
+        500
+      ],
+      "0.75": [
+        50,
+        100,
+        250,
+        500,
+        750
+      ],
+      "1.0": [
+        50,
+        100,
+        250,
+        500,
+        750,
+        1000
+      ]
+    },
+    "primary_metric": "ID gain minus OOD gain relative to 50 ms",
+    "primary_phases": [
+      0.75,
+      1.0
+    ],
+    "question": "Does added history benefit seen users more than held-out users?"
+  },
+  "artifacts": {
+    "F_pair_summary": "F_cross_user_geometry/F_pair_summary.csv",
+    "F_retrieval_summary": "F_cross_user_geometry/F_retrieval_summary.csv",
+    "G_summary": "G_user_leakage/G_user_leakage_summary.csv",
+    "H_summary": "H_history_generalization/H_history_summary.csv"
+  },
+  "experiment_id": "experiment_13_1_abstraction_generalization",
+  "primary_depth_control": "C1_frozen_A2_backbone_train_L3",
+  "protocol_version": "abstraction_generalization_v1",
+  "secondary_replication": "C2_end_to_end_three_layer"
+}
