@@ -101,7 +101,16 @@ def phase1_specs() -> list[LossSpec]:
     return specs
 
 
+def _family_selected(selection: dict[str, Any], family: str) -> bool:
+    return (
+        selection.get(family, {}).get("status") == "selected"
+        and selection.get(family, {}).get("lambda") is not None
+    )
+
+
 def phase2_specs(selection: dict[str, Any]) -> list[LossSpec]:
+    if not (_family_selected(selection, "phase") and _family_selected(selection, "prefix")):
+        return []
     lp = float(selection["phase"]["lambda"])
     la = float(selection["prefix"]["lambda"])
     strengths = (
@@ -118,17 +127,25 @@ def phase2_specs(selection: dict[str, Any]) -> list[LossSpec]:
 
 
 def final_eval_specs(selection: dict[str, Any]) -> list[LossSpec]:
-    lp = float(selection["phase"]["lambda"])
-    la = float(selection["prefix"]["lambda"])
     selected: list[LossSpec] = []
     for seed in SEEDS:
-        selected.extend(
-            (
-                LossSpec("C0_dual_null", seed),
-                LossSpec("P_phase_cu", seed, lambda_phase=lp),
-                LossSpec("A_prefix_wcce", seed, lambda_prefix=la),
+        selected.append(LossSpec("C0_dual_null", seed))
+        if _family_selected(selection, "phase"):
+            selected.append(
+                LossSpec(
+                    "P_phase_cu",
+                    seed,
+                    lambda_phase=float(selection["phase"]["lambda"]),
+                )
             )
-        )
+        if _family_selected(selection, "prefix"):
+            selected.append(
+                LossSpec(
+                    "A_prefix_wcce",
+                    seed,
+                    lambda_prefix=float(selection["prefix"]["lambda"]),
+                )
+            )
     selected.extend(phase2_specs(selection))
     if len({spec.key for spec in selected}) != len(selected):
         raise AssertionError("Final evaluation specs must be unique")
@@ -1033,12 +1050,28 @@ def select_phase1(config: Config) -> dict[str, Any]:
     phase["eligible_native"] = phase["native_val_ba"] >= c0_native - VAL_NATIVE_TOL
     eligible_phase = phase[phase["eligible_native"]].copy()
     if eligible_phase.empty:
-        raise RuntimeError("No phase lambda satisfies the native validation BA constraint")
-    best_retrieval = float(eligible_phase["retrieval"].max())
-    eligible_phase = eligible_phase[
-        eligible_phase["retrieval"] >= best_retrieval - VAL_RETRIEVAL_TIE
-    ].sort_values("lambda_phase")
-    phase_choice = eligible_phase.iloc[0]
+        phase_selection: dict[str, Any] = {
+            "status": "no_eligible_candidate",
+            "lambda": None,
+            "reason": "no phase lambda satisfies native validation BA >= C0 - 1pp",
+            "rule": "native BA >= C0-1pp; maximize L2 spike retrieval; within 0.5pp choose smaller lambda",
+        }
+    else:
+        best_retrieval = float(eligible_phase["retrieval"].max())
+        eligible_phase = eligible_phase[
+            eligible_phase["retrieval"] >= best_retrieval - VAL_RETRIEVAL_TIE
+        ].sort_values("lambda_phase")
+        phase_choice = eligible_phase.iloc[0]
+        phase_selection = {
+            "status": "selected",
+            "lambda": float(phase_choice["lambda_phase"]),
+            "native_val_ba_mean": float(phase_choice["native_val_ba"]),
+            "retrieval_l2_spike_mean": float(phase_choice["retrieval"]),
+            "c0_retrieval_l2_spike_mean": float(
+                c0["val_retrieval_l2_spike"].mean()
+            ),
+            "rule": "native BA >= C0-1pp; maximize L2 spike retrieval; within 0.5pp choose smaller lambda",
+        }
 
     prefix = (
         frame[frame.case == "A_prefix_wcce"]
@@ -1047,6 +1080,8 @@ def select_phase1(config: Config) -> dict[str, Any]:
             native_val_ba=("native_val_ba", "mean"),
             wholecount=("val_wholecount_no_bias_ba", "mean"),
             relative10=("val_relative10_no_bias_ba", "mean"),
+            prefix50=("val_native_prefix50_ba", "mean"),
+            prefix75=("val_native_prefix75_ba", "mean"),
             collapse_gap_pp=("val_collapse_gap_pp", "mean"),
         )
     )
@@ -1056,12 +1091,29 @@ def select_phase1(config: Config) -> dict[str, Any]:
     )
     eligible_prefix = prefix[prefix["eligible_native"] & prefix["eligible_relative10"]].copy()
     if eligible_prefix.empty:
-        raise RuntimeError("No prefix lambda satisfies native/relative10 validation constraints")
-    best_whole = float(eligible_prefix["wholecount"].max())
-    eligible_prefix = eligible_prefix[
-        np.isclose(eligible_prefix["wholecount"], best_whole, rtol=0.0, atol=1e-12)
-    ].sort_values(["collapse_gap_pp", "lambda_prefix"])
-    prefix_choice = eligible_prefix.iloc[0]
+        prefix_selection: dict[str, Any] = {
+            "status": "no_eligible_candidate",
+            "lambda": None,
+            "reason": "no prefix lambda satisfies native and relative10 validation BA >= C0 - 1pp",
+            "rule": "native BA >= C0-1pp and relative10 >= C0-1pp; maximize wholecount; tie by smaller collapse gap then lambda",
+        }
+    else:
+        best_whole = float(eligible_prefix["wholecount"].max())
+        eligible_prefix = eligible_prefix[
+            np.isclose(eligible_prefix["wholecount"], best_whole, rtol=0.0, atol=1e-12)
+        ].sort_values(["collapse_gap_pp", "lambda_prefix"])
+        prefix_choice = eligible_prefix.iloc[0]
+        prefix_selection = {
+            "status": "selected",
+            "lambda": float(prefix_choice["lambda_prefix"]),
+            "native_val_ba_mean": float(prefix_choice["native_val_ba"]),
+            "wholecount_no_bias_ba_mean": float(prefix_choice["wholecount"]),
+            "relative10_no_bias_ba_mean": float(prefix_choice["relative10"]),
+            "native_prefix50_ba_mean": float(prefix_choice["prefix50"]),
+            "native_prefix75_ba_mean": float(prefix_choice["prefix75"]),
+            "collapse_gap_pp_mean": float(prefix_choice["collapse_gap_pp"]),
+            "rule": "native BA >= C0-1pp and relative10 >= C0-1pp; maximize wholecount; tie by smaller collapse gap then lambda",
+        }
 
     phase.to_csv(config.results_dir / "phase_selection_candidates.csv", index=False)
     prefix.to_csv(config.results_dir / "prefix_selection_candidates.csv", index=False)
@@ -1069,25 +1121,34 @@ def select_phase1(config: Config) -> dict[str, Any]:
         "c0_validation": {
             "native_ba_mean": c0_native,
             "relative10_no_bias_ba_mean": c0_relative,
+            "wholecount_no_bias_ba_mean": float(
+                c0["val_wholecount_no_bias_ba"].mean()
+            ),
+            "retrieval_l2_spike_mean": float(
+                c0["val_retrieval_l2_spike"].mean()
+            ),
+            "native_prefix50_ba_mean": float(c0["val_native_prefix50_ba"].mean()),
+            "native_prefix75_ba_mean": float(c0["val_native_prefix75_ba"].mean()),
         },
-        "phase": {
-            "lambda": float(phase_choice["lambda_phase"]),
-            "native_val_ba_mean": float(phase_choice["native_val_ba"]),
-            "retrieval_l2_spike_mean": float(phase_choice["retrieval"]),
-            "rule": "native BA >= C0-1pp; maximize L2 spike retrieval; within 0.5pp choose smaller lambda",
-        },
-        "prefix": {
-            "lambda": float(prefix_choice["lambda_prefix"]),
-            "native_val_ba_mean": float(prefix_choice["native_val_ba"]),
-            "wholecount_no_bias_ba_mean": float(prefix_choice["wholecount"]),
-            "relative10_no_bias_ba_mean": float(prefix_choice["relative10"]),
-            "collapse_gap_pp_mean": float(prefix_choice["collapse_gap_pp"]),
-            "rule": "native BA >= C0-1pp and relative10 >= C0-1pp; maximize wholecount; tie by smaller collapse gap then lambda",
+        "phase": phase_selection,
+        "prefix": prefix_selection,
+        "combined": {
+            "status": (
+                "enabled"
+                if phase_selection["status"] == "selected"
+                and prefix_selection["status"] == "selected"
+                else "not_applicable"
+            ),
+            "reason": (
+                None
+                if phase_selection["status"] == "selected"
+                and prefix_selection["status"] == "selected"
+                else "combined cases require selected candidates from both phase and prefix families"
+            ),
         },
     }
     save_json(config.results_dir / "selection.json", selection)
     return selection
-
 
 def evaluate_final(config: Config, spec: LossSpec) -> dict[str, Any]:
     p, _, arrays = _load_core(config)
@@ -1351,6 +1412,20 @@ def _spec_at(specs: list[LossSpec], task_id: int) -> LossSpec:
     return specs[task_id]
 
 
+def _spec_at_or_skip(
+    specs: list[LossSpec],
+    task_id: int,
+    *,
+    stage: str,
+    slot_count: int,
+) -> LossSpec | None:
+    if not 0 <= task_id < slot_count:
+        raise ValueError(f"{stage} task-id must be in [0, {slot_count - 1}]")
+    if task_id >= len(specs):
+        return None
+    return specs[task_id]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Exp14.1 dual-loader phase alignment + Prefix-WCCE accumulation study"
@@ -1391,20 +1466,30 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(select_phase1(config), indent=2))
     elif args.command == "train-phase2":
         selection = json.loads((config.results_dir / "selection.json").read_text(encoding="utf-8"))
-        print(
-            json.dumps(
-                train_one(config, _spec_at(phase2_specs(selection), args.task_id)),
-                indent=2,
-            )
-        )
+        specs = phase2_specs(selection)
+        spec = _spec_at_or_skip(specs, args.task_id, stage="phase2", slot_count=12)
+        if spec is None:
+            print(json.dumps({
+                "status": "SKIPPED",
+                "stage": "phase2",
+                "task_id": args.task_id,
+                "reason": selection["combined"]["reason"],
+            }, indent=2))
+        else:
+            print(json.dumps(train_one(config, spec), indent=2))
     elif args.command == "eval-final":
         selection = json.loads((config.results_dir / "selection.json").read_text(encoding="utf-8"))
-        print(
-            json.dumps(
-                evaluate_final(config, _spec_at(final_eval_specs(selection), args.task_id)),
-                indent=2,
-            )
-        )
+        specs = final_eval_specs(selection)
+        spec = _spec_at_or_skip(specs, args.task_id, stage="final_eval", slot_count=21)
+        if spec is None:
+            print(json.dumps({
+                "status": "SKIPPED",
+                "stage": "final_eval",
+                "task_id": args.task_id,
+                "reason": "no preregistered selected case mapped to this fixed array slot",
+            }, indent=2))
+        else:
+            print(json.dumps(evaluate_final(config, spec), indent=2))
     elif args.command == "finalize":
         print(json.dumps(finalize(config), indent=2))
 
