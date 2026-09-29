@@ -19,7 +19,7 @@ def test_run_manifest_and_frozen_constants() -> None:
     assert exp.PHASE_LAMBDAS == (0.01, 0.03, 0.06, 0.10)
     assert exp.PREFIX_LAMBDAS == (0.10, 0.25, 0.50)
     assert exp.PREFIX_PHASES == (0.50, 0.75)
-    assert exp.PREFIX_WEIGHTS == (1.0 / 3.0, 2.0 / 3.0)
+    assert exp.PREFIX_WEIGHTS == (0.5, 0.5)
     assert sum(spec.case == "C0_dual_null" for spec in specs) == 3
     assert sum(spec.case == "P_phase_cu" for spec in specs) == 12
     assert sum(spec.case == "A_prefix_wcce" for spec in specs) == 9
@@ -62,7 +62,7 @@ def test_prefix_wcce_is_one_ce_per_prefix_after_temporal_mean() -> None:
     y = torch.tensor([0, 1])
     mean50 = evidence[:, :2].mean(dim=1)
     mean75 = evidence[:, :3].mean(dim=1)
-    expected = (1.0 / 3.0) * F.cross_entropy(mean50, y) + (2.0 / 3.0) * F.cross_entropy(mean75, y)
+    expected = 0.5 * F.cross_entropy(mean50, y) + 0.5 * F.cross_entropy(mean75, y)
     actual = exp.prefix_wcce(evidence, lengths, y)
     assert torch.allclose(actual, expected)
     actual.backward()
@@ -103,6 +103,9 @@ def _summary(case: str, seed: int, lp: float = 0.0, la: float = 0.0) -> dict[str
         "val_wholecount_no_bias_ba": 0.55,
         "val_relative10_no_bias_ba": 0.65,
         "val_fixed250_no_bias_ba": 0.57,
+        "val_native_prefix50_ba": 0.45,
+        "val_native_prefix75_ba": 0.55,
+        "val_native_prefix100_ba": 0.60,
         "val_collapse_gap_pp": 10.0,
     }
 
@@ -134,3 +137,72 @@ def test_phase1_selection_source_does_not_reference_test_arrays() -> None:
     constants = exp.select_phase1.__code__.co_consts
     text = " ".join(str(item) for item in (*names, *constants))
     assert "test_" not in text
+
+
+def _balanced_aux_arrays() -> dict[str, np.ndarray]:
+    labels, users, ids = [], [], []
+    for label in range(12):
+        for user_index in range(4):
+            user = f"user_{user_index}"
+            for sample in range(4):
+                labels.append(label)
+                users.append(user)
+                ids.append(f"{label}:{user}:{sample}")
+    n = len(labels)
+    return {
+        "train_y": np.asarray(labels, dtype=np.int64),
+        "train_users": np.asarray(users),
+        "train_ids": np.asarray(ids),
+        "train_x": np.zeros((n, 4, 2), dtype=np.float32),
+        "train_lengths": np.full(n, 4, dtype=np.int64),
+    }
+
+
+def test_auxiliary_batches_are_unique_and_have_cross_user_positives() -> None:
+    arrays = _balanced_aux_arrays()
+    batches = exp._validated_aux_batches(arrays, seed=11, epoch=1)
+    assert batches
+    for indices in batches:
+        assert len(indices) == len(np.unique(indices))
+        y = arrays["train_y"][indices]
+        users = arrays["train_users"][indices]
+        for i in range(len(indices)):
+            assert np.any((y == y[i]) & (users != users[i]))
+
+
+def test_auxiliary_batches_reject_replacement_requirement() -> None:
+    arrays = _balanced_aux_arrays()
+    keep = np.ones(len(arrays["train_y"]), dtype=bool)
+    target = np.flatnonzero((arrays["train_y"] == 0) & (arrays["train_users"] == "user_0"))
+    keep[target[-1]] = False
+    reduced = {key: value[keep] for key, value in arrays.items()}
+    try:
+        exp._validated_aux_batches(reduced, seed=11, epoch=1)
+    except ValueError as error:
+        assert "without replacement" in str(error)
+    else:
+        raise AssertionError("Expected undersized class-user cell to fail")
+
+
+def test_c0_bypasses_auxiliary_batches() -> None:
+    assert exp._needs_aux_batch(exp.LossSpec("C0_dual_null", 11)) is False
+    assert exp._needs_aux_batch(exp.LossSpec("A_prefix_wcce", 11, lambda_prefix=0.25)) is False
+    assert exp._needs_aux_batch(exp.LossSpec("P_phase_cu", 11, lambda_phase=0.03)) is True
+
+
+def test_native_prefix_diagnostics_report_all_horizons() -> None:
+    evidence = np.array([
+        [[2.0, 0.0], [1.0, 0.0], [1.0, 0.5], [1.0, 0.0]],
+        [[0.0, 2.0], [0.0, 1.0], [0.5, 1.0], [0.0, 1.0]],
+    ], dtype=np.float32)
+    payload = exp._native_prefix_diagnostics(
+        evidence,
+        np.array([4, 4], dtype=np.int64),
+        np.array([0, 1], dtype=np.int64),
+        "test",
+    )
+    assert [row["phase"] for row in payload["rows"]] == [0.5, 0.75, 1.0]
+    assert all(row["ba"] == 1.0 for row in payload["rows"])
+    assert 0.0 <= payload["summary"]["monotonic_margin_fraction"] <= 1.0
+    assert 0.0 <= payload["summary"]["support_sign_reversal_rate"] <= 1.0
+    assert payload["summary"]["support_cancellation_ratio_mean"] >= 0.0
