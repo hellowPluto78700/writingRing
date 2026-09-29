@@ -128,6 +128,12 @@ A family with no validation-eligible candidate is a valid negative result, not a
 
 Before submitting training arrays, `prepare` validates the complete auxiliary sampling schedule across all benchmark seeds and all possible training epochs. For every class it records the number of train users with at least one segment, total unique training samples, and the minimum/maximum samples per eligible user. The experiment hard-fails before the phase-1 array if any class has fewer than 8 eligible train users.
 
+## Negative family selection
+
+A hyperparameter family with no candidate satisfying its preregistered validation-retention constraints is a valid negative result, not a pipeline error. The selection artifact records `status: no_eligible_candidate` and `lambda: null`; thresholds are not relaxed and an ineligible lambda is never forced through to test.
+
+Combined Phase+Prefix cases run only when both families have a selected candidate. If either family is unavailable, combined cases are marked `not_applicable`. Final test evaluation includes C0 plus only those phase-1 families that produced a preregistered selected candidate. Fixed Slurm array slots without a mapped selected case exit successfully with `SKIPPED`, allowing the aggregate finalizer to complete without retraining Phase1.
+
 ## Scheduling
 
 Both auxiliary weights:
