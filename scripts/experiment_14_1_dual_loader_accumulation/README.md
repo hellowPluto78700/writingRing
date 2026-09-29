@@ -6,8 +6,8 @@ Exp14 showed that phase-conditioned cross-user supervision improves L2 cross-use
 
 Exp14.1 separates two targets:
 
-1. **Transferability** — preserve Exp14 C2 cross-user phase alignment while restoring the original CoreBenchmark random task-sampling distribution.
-2. **Accumulatability** — organize the native shared evidence so that partial sequence histories are already compatible with one shared accumulator without forcing per-timestep TSCE.
+1. **Transferability** — preserve Exp14 C2 cross-user phase alignment while preserving the original CoreBenchmark random **task-loss sampling distribution**. The structured Phase-CU auxiliary gradient remains an intentional inductive bias, so the overall backbone optimization distribution is not claimed to be unchanged.
+2. **Shared-horizon decodability** — test whether the native shared readout can extract class-consistent accumulated evidence at multiple temporal horizons without forcing per-timestep TSCE. Stronger claims about intrinsic temporal organization require the direct evidence diagnostics below.
 
 The primary question is:
 
@@ -33,7 +33,7 @@ No SNN dynamics, architecture, tau, split, or native output geometry are changed
 
 ## Dual-loader training
 
-Each optimization step uses two independent batches.
+For Phase-CU cases, each optimization step uses a Core task batch plus one independent structured auxiliary batch. C0 bypasses auxiliary sampling entirely.
 
 ### Task batch
 
@@ -55,7 +55,7 @@ The auxiliary batch reuses the Exp14 deterministic class/user-balanced sampler:
 
 It is used only for phase-conditioned cross-user SupCon.
 
-Task-loader and auxiliary-loader epoch lengths must match; otherwise the run hard-fails.
+When Phase-CU is active there is exactly one validated auxiliary batch per Core task optimizer step. Auxiliary batches must contain no duplicate segment IDs and every anchor must have a same-class/different-user positive.
 
 ## Losses
 
@@ -109,7 +109,7 @@ This is not TSCE: each prefix receives one CE after temporal averaging.
 
 Phase 1:
 
-- C0_dual_null: WCCE only. Must reproduce CoreBenchmark O0 bitwise for the selected checkpoint.
+- C0_dual_null: WCCE only. It does not construct/iterate the auxiliary sampler, records the first three deterministic Core task-batch ID groups for debugging, and must reproduce CoreBenchmark O0 bitwise for the selected checkpoint.
 - P_phase_cu: phase-CU only, lambda_phase in {0.01, 0.03, 0.06, 0.10}.
 - A_prefix_wcce: Prefix-WCCE only, lambda_prefix in {0.10, 0.25, 0.50}.
 
@@ -180,7 +180,7 @@ The desired mechanism is whole-count improvement while relative10 remains approx
 
 ## Gradient diagnostics
 
-At deterministic checkpoints, record on L2 weights:
+At deterministic checkpoints, record on L2 weights. WCCE and Prefix-WCCE gradients are averaged over four fixed Core-distribution task batches; Phase-CU gradients are averaged over four fixed structured auxiliary batches before cosine computation:
 
 - WCCE gradient norm;
 - phase-CU gradient norm;
@@ -191,7 +191,21 @@ At deterministic checkpoints, record on L2 weights:
 - cosine(phase, WCCE);
 - cosine(prefix, WCCE).
 
-These are observational only. No dynamic weighting, GradNorm, PCGrad, or optimizer modification is allowed.
+These are observational only. No dynamic weighting, GradNorm, PCGrad, optimizer modification, memory bank, or extra evidence-organization training loss is allowed.
+
+## Direct prefix/evidence diagnostics
+
+Prefix-WCCE is interpreted narrowly: it tests whether the actual trained shared native readout can decode accumulated evidence at 50%, 75%, and 100% horizons. Final evaluation therefore reports native Prefix50/Prefix75/Prefix100 BA in addition to whole-count and relative10 probes.
+
+To distinguish "the model simply knows the answer earlier" from progressively compatible accumulation, final evaluation also records:
+
+- true-class accumulated margin at 50%, 75%, and 100%;
+- cosine similarity of cumulative evidence vectors at 50%↔75% and 75%↔100%;
+- fraction of samples whose true-class margin is monotonic across 50%→75%→100%;
+- sign-reversal rate of true-class support across the 0–50%, 50–75%, and 75–100% segments;
+- a support cancellation ratio comparing net support with the sum of absolute segment support.
+
+Native test BA improvement is a bonus outcome rather than a necessary success condition. The preservation gate remains native BA no worse than C0 by more than 1 pp; the core positive pattern is retrieval up, whole-count up, and relative10 approximately preserved.
 
 ## Execution
 
@@ -232,6 +246,8 @@ Key aggregate files:
 - cross_user_geometry.csv
 - history_generalization.csv
 - gradient_diagnostics.csv
+- native_prefix_metrics.csv
+- evidence_organization_diagnostics.csv
 - paired_delta_vs_c0.csv
 - manifest.json
 
