@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,10 @@ VAL_RETRIEVAL_TIE = 0.005
 GRADIENT_DIAGNOSTIC_EPOCHS = (10, 20, 30, 50)
 GRADIENT_DIAGNOSTIC_BATCHES = 4
 TASK_BATCH_TRACE_COUNT = 3
+AUX_CLASSES_PER_BATCH = 8
+AUX_USERS_PER_CLASS = 8
+AUX_SAMPLES_PER_USER = 1
+AUX_BATCH_SIZE = AUX_CLASSES_PER_BATCH * AUX_USERS_PER_CLASS * AUX_SAMPLES_PER_USER
 
 
 @dataclass(frozen=True)
@@ -144,8 +149,8 @@ def _load_core(config: Config) -> tuple[Protocol, dict[str, Any], dict[str, np.n
     arrays = load_cache(config.core_results_dir, p, lock)
     if tuple(p.seeds) != SEEDS:
         raise ValueError(f"Core seeds changed: {p.seeds}")
-    if (p.width, p.fs, p.input_channels, p.tau_mem_ms) != (128, 64.0, 30, 22.54):
-        raise ValueError("Core geometry no longer matches Exp14.1 contract")
+    if (p.width, p.fs, p.input_channels, p.tau_mem_ms, p.batch_size) != (128, 64.0, 30, 22.54, 128):
+        raise ValueError("Core geometry or task batch size no longer matches Exp14.1 contract")
     expected = {
         "train": ["user_0", "user_1", "user_11", "user_12", "user_13", "user_14", "user_15",
                   "user_18", "user_19", "user_2", "user_20", "user_5", "user_7", "user_8"],
@@ -183,11 +188,13 @@ def prepare(config: Config) -> dict[str, Any]:
         "ramp_end_epoch": RAMP_END_EPOCH,
         "task_loader": "CoreBenchmark shuffled DataLoader, batch_size=128",
         "aux_loader": {
-            "classes_per_batch": exp14.CLASSES_PER_BATCH,
-            "users_per_class": exp14.USERS_PER_CLASS,
-            "samples_per_user": exp14.SAMPLES_PER_USER,
-            "batch_size": exp14.EXPECTED_BATCH_SIZE,
+            "classes_per_batch": AUX_CLASSES_PER_BATCH,
+            "users_per_class": AUX_USERS_PER_CLASS,
+            "samples_per_class_user": AUX_SAMPLES_PER_USER,
+            "batch_size": AUX_BATCH_SIZE,
+            "sampling_unit": "distinct user first, then one unique segment from that class-user cell",
         },
+        "aux_sampler_validation": _validate_aux_sampler_schedule(arrays, p),
         "selection_tolerances": {
             "native_ba_absolute": VAL_NATIVE_TOL,
             "relative10_ba_absolute": VAL_RELATIVE_TOL,
@@ -213,36 +220,136 @@ def _core_o0_run(seed: int) -> Run:
     return Run("O0", seed, "01_objective", objective="wcce")
 
 
+def _aux_user_pools(arrays: dict[str, np.ndarray]) -> dict[int, dict[str, np.ndarray]]:
+    labels = arrays["train_y"]
+    users = arrays["train_users"]
+    pools: dict[int, dict[str, np.ndarray]] = {}
+    for class_id in np.unique(labels).tolist():
+        user_map: dict[str, np.ndarray] = {}
+        for user in sorted(set(users[labels == class_id].tolist())):
+            indices = np.flatnonzero((labels == class_id) & (users == user))
+            if len(indices) > 0:
+                user_map[str(user)] = indices
+        pools[int(class_id)] = user_map
+    return pools
+
+
+def _aux_sampler_report(arrays: dict[str, np.ndarray]) -> list[dict[str, Any]]:
+    labels = arrays["train_y"]
+    pools = _aux_user_pools(arrays)
+    rows: list[dict[str, Any]] = []
+    for class_id in sorted(pools):
+        user_map = pools[class_id]
+        counts = [len(indices) for indices in user_map.values()]
+        row = {
+            "class_id": int(class_id),
+            "eligible_train_users": int(len(user_map)),
+            "unique_train_samples": int((labels == class_id).sum()),
+            "min_samples_per_eligible_user": int(min(counts)) if counts else 0,
+            "max_samples_per_eligible_user": int(max(counts)) if counts else 0,
+        }
+        if len(user_map) < AUX_USERS_PER_CLASS:
+            raise ValueError(
+                f"class={class_id} has {len(user_map)} train users with >=1 sample; "
+                f"need at least {AUX_USERS_PER_CLASS}"
+            )
+        rows.append(row)
+    return rows
+
+
 def _validated_aux_batches(
     arrays: dict[str, np.ndarray],
     seed: int,
     epoch: int,
+    task_batch_size: int = 128,
 ) -> list[np.ndarray]:
     labels = arrays["train_y"]
     users = arrays["train_users"]
-    for class_id in np.unique(labels):
-        for user in np.unique(users[labels == class_id]):
-            count = int(((labels == class_id) & (users == user)).sum())
-            if count < exp14.SAMPLES_PER_USER:
-                raise ValueError(
-                    f"class={int(class_id)} user={user} has {count} samples; "
-                    f"need at least {exp14.SAMPLES_PER_USER} without replacement"
-                )
-    batches = list(exp14._structured_batches(arrays, seed, epoch))
-    for indices in batches:
+    classes = np.unique(labels)
+    pools = _aux_user_pools(arrays)
+    for class_id in classes.tolist():
+        if len(pools[int(class_id)]) < AUX_USERS_PER_CLASS:
+            raise ValueError(
+                f"class={int(class_id)} has {len(pools[int(class_id)])} train users with >=1 sample; "
+                f"need at least {AUX_USERS_PER_CLASS}"
+            )
+
+    rng = np.random.default_rng(paired_seed(seed, f"exp14_1:aux_sampler:{epoch}"))
+    count = max(1, int(math.ceil(len(labels) / task_batch_size)))
+    batches: list[np.ndarray] = []
+    for _ in range(count):
+        selected_classes = rng.choice(classes, size=AUX_CLASSES_PER_BATCH, replace=False)
+        batch: list[int] = []
+        for class_id in selected_classes.tolist():
+            user_map = pools[int(class_id)]
+            selected_users = rng.choice(
+                np.asarray(sorted(user_map), dtype=object),
+                size=AUX_USERS_PER_CLASS,
+                replace=False,
+            )
+            for user in selected_users.tolist():
+                pool = user_map[str(user)]
+                chosen = int(rng.choice(pool))
+                batch.append(chosen)
+        indices = np.asarray(batch, dtype=np.int64)
+        rng.shuffle(indices)
+
+        if len(indices) != AUX_BATCH_SIZE:
+            raise AssertionError(
+                f"Auxiliary batch has {len(indices)} samples; expected {AUX_BATCH_SIZE}"
+            )
         if len(np.unique(indices)) != len(indices):
             raise AssertionError("Auxiliary batch contains duplicate segment IDs")
         batch_y = labels[indices]
         batch_users = users[indices]
+        unique_classes, class_counts = np.unique(batch_y, return_counts=True)
+        if len(unique_classes) != AUX_CLASSES_PER_BATCH or not np.all(
+            class_counts == AUX_USERS_PER_CLASS
+        ):
+            raise AssertionError("Auxiliary batch class geometry changed")
+        for class_id in unique_classes.tolist():
+            class_users = batch_users[batch_y == class_id]
+            if len(np.unique(class_users)) != AUX_USERS_PER_CLASS:
+                raise AssertionError(
+                    f"class={int(class_id)} does not contain {AUX_USERS_PER_CLASS} distinct users"
+                )
         for row, (label, user) in enumerate(zip(batch_y.tolist(), batch_users.tolist())):
             positive = (batch_y == label) & (batch_users != user)
             positive[row] = False
-            if not positive.any():
+            if int(positive.sum()) != AUX_USERS_PER_CLASS - 1:
                 raise AssertionError(
-                    f"Auxiliary anchor has no same-class different-user positive: "
-                    f"label={label} user={user}"
+                    f"Auxiliary anchor expected {AUX_USERS_PER_CLASS - 1} cross-user positives; "
+                    f"label={label} user={user} got {int(positive.sum())}"
                 )
+        batches.append(indices)
     return batches
+
+
+def _validate_aux_sampler_schedule(
+    arrays: dict[str, np.ndarray],
+    p: Protocol,
+) -> dict[str, Any]:
+    report = _aux_sampler_report(arrays)
+    checked = 0
+    for seed in SEEDS:
+        for epoch in range(0, p.max_epochs + 1):
+            batches = _validated_aux_batches(
+                arrays,
+                seed,
+                epoch,
+                task_batch_size=p.batch_size,
+            )
+            expected_steps = max(1, int(math.ceil(len(arrays["train_y"]) / p.batch_size)))
+            if len(batches) != expected_steps:
+                raise AssertionError(
+                    f"Auxiliary step count mismatch: {len(batches)} vs {expected_steps}"
+                )
+            checked += len(batches)
+    return {
+        "class_report": report,
+        "validated_seed_epoch_pairs": int(len(SEEDS) * (p.max_epochs + 1)),
+        "validated_aux_batches": int(checked),
+    }
 
 
 def _task_batch_trace(arrays: dict[str, np.ndarray], p: Protocol, seed: int) -> list[list[str]]:
@@ -575,24 +682,30 @@ def _gradient_diagnostic(
         task_wcce.append(torch.autograd.grad(wcce, parameter, retain_graph=True)[0])
         task_prefix.append(torch.autograd.grad(prefix, parameter)[0])
 
-    user_ids = _user_ids(arrays)
     phase_grads: list[torch.Tensor] = []
-    aux_batches = _validated_aux_batches(arrays, spec.seed, epoch=0)
-    for indices in aux_batches[:GRADIENT_DIAGNOSTIC_BATCHES]:
-        x = torch.from_numpy(arrays["train_x"][indices])
-        y = torch.from_numpy(arrays["train_y"][indices])
-        lengths = torch.from_numpy(arrays["train_lengths"][indices])
-        users = torch.from_numpy(user_ids[indices])
-        phase = _phase_cu_loss_from_tensors(model, projector, x, y, lengths, users)
-        phase_grads.append(torch.autograd.grad(phase, parameter)[0])
+    if _needs_aux_batch(spec):
+        user_ids = _user_ids(arrays)
+        aux_batches = _validated_aux_batches(
+            arrays,
+            spec.seed,
+            epoch=0,
+            task_batch_size=p.batch_size,
+        )
+        for indices in aux_batches[:GRADIENT_DIAGNOSTIC_BATCHES]:
+            x = torch.from_numpy(arrays["train_x"][indices])
+            y = torch.from_numpy(arrays["train_y"][indices])
+            lengths = torch.from_numpy(arrays["train_lengths"][indices])
+            users = torch.from_numpy(user_ids[indices])
+            phase = _phase_cu_loss_from_tensors(model, projector, x, y, lengths, users)
+            phase_grads.append(torch.autograd.grad(phase, parameter)[0])
 
     g_w = _mean_gradient(task_wcce)
     g_a = _mean_gradient(task_prefix)
-    g_p = _mean_gradient(phase_grads)
+    g_p = _mean_gradient(phase_grads) if phase_grads else None
     wp = _aux_weight(spec.lambda_phase, epoch)
     wa = _aux_weight(spec.lambda_prefix, epoch)
     norm_w = float(g_w.norm())
-    norm_p = float(g_p.norm())
+    norm_p = float(g_p.norm()) if g_p is not None else float("nan")
     norm_a = float(g_a.norm())
     if was_training:
         model.train()
@@ -612,8 +725,8 @@ def _gradient_diagnostic(
         "prefix_grad_norm_l2": norm_a,
         "weighted_phase_over_wcce": (wp * norm_p / norm_w) if norm_w > 0 else float("nan"),
         "weighted_prefix_over_wcce": (wa * norm_a / norm_w) if norm_w > 0 else float("nan"),
-        "cos_phase_prefix": _gradient_cosine(g_p, g_a),
-        "cos_phase_wcce": _gradient_cosine(g_p, g_w),
+        "cos_phase_prefix": _gradient_cosine(g_p, g_a) if g_p is not None else float("nan"),
+        "cos_phase_wcce": _gradient_cosine(g_p, g_w) if g_p is not None else float("nan"),
         "cos_prefix_wcce": _gradient_cosine(g_a, g_w),
     }
 
@@ -683,7 +796,11 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
     for epoch in range(1, p.max_epochs + 1):
         model.train()
         projector.train()
-        aux_batches = _validated_aux_batches(arrays, spec.seed, epoch) if _needs_aux_batch(spec) else None
+        aux_batches = (
+            _validated_aux_batches(arrays, spec.seed, epoch, task_batch_size=p.batch_size)
+            if _needs_aux_batch(spec)
+            else None
+        )
         if aux_batches is not None and len(aux_batches) != len(train_loader):
             raise AssertionError(
                 f"Task/aux step mismatch: {len(train_loader)} vs {len(aux_batches)}"
