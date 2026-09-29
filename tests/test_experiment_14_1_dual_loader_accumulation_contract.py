@@ -20,6 +20,10 @@ def test_run_manifest_and_frozen_constants() -> None:
     assert exp.PREFIX_LAMBDAS == (0.10, 0.25, 0.50)
     assert exp.PREFIX_PHASES == (0.50, 0.75)
     assert exp.PREFIX_WEIGHTS == (0.5, 0.5)
+    assert exp.AUX_CLASSES_PER_BATCH == 8
+    assert exp.AUX_USERS_PER_CLASS == 8
+    assert exp.AUX_SAMPLES_PER_USER == 1
+    assert exp.AUX_BATCH_SIZE == 64
     assert sum(spec.case == "C0_dual_null" for spec in specs) == 3
     assert sum(spec.case == "P_phase_cu" for spec in specs) == 12
     assert sum(spec.case == "A_prefix_wcce" for spec in specs) == 9
@@ -139,12 +143,16 @@ def test_phase1_selection_source_does_not_reference_test_arrays() -> None:
     assert "test_" not in text
 
 
-def _balanced_aux_arrays() -> dict[str, np.ndarray]:
+def _balanced_aux_arrays(
+    users_per_class: int = 10,
+    samples_pattern: tuple[int, ...] = (1, 2, 2, 3),
+) -> dict[str, np.ndarray]:
     labels, users, ids = [], [], []
     for label in range(12):
-        for user_index in range(4):
+        for user_index in range(users_per_class):
             user = f"user_{user_index}"
-            for sample in range(4):
+            count = samples_pattern[(label + user_index) % len(samples_pattern)]
+            for sample in range(count):
                 labels.append(label)
                 users.append(user)
                 ids.append(f"{label}:{user}:{sample}")
@@ -158,31 +166,54 @@ def _balanced_aux_arrays() -> dict[str, np.ndarray]:
     }
 
 
-def test_auxiliary_batches_are_unique_and_have_cross_user_positives() -> None:
+def test_auxiliary_batches_match_user_diverse_geometry() -> None:
     arrays = _balanced_aux_arrays()
-    batches = exp._validated_aux_batches(arrays, seed=11, epoch=1)
+    batches = exp._validated_aux_batches(arrays, seed=11, epoch=1, task_batch_size=128)
     assert batches
     for indices in batches:
+        assert len(indices) == exp.AUX_BATCH_SIZE == 64
         assert len(indices) == len(np.unique(indices))
         y = arrays["train_y"][indices]
         users = arrays["train_users"][indices]
+        unique_classes, counts = np.unique(y, return_counts=True)
+        assert len(unique_classes) == exp.AUX_CLASSES_PER_BATCH
+        assert np.all(counts == exp.AUX_USERS_PER_CLASS)
+        for label in unique_classes:
+            class_users = users[y == label]
+            assert len(np.unique(class_users)) == exp.AUX_USERS_PER_CLASS
         for i in range(len(indices)):
-            assert np.any((y == y[i]) & (users != users[i]))
+            positive = (y == y[i]) & (users != users[i])
+            assert int(positive.sum()) == exp.AUX_USERS_PER_CLASS - 1
 
 
-def test_auxiliary_batches_reject_replacement_requirement() -> None:
-    arrays = _balanced_aux_arrays()
-    keep = np.ones(len(arrays["train_y"]), dtype=bool)
-    target = np.flatnonzero((arrays["train_y"] == 0) & (arrays["train_users"] == "user_0"))
-    keep[target[-1]] = False
-    reduced = {key: value[keep] for key, value in arrays.items()}
+def test_auxiliary_sampler_allows_one_sample_class_user_cells() -> None:
+    arrays = _balanced_aux_arrays(samples_pattern=(1,))
+    batches = exp._validated_aux_batches(arrays, seed=23, epoch=5, task_batch_size=128)
+    assert batches
+    assert all(len(batch) == 64 for batch in batches)
+
+
+def test_auxiliary_sampler_ignores_zero_sample_user_for_that_class() -> None:
+    arrays = _balanced_aux_arrays(users_per_class=9, samples_pattern=(1,))
+    mask = ~((arrays["train_y"] == 0) & (arrays["train_users"] == "user_0"))
+    reduced = {key: value[mask] for key, value in arrays.items()}
+    report = exp._aux_sampler_report(reduced)
+    class0 = next(row for row in report if row["class_id"] == 0)
+    assert class0["eligible_train_users"] == 8
+    batches = exp._validated_aux_batches(reduced, seed=37, epoch=2, task_batch_size=128)
+    assert batches
+
+
+def test_auxiliary_sampler_rejects_class_with_fewer_than_eight_users() -> None:
+    arrays = _balanced_aux_arrays(users_per_class=8, samples_pattern=(1,))
+    mask = ~((arrays["train_y"] == 0) & (arrays["train_users"] == "user_0"))
+    reduced = {key: value[mask] for key, value in arrays.items()}
     try:
-        exp._validated_aux_batches(reduced, seed=11, epoch=1)
+        exp._validated_aux_batches(reduced, seed=11, epoch=1, task_batch_size=128)
     except ValueError as error:
-        assert "without replacement" in str(error)
+        assert "need at least 8" in str(error)
     else:
-        raise AssertionError("Expected undersized class-user cell to fail")
-
+        raise AssertionError("Expected class with <8 eligible users to fail")
 
 def test_c0_bypasses_auxiliary_batches() -> None:
     assert exp._needs_aux_batch(exp.LossSpec("C0_dual_null", 11)) is False
