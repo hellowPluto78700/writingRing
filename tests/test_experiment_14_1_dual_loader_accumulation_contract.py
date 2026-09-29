@@ -33,7 +33,11 @@ def test_run_manifest_and_frozen_constants() -> None:
 
 
 def test_phase2_and_final_eval_specs_are_preregistered() -> None:
-    selection = {"phase": {"lambda": 0.03}, "prefix": {"lambda": 0.25}}
+    selection = {
+        "phase": {"status": "selected", "lambda": 0.03},
+        "prefix": {"status": "selected", "lambda": 0.25},
+        "combined": {"status": "enabled", "reason": None},
+    }
     phase2 = exp.phase2_specs(selection)
     assert len(phase2) == 12
     by_case = {case: [spec for spec in phase2 if spec.case == case] for case in {
@@ -176,8 +180,45 @@ def test_validation_selection_uses_constraints_and_smaller_phase_tie(tmp_path) -
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "validation_summary.json").write_text(json.dumps(row))
     selection = exp.select_phase1(config)
+    assert selection["phase"]["status"] == "selected"
     assert selection["phase"]["lambda"] == 0.03
+    assert selection["prefix"]["status"] == "selected"
     assert selection["prefix"]["lambda"] == 0.25
+    assert selection["combined"]["status"] == "enabled"
+
+
+def test_no_eligible_prefix_is_negative_result_not_exception(tmp_path) -> None:
+    config = exp.Config(tmp_path, tmp_path / "results", tmp_path / "core")
+    for spec in exp.phase1_specs():
+        row = _summary(spec.case, spec.seed, spec.lambda_phase, spec.lambda_prefix)
+        if spec.case == "P_phase_cu":
+            row["native_val_ba"] = 0.595
+            row["val_retrieval_l2_spike"] = {
+                0.01: 0.61,
+                0.03: 0.60,
+                0.06: 0.58,
+                0.10: 0.56,
+            }[spec.lambda_phase]
+        if spec.case == "A_prefix_wcce":
+            row["native_val_ba"] = 0.575
+            row["val_relative10_no_bias_ba"] = 0.635
+            row["val_wholecount_no_bias_ba"] = 0.56
+        directory = config.results_dir / "runs" / spec.key
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "validation_summary.json").write_text(json.dumps(row))
+
+    selection = exp.select_phase1(config)
+    assert selection["phase"]["status"] == "selected"
+    assert selection["prefix"]["status"] == "no_eligible_candidate"
+    assert selection["prefix"]["lambda"] is None
+    assert selection["combined"]["status"] == "not_applicable"
+    assert exp.phase2_specs(selection) == []
+
+    final = exp.final_eval_specs(selection)
+    assert len(final) == 6
+    assert {spec.case for spec in final} == {"C0_dual_null", "P_phase_cu"}
+    assert exp._spec_at_or_skip(final, 5, stage="final_eval", slot_count=21) is not None
+    assert exp._spec_at_or_skip(final, 6, stage="final_eval", slot_count=21) is None
 
 
 def test_phase1_selection_source_does_not_reference_test_arrays() -> None:
