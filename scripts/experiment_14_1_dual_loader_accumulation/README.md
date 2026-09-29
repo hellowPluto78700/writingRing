@@ -122,6 +122,8 @@ Phase 2 uses validation-selected lambdas:
 
 These four are preregistered interaction/sensitivity cases. Test performance never selects among them.
 
+A family with no validation-eligible candidate is a valid negative result, not a pipeline error. Its preregistered retention threshold is never relaxed after observing validation results. If either Phase-CU or Prefix-WCCE has no eligible candidate, combined cases are marked `not_applicable` and skipped. Final test evaluation contains only C0 plus families with a validation-selected candidate. Fixed Slurm array slots that have no mapped preregistered case exit successfully with `status=SKIPPED`.
+
 ## Prepare-time sampler feasibility
 
 Before submitting training arrays, `prepare` validates the complete auxiliary sampling schedule across all benchmark seeds and all possible training epochs. For every class it records the number of train users with at least one segment, total unique training samples, and the minimum/maximum samples per eligible user. The experiment hard-fails before the phase-1 array if any class has fewer than 8 eligible train users.
