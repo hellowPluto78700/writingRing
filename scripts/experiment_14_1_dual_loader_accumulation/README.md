@@ -113,14 +113,14 @@ Phase 1:
 - P_phase_cu: phase-CU only, lambda_phase in {0.01, 0.03, 0.06, 0.10}.
 - A_prefix_wcce: Prefix-WCCE only, lambda_prefix in {0.10, 0.25, 0.50}.
 
-Phase 2 uses validation-selected lambdas:
+Phase 2 uses validation-selected lambdas only when both families have an eligible candidate:
 
 - J0_combined: full phase + full prefix;
 - Jp_half_phase: half phase + full prefix;
 - Ja_half_prefix: full phase + half prefix;
 - Jb_half_both: half phase + half prefix.
 
-These four are preregistered interaction/sensitivity cases. Test performance never selects among them.
+These four are preregistered interaction/sensitivity cases and are enabled only if both the phase and prefix families have validation-eligible selected candidates. If either family has no eligible candidate, that family is recorded as a valid negative result and combined cases are marked `not_applicable`; thresholds are never relaxed and no ineligible lambda is forced. Test performance never selects among cases.
 
 A family with no validation-eligible candidate is a valid negative result, not a pipeline error. Its preregistered retention threshold is never relaxed after observing validation results. If either Phase-CU or Prefix-WCCE has no eligible candidate, combined cases are marked `not_applicable` and skipped. Final test evaluation contains only C0 plus families with a validation-selected candidate. Fixed Slurm array slots that have no mapped preregistered case exit successfully with `status=SKIPPED`.
 
@@ -238,7 +238,7 @@ prepare
 
 Each task uses one CPU core. Array concurrency defaults to 20 and is capped at 50.
 
-Final-eval contains only C0, selected P, selected A, and the four combined cases across three seeds. Full timestep trace archives are not persisted.
+Final-eval dynamically contains only preregistered cases whose family was selected on validation. With a missing prefix candidate, for example, only C0 and selected P are evaluated on test. The fixed Slurm array keeps its original slot count; unused slots report `SKIPPED` and exit successfully. Full timestep trace archives are not persisted.
 
 ## Main outputs
 
