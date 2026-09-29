@@ -20,8 +20,9 @@ Test whether the cross-user phase alignment benefit from Exp14 can be preserved 
 - Hyperparameter selection uses training/validation information only. Test arrays must not be read by phase-1 selection code.
 - Phase lambda selection first enforces native validation BA >= C0 mean minus 1 pp, then maximizes validation L2 spike cross-user retrieval; ties within 0.5 pp choose the smaller lambda.
 - Prefix lambda selection enforces native validation BA >= C0 mean minus 1 pp and validation relative10 no-bias BA >= C0 mean minus 1 pp, then maximizes validation L2 spike whole-count no-bias BA; ties choose smaller collapse gap and then smaller lambda.
-- Combined cases use independently selected lambdas: full/full, half-phase/full-prefix, full-phase/half-prefix, and half/half. These are preregistered sensitivity cases; test metrics never select among them.
-- Final test evaluation is performed only after hyperparameter selection, on C0, selected phase-only, selected prefix-only, and all four combined cases.
+- A loss family with no validation-eligible candidate is recorded as `status=no_eligible_candidate`; its threshold is never relaxed and no candidate is forced.
+- Combined cases use independently selected lambdas only when both families have `status=selected`: full/full, half-phase/full-prefix, full-phase/half-prefix, and half/half. Otherwise combined is `not_applicable`. These are preregistered sensitivity cases; test metrics never select among them.
+- Final test evaluation is performed only after hyperparameter selection: always C0, plus each family with a validation-selected candidate, plus combined cases only when both families are selected. Fixed array slots with no mapped case must return `SKIPPED` with exit code 0.
 - Do not persist full timestep trace archives; retain checkpoints so traces can be regenerated.
 
 ## Diagnostics
@@ -41,8 +42,8 @@ Test whether the cross-user phase alignment benefit from Exp14 can be preserved 
 - Prepare job freezes/validates the CoreBenchmark dependency, validates the complete auxiliary sampler schedule across all seeds and epochs, writes a per-class sampler-capacity report, and writes the Exp14.1 protocol manifest.
 - Phase-1 array: 24 one-CPU tasks = 3 C0 + 12 phase-only + 9 prefix-only runs.
 - Selection job aggregates phase-1 validation artifacts only and writes selected lambdas.
-- Phase-2 array: 12 one-CPU tasks = 4 combined cases x 3 seeds.
-- Final-evaluation array: 21 one-CPU tasks = 3 C0 + 3 selected phase-only + 3 selected prefix-only + 12 combined checkpoints. It is created only after selection and phase-2 training, and performs each selected checkpoint's test/probe/diagnostic evaluation without retraining.
+- Phase-2 array reserves 12 one-CPU slots = 4 combined cases x 3 seeds. If combined is not applicable, all reserved slots return `SKIPPED` successfully.
+- Final-evaluation array reserves 21 one-CPU slots = 3 C0 + up to 3 selected phase-only + up to 3 selected prefix-only + up to 12 combined checkpoints. It is created only after selection; slots beyond the dynamically selected case list return `SKIPPED` successfully.
 - Finalizer aggregates existing final-evaluation artifacts only; it never retrains or evaluates models.
 - Slurm array concurrency is capped at 50 and every compute job initializes Conda locally with BLAS/OpenMP threads set to one.
 
