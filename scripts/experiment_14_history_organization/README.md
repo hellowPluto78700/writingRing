@@ -60,6 +60,8 @@ projection head:
 
 The projection head is discarded at inference.
 
+Full per-timestep `traces.npz` files are intentionally not persisted. All probes and diagnostics consume traces in memory during evaluation, while `checkpoint.pt` is retained so traces can be regenerated later if needed.
+
 ## Cases
 
 C0: matched WCCE baseline. No auxiliary loss.

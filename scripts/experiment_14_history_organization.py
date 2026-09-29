@@ -21,7 +21,7 @@ from core_benchmark_v1.diagnostics import run_diagnostics
 from core_benchmark_v1.model import BenchmarkNet, mean_logits, valid_mask
 from core_benchmark_v1.probes import run_probes
 from core_benchmark_v1.protocol import Protocol, Run, digest, paired_seed
-from core_benchmark_v1.storage import file_hash, save_json, save_npz, save_torch
+from core_benchmark_v1.storage import file_hash, save_json, save_torch
 from core_benchmark_v1.training import cpu_state, extract, metrics
 
 
@@ -600,7 +600,6 @@ def evaluate_one(config: Config, spec: LossSpec, model: BenchmarkNet | None = No
     model = model or _load_model(config, spec)
     model.eval()
     traces, native = extract(model, arrays, p, _run(spec))
-    save_npz(directory / "traces.npz", traces)
     save_json(directory / "native.json", native)
     run_probes(directory, traces, arrays, _run(spec), p)
     diagnostic_protocol = Protocol.from_dict({
