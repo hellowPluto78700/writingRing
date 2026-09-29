@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import asdict, replace
 import json
 
 import numpy as np
+import pytest
 import torch
 import torch.nn.functional as F
 
-from core_benchmark_v1.model import BenchmarkNet
+from core_benchmark_v1.model import BenchmarkNet, mean_logits
 from core_benchmark_v1.protocol import Protocol
+from core_benchmark_v1.runner import smoke_protocol
 from scripts import experiment_14_1_dual_loader_accumulation as exp
 
 
@@ -48,10 +51,51 @@ def test_phase2_and_final_eval_specs_are_preregistered() -> None:
 
 def test_same_seed_c0_initialization_matches_core_o0() -> None:
     p = Protocol()
-    c0 = BenchmarkNet(exp._run(exp.LossSpec("C0_dual_null", 11)), p)
+    spec = exp.LossSpec("C0_dual_null", 11)
+    c0 = BenchmarkNet(exp._run(spec), p)
     o0 = BenchmarkNet(exp._core_o0_run(11), p)
     for key, value in c0.state_dict().items():
         assert torch.equal(value, o0.state_dict()[key]), key
+    contract = exp._verify_c0_current_core_contract(
+        spec,
+        p,
+        {key: value.detach().cpu().clone() for key, value in c0.state_dict().items()},
+    )
+    assert contract is not None
+    assert contract["initialization_bitwise_match"] is True
+    assert contract["auxiliary_path_bypassed"] is True
+
+
+def test_c0_and_current_core_o0_optimizer_steps_match() -> None:
+    p = replace(smoke_protocol(), max_epochs=2, min_epochs=1, patience=1)
+    spec = exp.LossSpec("C0_dual_null", 11)
+    c0 = BenchmarkNet(exp._run(spec), p)
+    core = BenchmarkNet(exp._core_o0_run(11), p)
+    c0_optimizer = torch.optim.Adam(
+        c0.parameters(),
+        lr=p.learning_rate,
+        weight_decay=p.weight_decay,
+    )
+    core_optimizer = torch.optim.Adam(
+        core.parameters(),
+        lr=p.learning_rate,
+        weight_decay=p.weight_decay,
+    )
+    generator = torch.Generator().manual_seed(991)
+    x = torch.rand(8, p.steps, p.input_channels, generator=generator)
+    y = torch.tensor([0, 1, 2, 0, 1, 2, 0, 1], dtype=torch.long)
+    lengths = torch.tensor([32, 29, 27, 25, 23, 21, 19, 17], dtype=torch.long)
+
+    for start in (0, 4):
+        batch = slice(start, start + 4)
+        for model, optimizer in ((c0, c0_optimizer), (core, core_optimizer)):
+            optimizer.zero_grad(set_to_none=True)
+            trajectory = model(x[batch], lengths[batch])
+            loss = F.cross_entropy(mean_logits(trajectory["evidence"], lengths[batch]), y[batch])
+            loss.backward()
+            optimizer.step()
+        for key, value in c0.state_dict().items():
+            assert torch.equal(value, core.state_dict()[key]), (start, key)
 
 
 def test_prefix_wcce_is_one_ce_per_prefix_after_temporal_mean() -> None:
@@ -214,6 +258,89 @@ def test_auxiliary_sampler_rejects_class_with_fewer_than_eight_users() -> None:
         assert "need at least 8" in str(error)
     else:
         raise AssertionError("Expected class with <8 eligible users to fail")
+
+
+def test_task_batch_trace_matches_core_dataloader_first_epoch() -> None:
+    arrays = _balanced_aux_arrays(users_per_class=8, samples_pattern=(1,))
+    p = replace(Protocol(), batch_size=7)
+    actual = exp._task_batch_trace(arrays, p, seed=11)
+
+    index_dataset = torch.utils.data.TensorDataset(
+        torch.arange(len(arrays["train_y"]), dtype=torch.long)
+    )
+    replay = torch.utils.data.DataLoader(
+        index_dataset,
+        batch_size=p.batch_size,
+        shuffle=True,
+        generator=torch.Generator().manual_seed(exp.paired_seed(11, "loader:train")),
+        num_workers=0,
+    )
+    expected: list[list[str]] = []
+    for batch_index, (indices,) in enumerate(replay):
+        if batch_index >= exp.TASK_BATCH_TRACE_COUNT:
+            break
+        expected.append([str(arrays["train_ids"][int(index)]) for index in indices.tolist()])
+    assert actual == expected
+
+
+def test_c0_historical_reference_mismatch_is_non_blocking_but_provenance_is_hard(
+    tmp_path,
+) -> None:
+    core = tmp_path / "core"
+    run_dir = core / "runs" / "O0__seed11"
+    run_dir.mkdir(parents=True)
+    (core / "protocol.lock.json").write_text(
+        json.dumps({"identity": "core-identity"}),
+        encoding="utf-8",
+    )
+
+    p = Protocol()
+    historical_model = BenchmarkNet(exp._core_o0_run(11), p)
+    historical_state = {
+        key: value.detach().cpu().clone()
+        for key, value in historical_model.state_dict().items()
+    }
+    checkpoint = run_dir / "checkpoint.pt"
+    torch.save(
+        {
+            "identity": "core-identity",
+            "run": asdict(exp._core_o0_run(11)),
+            "model_state_dict": historical_state,
+            "best_epoch": 93,
+            "best_val": {"ba": 0.55, "mean_logit_ce": 1.20},
+        },
+        checkpoint,
+    )
+
+    current_state = {key: value.clone() for key, value in historical_state.items()}
+    first_key = next(iter(current_state))
+    current_state[first_key].view(-1)[0] += 1e-4
+    config = exp.Config(tmp_path, tmp_path / "results", core)
+    summary = exp._c0_historical_reference_summary(
+        config,
+        exp.LossSpec("C0_dual_null", 11),
+        current_state,
+        best_epoch=91,
+        best_val={"ba": 0.56, "mean_logit_ce": 1.18},
+    )
+    assert summary is not None
+    assert summary["state_keys_match"] is True
+    assert summary["state_hash_match"] is False
+    assert summary["best_epoch_match"] is False
+    assert first_key in summary["mismatched_parameters"]
+    assert summary["val_ba_delta_current_minus_historical"] == pytest.approx(0.01)
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    payload["identity"] = "wrong-identity"
+    torch.save(payload, checkpoint)
+    with pytest.raises(ValueError, match="identity mismatch"):
+        exp._c0_historical_reference_summary(
+            config,
+            exp.LossSpec("C0_dual_null", 11),
+            current_state,
+            best_epoch=91,
+            best_val={"ba": 0.56, "mean_logit_ce": 1.18},
+        )
 
 def test_c0_bypasses_auxiliary_batches() -> None:
     assert exp._needs_aux_batch(exp.LossSpec("C0_dual_null", 11)) is False

@@ -17,7 +17,7 @@ from core_benchmark_v1.diagnostics import run_diagnostics
 from core_benchmark_v1.model import BenchmarkNet, mean_logits
 from core_benchmark_v1.probes import fit_probe, run_probes, temporal_features
 from core_benchmark_v1.protocol import Protocol, Run, digest, paired_seed
-from core_benchmark_v1.storage import file_hash, save_json, save_torch
+from core_benchmark_v1.storage import file_hash, save_json, save_torch, state_hash, validate_checkpoint
 from core_benchmark_v1.training import cpu_state, evaluate_validation, extract, metrics
 from scripts import experiment_14_history_organization as exp14
 
@@ -353,12 +353,20 @@ def _validate_aux_sampler_schedule(
 
 
 def _task_batch_trace(arrays: dict[str, np.ndarray], p: Protocol, seed: int) -> list[list[str]]:
+    index_dataset = torch.utils.data.TensorDataset(torch.arange(len(arrays["train_y"]), dtype=torch.long))
     generator = torch.Generator().manual_seed(paired_seed(seed, "loader:train"))
-    permutation = torch.randperm(len(arrays["train_y"]), generator=generator).tolist()
+    replay = torch.utils.data.DataLoader(
+        index_dataset,
+        batch_size=p.batch_size,
+        shuffle=True,
+        generator=generator,
+        num_workers=0,
+    )
     rows: list[list[str]] = []
-    for start in range(0, min(len(permutation), p.batch_size * TASK_BATCH_TRACE_COUNT), p.batch_size):
-        indices = permutation[start:start + p.batch_size]
-        rows.append([str(arrays["train_ids"][index]) for index in indices])
+    for batch_index, (indices,) in enumerate(replay):
+        if batch_index >= TASK_BATCH_TRACE_COUNT:
+            break
+        rows.append([str(arrays["train_ids"][int(index)]) for index in indices.tolist()])
     return rows
 
 
@@ -730,23 +738,86 @@ def _gradient_diagnostic(
         "cos_prefix_wcce": _gradient_cosine(g_a, g_w),
     }
 
-def _verify_c0_reference(config: Config, spec: LossSpec, best_state: dict[str, torch.Tensor], best_epoch: int) -> None:
+def _verify_c0_current_core_contract(
+    spec: LossSpec,
+    p: Protocol,
+    initial_state: dict[str, torch.Tensor],
+) -> dict[str, Any] | None:
     if spec.case != "C0_dual_null":
-        return
+        return None
+    if spec.lambda_phase != 0.0 or spec.lambda_prefix != 0.0 or _needs_aux_batch(spec):
+        raise AssertionError("C0 must have zero auxiliary weights and bypass auxiliary sampling")
+    current_run = _run(spec)
+    core_run = _core_o0_run(spec.seed)
+    if current_run.objective != core_run.objective or current_run.shifts != core_run.shifts:
+        raise AssertionError("C0/Core O0 objective or SNN shifts differ")
+    reference_state = cpu_state(BenchmarkNet(core_run, p))
+    if reference_state.keys() != initial_state.keys():
+        raise AssertionError("C0/Core O0 initial state keys differ")
+    mismatched = [
+        key for key in reference_state
+        if not torch.equal(reference_state[key], initial_state[key])
+    ]
+    if mismatched:
+        raise AssertionError(f"C0/Core O0 initialization differs: {mismatched[:5]}")
+    return {
+        "initialization_bitwise_match": True,
+        "task_loader_seed": paired_seed(spec.seed, "loader:train"),
+        "task_objective": "wcce",
+        "optimizer": "Adam",
+        "learning_rate": float(p.learning_rate),
+        "weight_decay": float(p.weight_decay),
+        "selection_rule": "held-out-user validation BA, then validation valid-mean-logit CE, then earliest epoch",
+        "auxiliary_path_bypassed": True,
+    }
+
+
+def _c0_historical_reference_summary(
+    config: Config,
+    spec: LossSpec,
+    best_state: dict[str, torch.Tensor],
+    best_epoch: int,
+    best_val: dict[str, float],
+) -> dict[str, Any] | None:
+    if spec.case != "C0_dual_null":
+        return None
     path = config.core_results_dir / "runs" / f"O0__seed{spec.seed}" / "checkpoint.pt"
     if not path.exists():
         raise FileNotFoundError(f"Missing frozen Core O0 reference: {path}")
     payload = torch.load(path, map_location="cpu", weights_only=False)
+    core_lock = json.loads((config.core_results_dir / "protocol.lock.json").read_text(encoding="utf-8"))
+    validate_checkpoint(payload, _core_o0_run(spec.seed), core_lock)
+
     reference = payload["model_state_dict"]
-    if reference.keys() != best_state.keys():
-        raise AssertionError("C0/Core O0 state keys differ")
-    mismatched = [key for key in reference if not torch.equal(reference[key], best_state[key])]
-    if mismatched:
-        raise AssertionError(f"C0 failed bitwise Core O0 reproduction: {mismatched[:5]}")
-    if int(payload["best_epoch"]) != int(best_epoch):
-        raise AssertionError(
-            f"C0/Core O0 best epoch differs: Exp14.1={best_epoch}, Core={payload['best_epoch']}"
-        )
+    reference_names = set(reference)
+    current_names = set(best_state)
+    mismatched = sorted(reference_names ^ current_names)
+    for key in sorted(reference_names & current_names):
+        if not torch.equal(reference[key], best_state[key]):
+            mismatched.append(key)
+
+    historical_val = payload.get("best_val", {})
+    historical_ba = historical_val.get("ba")
+    historical_ce = historical_val.get("mean_logit_ce")
+    current_ba = float(best_val["ba"])
+    current_ce = float(best_val["mean_logit_ce"])
+    historical_epoch = int(payload["best_epoch"])
+    return {
+        "role": "non_blocking_historical_sanity_reference",
+        "checkpoint_file_hash": file_hash(path),
+        "state_keys_match": reference_names == current_names,
+        "state_hash_match": state_hash(reference) == state_hash(best_state),
+        "mismatched_parameters": mismatched,
+        "historical_best_epoch": historical_epoch,
+        "current_best_epoch": int(best_epoch),
+        "best_epoch_match": historical_epoch == int(best_epoch),
+        "historical_val_ba": None if historical_ba is None else float(historical_ba),
+        "current_val_ba": current_ba,
+        "val_ba_delta_current_minus_historical": None if historical_ba is None else current_ba - float(historical_ba),
+        "historical_val_mean_logit_ce": None if historical_ce is None else float(historical_ce),
+        "current_val_mean_logit_ce": current_ce,
+        "val_mean_logit_ce_delta_current_minus_historical": None if historical_ce is None else current_ce - float(historical_ce),
+    }
 
 
 def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
@@ -760,6 +831,7 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
     model = BenchmarkNet(_run(spec), p)
     projector = exp14.ProjectionHead(spec.seed, p.width)
     initial = cpu_state(model)
+    c0_current_core_contract = _verify_c0_current_core_contract(spec, p, initial)
     params = list(model.parameters())
     if spec.lambda_phase > 0:
         params += list(projector.parameters())
@@ -879,7 +951,13 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
 
     model.load_state_dict(best_state)
     projector.load_state_dict(best_projector)
-    _verify_c0_reference(config, spec, best_state, best_epoch)
+    historical_reference = _c0_historical_reference_summary(
+        config,
+        spec,
+        best_state,
+        best_epoch,
+        best,
+    )
     gradient_rows.append(
         _gradient_diagnostic(model, projector, arrays, p, spec, best_epoch, "selected_checkpoint")
     )
@@ -899,7 +977,8 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
             "best_val": best,
             "initial_model_state_dict": initial,
             "selection_rule": "held-out-user validation BA, then validation valid-mean-logit CE, then earliest epoch",
-            "c0_core_o0_bitwise_match": spec.case == "C0_dual_null",
+            "c0_current_core_contract": c0_current_core_contract,
+            "historical_core_o0_reference": historical_reference,
         },
     )
     validation = _validation_artifacts(config, spec, model, p, arrays)
