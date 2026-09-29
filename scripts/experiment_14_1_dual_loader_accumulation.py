@@ -15,7 +15,7 @@ from core_benchmark_v1.data import load_cache, loader
 from core_benchmark_v1.diagnostics import run_diagnostics
 from core_benchmark_v1.model import BenchmarkNet, mean_logits
 from core_benchmark_v1.probes import fit_probe, run_probes, temporal_features
-from core_benchmark_v1.protocol import Protocol, Run, digest
+from core_benchmark_v1.protocol import Protocol, Run, digest, paired_seed
 from core_benchmark_v1.storage import file_hash, save_json, save_torch
 from core_benchmark_v1.training import cpu_state, evaluate_validation, extract, metrics
 from scripts import experiment_14_history_organization as exp14
@@ -30,13 +30,15 @@ PHASE_LAMBDAS = (0.01, 0.03, 0.06, 0.10)
 PREFIX_LAMBDAS = (0.10, 0.25, 0.50)
 PHASES = (0.25, 0.50, 0.75, 1.00)
 PREFIX_PHASES = (0.50, 0.75)
-PREFIX_WEIGHTS = (1.0 / 3.0, 2.0 / 3.0)
+PREFIX_WEIGHTS = (0.5, 0.5)
 WARMUP_EPOCHS = 10
 RAMP_END_EPOCH = 30
 VAL_NATIVE_TOL = 0.01
 VAL_RELATIVE_TOL = 0.01
 VAL_RETRIEVAL_TIE = 0.005
 GRADIENT_DIAGNOSTIC_EPOCHS = (10, 20, 30, 50)
+GRADIENT_DIAGNOSTIC_BATCHES = 4
+TASK_BATCH_TRACE_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -175,6 +177,8 @@ def prepare(config: Config) -> dict[str, Any]:
         "phase_points": list(PHASES),
         "prefix_phases": list(PREFIX_PHASES),
         "prefix_weights": list(PREFIX_WEIGHTS),
+        "gradient_diagnostic_batches": GRADIENT_DIAGNOSTIC_BATCHES,
+        "task_batch_trace_count": TASK_BATCH_TRACE_COUNT,
         "warmup_epochs": WARMUP_EPOCHS,
         "ramp_end_epoch": RAMP_END_EPOCH,
         "task_loader": "CoreBenchmark shuffled DataLoader, batch_size=128",
@@ -207,6 +211,52 @@ def _run(spec: LossSpec) -> Run:
 
 def _core_o0_run(seed: int) -> Run:
     return Run("O0", seed, "01_objective", objective="wcce")
+
+
+def _validated_aux_batches(
+    arrays: dict[str, np.ndarray],
+    seed: int,
+    epoch: int,
+) -> list[np.ndarray]:
+    labels = arrays["train_y"]
+    users = arrays["train_users"]
+    for class_id in np.unique(labels):
+        for user in np.unique(users[labels == class_id]):
+            count = int(((labels == class_id) & (users == user)).sum())
+            if count < exp14.SAMPLES_PER_USER:
+                raise ValueError(
+                    f"class={int(class_id)} user={user} has {count} samples; "
+                    f"need at least {exp14.SAMPLES_PER_USER} without replacement"
+                )
+    batches = list(exp14._structured_batches(arrays, seed, epoch))
+    for indices in batches:
+        if len(np.unique(indices)) != len(indices):
+            raise AssertionError("Auxiliary batch contains duplicate segment IDs")
+        batch_y = labels[indices]
+        batch_users = users[indices]
+        for row, (label, user) in enumerate(zip(batch_y.tolist(), batch_users.tolist())):
+            positive = (batch_y == label) & (batch_users != user)
+            positive[row] = False
+            if not positive.any():
+                raise AssertionError(
+                    f"Auxiliary anchor has no same-class different-user positive: "
+                    f"label={label} user={user}"
+                )
+    return batches
+
+
+def _task_batch_trace(arrays: dict[str, np.ndarray], p: Protocol, seed: int) -> list[list[str]]:
+    generator = torch.Generator().manual_seed(paired_seed(seed, "loader:train"))
+    permutation = torch.randperm(len(arrays["train_y"]), generator=generator).tolist()
+    rows: list[list[str]] = []
+    for start in range(0, min(len(permutation), p.batch_size * TASK_BATCH_TRACE_COUNT), p.batch_size):
+        indices = permutation[start:start + p.batch_size]
+        rows.append([str(arrays["train_ids"][index]) for index in indices])
+    return rows
+
+
+def _needs_aux_batch(spec: LossSpec) -> bool:
+    return spec.lambda_phase > 0.0
 
 
 def _aux_weight(target: float, epoch: int) -> float:
@@ -292,18 +342,101 @@ def _extract_splits(
     traces: dict[str, np.ndarray] = {}
     with torch.no_grad():
         for split in splits:
-            chunks: dict[str, list[np.ndarray]] = {}
+            chunks: dict[str, list[np.ndarray]] = {"evidence": []}
             for layer in ("L1", "L2"):
                 for state in ("spike", "pre_reset"):
                     chunks[f"{layer}__{state}"] = []
             for x, _, lengths in loader(arrays, split, p, seed):
                 trajectory = model(x, lengths)
+                chunks["evidence"].append(trajectory["evidence"].numpy().astype(np.float32))
                 for li, layer in enumerate(("L1", "L2")):
                     chunks[f"{layer}__spike"].append(trajectory["spike"][li].numpy().astype(np.uint8))
                     chunks[f"{layer}__pre_reset"].append(trajectory["pre_reset"][li].numpy().astype(np.float32))
             for key, values in chunks.items():
                 traces[f"{split}__{key}"] = np.concatenate(values, axis=0)
     return traces
+
+
+def _prefix_evidence_vectors_numpy(
+    evidence: np.ndarray,
+    lengths: np.ndarray,
+    phase: float,
+) -> np.ndarray:
+    count = np.ceil(lengths.astype(np.float64) * phase).astype(np.int64)
+    count = np.maximum(count, 1)
+    cumulative = np.cumsum(evidence, axis=1)
+    vectors = cumulative[np.arange(len(lengths)), count - 1]
+    return vectors / count[:, None]
+
+
+def _native_prefix_diagnostics(
+    evidence: np.ndarray,
+    lengths: np.ndarray,
+    y: np.ndarray,
+    split: str,
+) -> dict[str, Any]:
+    phases = (0.50, 0.75, 1.00)
+    vectors = {phase: _prefix_evidence_vectors_numpy(evidence, lengths, phase) for phase in phases}
+    rows: list[dict[str, Any]] = []
+    margins: dict[float, np.ndarray] = {}
+    for phase in phases:
+        vector = vectors[phase]
+        prediction = vector.argmax(axis=1)
+        correct = vector[np.arange(len(y)), y]
+        masked = vector.copy()
+        masked[np.arange(len(y)), y] = -np.inf
+        margin = correct - masked.max(axis=1)
+        margins[phase] = margin
+        rows.append({
+            "split": split,
+            "phase": phase,
+            **metrics(y, prediction),
+            "mean_margin": float(np.mean(margin)),
+            "median_margin": float(np.median(margin)),
+        })
+
+    def cosine(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        denom = np.linalg.norm(left, axis=1) * np.linalg.norm(right, axis=1)
+        return np.divide(
+            np.sum(left * right, axis=1),
+            np.maximum(denom, 1e-12),
+            out=np.zeros(len(left), dtype=np.float64),
+            where=denom > 1e-12,
+        )
+
+    # True-class support relative to the mean competing logit is additive in time,
+    # so segment signs and cancellation can be interpreted without changing competitors.
+    class_count = evidence.shape[2]
+    true = np.take_along_axis(evidence, y[:, None, None], axis=2).squeeze(2)
+    other_mean = (evidence.sum(axis=2) - true) / max(class_count - 1, 1)
+    support = true - other_mean
+    segment_support = np.zeros((len(y), 3), dtype=np.float64)
+    for index, length in enumerate(lengths.astype(int).tolist()):
+        b50 = max(1, int(np.ceil(0.50 * length)))
+        b75 = max(b50, int(np.ceil(0.75 * length)))
+        segment_support[index, 0] = support[index, :b50].sum()
+        segment_support[index, 1] = support[index, b50:b75].sum()
+        segment_support[index, 2] = support[index, b75:length].sum()
+    adjacent_product = segment_support[:, :-1] * segment_support[:, 1:]
+    nonzero_adjacent = adjacent_product != 0
+    reversal = adjacent_product < 0
+    reversal_rate = float(reversal[nonzero_adjacent].mean()) if nonzero_adjacent.any() else 0.0
+    cancellation = 1.0 - (
+        np.abs(segment_support.sum(axis=1))
+        / np.maximum(np.abs(segment_support).sum(axis=1), 1e-12)
+    )
+    summary = {
+        "split": split,
+        "cosine_50_75_mean": float(np.mean(cosine(vectors[0.50], vectors[0.75]))),
+        "cosine_75_100_mean": float(np.mean(cosine(vectors[0.75], vectors[1.00]))),
+        "monotonic_margin_fraction": float(
+            ((margins[0.50] <= margins[0.75]) & (margins[0.75] <= margins[1.00])).mean()
+        ),
+        "support_sign_reversal_rate": reversal_rate,
+        "support_cancellation_ratio_mean": float(np.mean(cancellation)),
+        "support_cancellation_ratio_median": float(np.median(cancellation)),
+    }
+    return {"rows": rows, "summary": summary}
 
 
 def _validation_retrieval(
@@ -372,6 +505,10 @@ def _validation_artifacts(
     whole = _validation_probe(traces, arrays, p, "whole_count")
     relative = _validation_probe(traces, arrays, p, "relative10_ordered")
     fixed250 = _validation_probe(traces, arrays, p, "fixed250_ordered")
+    val_prefix = _native_prefix_diagnostics(
+        traces["val__evidence"], arrays["val_lengths"], arrays["val_y"], "val"
+    )
+    prefix_by_phase = {float(row["phase"]): row for row in val_prefix["rows"]}
     collapse_gap_pp = 100.0 * (relative["val_ba"] - whole["val_ba"])
     summary = {
         "case": spec.case,
@@ -386,6 +523,9 @@ def _validation_artifacts(
         "val_wholecount_no_bias_ba": whole["val_ba"],
         "val_relative10_no_bias_ba": relative["val_ba"],
         "val_fixed250_no_bias_ba": fixed250["val_ba"],
+        "val_native_prefix50_ba": prefix_by_phase[0.50]["ba"],
+        "val_native_prefix75_ba": prefix_by_phase[0.75]["ba"],
+        "val_native_prefix100_ba": prefix_by_phase[1.00]["ba"],
         "val_collapse_gap_pp": collapse_gap_pp,
     }
     save_json(config.results_dir / "runs" / spec.key / "validation_summary.json", summary)
@@ -401,38 +541,54 @@ def _gradient_cosine(left: torch.Tensor, right: torch.Tensor) -> float:
     return float(torch.dot(left_flat, right_flat) / denom)
 
 
+def _mean_gradient(values: list[torch.Tensor]) -> torch.Tensor:
+    if not values:
+        raise ValueError("Cannot average an empty gradient list")
+    return torch.stack([value.detach() for value in values], dim=0).mean(dim=0)
+
+
 def _gradient_diagnostic(
     model: BenchmarkNet,
     projector: exp14.ProjectionHead,
     arrays: dict[str, np.ndarray],
+    p: Protocol,
     spec: LossSpec,
     epoch: int,
     label: str,
 ) -> dict[str, Any]:
-    indices = next(iter(exp14._structured_batches(arrays, spec.seed, epoch=0)))
-    user_ids = _user_ids(arrays)
-    x = torch.from_numpy(arrays["train_x"][indices])
-    y = torch.from_numpy(arrays["train_y"][indices])
-    lengths = torch.from_numpy(arrays["train_lengths"][indices])
-    users = torch.from_numpy(user_ids[indices])
     was_training = model.training
     projector_was_training = projector.training
     model.eval()
     projector.eval()
-    trajectory = model(x, lengths)
-    wcce = F.cross_entropy(mean_logits(trajectory["evidence"], lengths), y)
-    prefix = prefix_wcce(trajectory["evidence"], lengths, y)
-    phase_values = exp14._phase_vectors(trajectory["pre_reset"][1], lengths)
-    phase = torch.stack(
-        [
-            exp14.cross_user_supcon(projector(phase_values[:, index]), y, users)
-            for index in range(phase_values.shape[1])
-        ]
-    ).mean()
     parameter = model.layers[1].weight
-    g_w = torch.autograd.grad(wcce, parameter, retain_graph=True)[0]
-    g_a = torch.autograd.grad(prefix, parameter, retain_graph=True)[0]
-    g_p = torch.autograd.grad(phase, parameter)[0]
+
+    task_wcce: list[torch.Tensor] = []
+    task_prefix: list[torch.Tensor] = []
+    for batch_index, (x, y, lengths) in enumerate(
+        loader(arrays, "train", p, spec.seed, shuffle=True)
+    ):
+        if batch_index >= GRADIENT_DIAGNOSTIC_BATCHES:
+            break
+        trajectory = model(x, lengths)
+        wcce = F.cross_entropy(mean_logits(trajectory["evidence"], lengths), y)
+        prefix = prefix_wcce(trajectory["evidence"], lengths, y)
+        task_wcce.append(torch.autograd.grad(wcce, parameter, retain_graph=True)[0])
+        task_prefix.append(torch.autograd.grad(prefix, parameter)[0])
+
+    user_ids = _user_ids(arrays)
+    phase_grads: list[torch.Tensor] = []
+    aux_batches = _validated_aux_batches(arrays, spec.seed, epoch=0)
+    for indices in aux_batches[:GRADIENT_DIAGNOSTIC_BATCHES]:
+        x = torch.from_numpy(arrays["train_x"][indices])
+        y = torch.from_numpy(arrays["train_y"][indices])
+        lengths = torch.from_numpy(arrays["train_lengths"][indices])
+        users = torch.from_numpy(user_ids[indices])
+        phase = _phase_cu_loss_from_tensors(model, projector, x, y, lengths, users)
+        phase_grads.append(torch.autograd.grad(phase, parameter)[0])
+
+    g_w = _mean_gradient(task_wcce)
+    g_a = _mean_gradient(task_prefix)
+    g_p = _mean_gradient(phase_grads)
     wp = _aux_weight(spec.lambda_phase, epoch)
     wa = _aux_weight(spec.lambda_prefix, epoch)
     norm_w = float(g_w.norm())
@@ -449,6 +605,8 @@ def _gradient_diagnostic(
         "lambda_prefix": spec.lambda_prefix,
         "epoch": epoch,
         "label": label,
+        "diagnostic_task_batches": len(task_wcce),
+        "diagnostic_aux_batches": len(phase_grads),
         "wcce_grad_norm_l2": norm_w,
         "phase_grad_norm_l2": norm_p,
         "prefix_grad_norm_l2": norm_a,
@@ -458,7 +616,6 @@ def _gradient_diagnostic(
         "cos_phase_wcce": _gradient_cosine(g_p, g_w),
         "cos_prefix_wcce": _gradient_cosine(g_a, g_w),
     }
-
 
 def _verify_c0_reference(config: Config, spec: LossSpec, best_state: dict[str, torch.Tensor], best_epoch: int) -> None:
     if spec.case != "C0_dual_null":
@@ -496,6 +653,13 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
     optimizer = torch.optim.Adam(params, lr=p.learning_rate, weight_decay=p.weight_decay)
     train_loader = loader(arrays, "train", p, spec.seed, shuffle=True)
     user_ids = _user_ids(arrays)
+    save_json(
+        directory / "task_batch_trace.json",
+        {
+            "source": "independent replay of the frozen Core RandomSampler seed",
+            "first_epoch_batch_ids": _task_batch_trace(arrays, p, spec.seed),
+        },
+    )
 
     best = evaluate_validation(model, arrays, p, spec.seed)
     best_state = initial
@@ -519,15 +683,15 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
     for epoch in range(1, p.max_epochs + 1):
         model.train()
         projector.train()
-        aux_batches = list(exp14._structured_batches(arrays, spec.seed, epoch))
-        if len(aux_batches) != len(train_loader):
+        aux_batches = _validated_aux_batches(arrays, spec.seed, epoch) if _needs_aux_batch(spec) else None
+        if aux_batches is not None and len(aux_batches) != len(train_loader):
             raise AssertionError(
-                f"Task/aux loader length mismatch: {len(train_loader)} vs {len(aux_batches)}"
+                f"Task/aux step mismatch: {len(train_loader)} vs {len(aux_batches)}"
             )
         totals = {"loss": 0.0, "wcce": 0.0, "prefix": 0.0, "phase": 0.0, "n": 0}
         wp = _aux_weight(spec.lambda_phase, epoch)
         wa = _aux_weight(spec.lambda_prefix, epoch)
-        for (x, y, lengths), aux_indices in zip(train_loader, aux_batches, strict=True):
+        for step, (x, y, lengths) in enumerate(train_loader):
             optimizer.zero_grad(set_to_none=True)
             trajectory = model(x, lengths)
             wcce = F.cross_entropy(mean_logits(trajectory["evidence"], lengths), y)
@@ -538,6 +702,9 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
                 prefix_loss = prefix_wcce(trajectory["evidence"], lengths, y)
                 total_loss = total_loss + wa * prefix_loss
             if wp > 0.0:
+                if aux_batches is None:
+                    raise AssertionError("Phase-CU weight is nonzero without an auxiliary batch")
+                aux_indices = aux_batches[step]
                 aux_x = torch.from_numpy(arrays["train_x"][aux_indices])
                 aux_y = torch.from_numpy(arrays["train_y"][aux_indices])
                 aux_lengths = torch.from_numpy(arrays["train_lengths"][aux_indices])
@@ -588,7 +755,7 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
 
         if epoch in GRADIENT_DIAGNOSTIC_EPOCHS:
             gradient_rows.append(
-                _gradient_diagnostic(model, projector, arrays, spec, epoch, f"epoch{epoch}")
+                _gradient_diagnostic(model, projector, arrays, p, spec, epoch, f"epoch{epoch}")
             )
         if epoch >= p.min_epochs and epoch - best_epoch >= p.patience:
             break
@@ -597,7 +764,7 @@ def train_one(config: Config, spec: LossSpec) -> dict[str, Any]:
     projector.load_state_dict(best_projector)
     _verify_c0_reference(config, spec, best_state, best_epoch)
     gradient_rows.append(
-        _gradient_diagnostic(model, projector, arrays, spec, best_epoch, "selected_checkpoint")
+        _gradient_diagnostic(model, projector, arrays, p, spec, best_epoch, "selected_checkpoint")
     )
     pd.DataFrame(gradient_rows).to_csv(directory / "gradient_diagnostics.csv", index=False)
     save_json(directory / "history.json", {"rows": history})
@@ -765,6 +932,16 @@ def evaluate_final(config: Config, spec: LossSpec) -> dict[str, Any]:
     pd.DataFrame(exp14._history_generalization(model, arrays, spec)).to_csv(
         directory / "history_generalization.csv", index=False
     )
+    prefix_payload = {
+        split: _native_prefix_diagnostics(
+            traces[f"{split}__evidence"],
+            arrays[f"{split}_lengths"],
+            arrays[f"{split}_y"],
+            split,
+        )
+        for split in ("train", "val", "test")
+    }
+    save_json(directory / "prefix_evidence_diagnostics.json", prefix_payload)
     save_json(done, {"status": "PASS", "key": spec.key})
     return {"status": "PASS", "key": spec.key}
 
@@ -805,6 +982,8 @@ def finalize(config: Config) -> dict[str, Any]:
     retrieval: list[pd.DataFrame] = []
     history: list[pd.DataFrame] = []
     gradient: list[pd.DataFrame] = []
+    prefix_rows: list[dict[str, Any]] = []
+    evidence_rows: list[dict[str, Any]] = []
 
     for spec in specs:
         directory = config.results_dir / "runs" / spec.key
@@ -816,6 +995,7 @@ def finalize(config: Config) -> dict[str, Any]:
             "cross_user_retrieval.csv",
             "history_generalization.csv",
             "gradient_diagnostics.csv",
+            "prefix_evidence_diagnostics.json",
             "final_evaluated.json",
         )
         for name in required:
@@ -867,6 +1047,25 @@ def finalize(config: Config) -> dict[str, Any]:
         grad = pd.read_csv(directory / "gradient_diagnostics.csv")
         grad["run_key"] = spec.key
         gradient.append(grad)
+        prefix_payload = json.loads(
+            (directory / "prefix_evidence_diagnostics.json").read_text(encoding="utf-8")
+        )
+        for split, payload in prefix_payload.items():
+            for row in payload["rows"]:
+                prefix_rows.append({
+                    "case": spec.case,
+                    "seed": spec.seed,
+                    "lambda_phase": spec.lambda_phase,
+                    "lambda_prefix": spec.lambda_prefix,
+                    **row,
+                })
+            evidence_rows.append({
+                "case": spec.case,
+                "seed": spec.seed,
+                "lambda_phase": spec.lambda_phase,
+                "lambda_prefix": spec.lambda_prefix,
+                **payload["summary"],
+            })
 
     aggregate = config.results_dir / "aggregate"
     aggregate.mkdir(parents=True, exist_ok=True)
@@ -886,6 +1085,12 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     pd.concat(gradient, ignore_index=True).to_csv(
         aggregate / "gradient_diagnostics.csv", index=False
+    )
+    pd.DataFrame(prefix_rows).to_csv(
+        aggregate / "native_prefix_metrics.csv", index=False
+    )
+    pd.DataFrame(evidence_rows).to_csv(
+        aggregate / "evidence_organization_diagnostics.csv", index=False
     )
     native_summary = (
         native_frame.groupby(["case", "lambda_phase", "lambda_prefix"])["test_ba"]
