@@ -46,16 +46,16 @@ The structured cross-user sampler never contributes examples to these two losses
 
 ### Auxiliary batch
 
-The auxiliary batch reuses the Exp14 deterministic class/user-balanced sampler:
+The auxiliary batch is redesigned for the actual class-user sample distribution and is used only for phase-conditioned cross-user SupCon:
 
 - 8 classes/batch;
-- 4 users/class;
-- 4 samples/user;
-- 128 samples/batch.
+- 8 distinct eligible users/class;
+- exactly 1 unique segment from each selected (class,user) cell;
+- 64 unique samples/batch.
 
-It is used only for phase-conditioned cross-user SupCon.
+A user is eligible for a class whenever that class-user cell contains at least one training segment. Cells with zero samples are skipped for that class only. Cells with one sample are valid; cells with two or three samples contribute one uniformly sampled segment each time that user is selected. This makes the auxiliary objective user-balanced rather than sample-count-balanced.
 
-When Phase-CU is active there is exactly one validated auxiliary batch per Core task optimizer step. Auxiliary batches must contain no duplicate segment IDs and every anchor must have a same-class/different-user positive.
+When Phase-CU is active there is exactly one validated auxiliary batch per Core task optimizer step. Every auxiliary batch must contain 64 unique segment IDs, exactly 8 selected classes, exactly 8 distinct users per selected class, and therefore exactly 7 valid same-class/different-user positives for every anchor.
 
 ## Losses
 
@@ -121,6 +121,10 @@ Phase 2 uses validation-selected lambdas:
 - Jb_half_both: half phase + half prefix.
 
 These four are preregistered interaction/sensitivity cases. Test performance never selects among them.
+
+## Prepare-time sampler feasibility
+
+Before submitting training arrays, `prepare` validates the complete auxiliary sampling schedule across all benchmark seeds and all possible training epochs. For every class it records the number of train users with at least one segment, total unique training samples, and the minimum/maximum samples per eligible user. The experiment hard-fails before the phase-1 array if any class has fewer than 8 eligible train users.
 
 ## Scheduling
 

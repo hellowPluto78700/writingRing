@@ -8,7 +8,7 @@ Test whether the cross-user phase alignment benefit from Exp14 can be preserved 
 
 - Reuse the finalized CoreBenchmark production dataset, user split, seeds `(11, 23, 37)`, two-layer width-128 multi-tau SNN, `tau_mem=22.54 ms`, shifts `(2,3,4)` in both layers, threshold `0.5`, unnormalized synapses, and bias-free analog output head.
 - Preserve the CoreBenchmark random shuffled **task-loss sampling distribution** for all WCCE and Prefix-WCCE updates. The overall backbone optimization distribution is intentionally changed by the auxiliary Phase-CU gradient.
-- Use a separate deterministic class/user-balanced auxiliary loader only for the Exp14 phase-conditioned cross-user SupCon loss: 8 classes x 4 users/class x 4 samples/user = 128 samples.
+- Use a separate deterministic user-diverse auxiliary loader only for the phase-conditioned cross-user SupCon loss: 8 classes x 8 distinct eligible users/class x 1 unique segment/(class,user) = 64 samples. A user is eligible for a class iff that class-user cell has at least one train sample; zero-sample cells are skipped only for that class.
 - Never compute WCCE or Prefix-WCCE on the structured auxiliary batch.
 - Phase loss is unchanged from Exp14 C2: L2 pre-reset states at normalized phases `(0.25, 0.50, 0.75, 1.00)`, training-only `128->64->ReLU->32` projection, L2 normalization, and positives restricted to same class / different user.
 - Prefix-WCCE uses the native shared evidence head and exactly two prefixes: 50% and 75% of each valid sequence. For each prefix, average native evidence over the prefix and apply one CE. The first-pass prefix loss is assumption-light and symmetric: `1/2 * CE(prefix50) + 1/2 * CE(prefix75)`.
@@ -37,7 +37,7 @@ Test whether the cross-user phase alignment benefit from Exp14 can be preserved 
 
 ## Execution contract
 
-- Prepare job freezes/validates the CoreBenchmark dependency and writes the Exp14.1 protocol manifest.
+- Prepare job freezes/validates the CoreBenchmark dependency, validates the complete auxiliary sampler schedule across all seeds and epochs, writes a per-class sampler-capacity report, and writes the Exp14.1 protocol manifest.
 - Phase-1 array: 24 one-CPU tasks = 3 C0 + 12 phase-only + 9 prefix-only runs.
 - Selection job aggregates phase-1 validation artifacts only and writes selected lambdas.
 - Phase-2 array: 12 one-CPU tasks = 4 combined cases x 3 seeds.
@@ -57,7 +57,7 @@ Test whether the cross-user phase alignment benefit from Exp14 can be preserved 
 - Exactly 24 phase-1 specs and 12 phase-2 combined specs are generated.
 - C0 model initialization matches Core O0 for each seed, and the C0 training step path uses the same Core shuffled task batches and WCCE objective without auxiliary forward/backward contribution.
 - Prefix-WCCE applies one CE to the 50% prefix mean and one CE to the 75% prefix mean with fixed equal weights `(1/2, 1/2)`.
-- Phase auxiliary batches contain same-class cross-user positives, contain no duplicate segment ID, provide at least one same-class/different-user positive for every anchor, and never enter the WCCE/Prefix-WCCE terms.
+- Phase auxiliary batches contain no duplicate segment ID, exactly 8 selected classes, exactly 8 distinct users per selected class, one segment per selected class-user cell, and therefore exactly 7 same-class/different-user positives for every anchor. They never enter the WCCE/Prefix-WCCE terms.
 - Selection code uses no `test_*` arrays or test metrics.
 - Final artifacts report native metrics, native-prefix metrics, evidence-organization diagnostics, probes, collapse gap, cross-user retrieval/geometry, history generalization, gradient diagnostics, selection metadata and a manifest.
 - Focused tests cover run mapping, C0 auxiliary bypass, task-batch trace determinism, auxiliary-batch uniqueness/positive validity, prefix loss math, C0/Core initialization contract, selection constraints, no-test selection behavior, evidence diagnostics, and Slurm topology.
