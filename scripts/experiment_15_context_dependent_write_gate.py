@@ -392,6 +392,28 @@ def _gradient_diagnostic(
     return row
 
 
+def _make_optimizer(model: nn.Module, p: Protocol) -> torch.optim.Optimizer:
+    trainable = [
+        (name, parameter)
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    ]
+    if isinstance(model, ContextWriteGateNet):
+        gate_bias = [parameter for name, parameter in trainable if name == "gate_bias"]
+        others = [parameter for name, parameter in trainable if name != "gate_bias"]
+        groups: list[dict[str, Any]] = []
+        if others:
+            groups.append({"params": others, "weight_decay": p.weight_decay})
+        if gate_bias:
+            groups.append({"params": gate_bias, "weight_decay": 0.0})
+        return torch.optim.Adam(groups, lr=p.learning_rate)
+    return torch.optim.Adam(
+        [parameter for _, parameter in trainable],
+        lr=p.learning_rate,
+        weight_decay=p.weight_decay,
+    )
+
+
 def train_one(config: Config, spec: ExpSpec) -> dict[str, Any]:
     p, lock, arrays = _load_core(config)
     directory = config.results_dir / "runs" / spec.key
@@ -401,11 +423,7 @@ def train_one(config: Config, spec: ExpSpec) -> dict[str, Any]:
 
     model = _build_model(config, spec, p, lock)
     initial = cpu_state(model)
-    optimizer = torch.optim.Adam(
-        [parameter for parameter in model.parameters() if parameter.requires_grad],
-        lr=p.learning_rate,
-        weight_decay=p.weight_decay,
-    )
+    optimizer = _make_optimizer(model, p)
     train_loader = loader(arrays, "train", p, spec.seed, shuffle=True)
     best = _split_eval(model, arrays, p, spec.seed, "val")
     best_state = initial
@@ -467,6 +485,12 @@ def train_one(config: Config, spec: ExpSpec) -> dict[str, Any]:
             break
 
     model.load_state_dict(best_state)
+    if isinstance(model, ContextWriteGateNet):
+        selected_gradient = _gradient_diagnostic(
+            model, arrays, p, spec.seed, best_epoch
+        )
+        selected_gradient["selected_checkpoint"] = True
+        gradient_rows.append(selected_gradient)
     if spec.case == "GF":
         baseline_keys = [key for key in initial if not key.startswith("gate_")]
         if any(not torch.equal(initial[key], best_state[key]) for key in baseline_keys):
@@ -586,6 +610,8 @@ def _gate_summary(
             "split": split,
             "mean_g": float(gv.mean()),
             "std_g": float(gv.std()),
+            "p_g_lt_01": float((gv < 0.1).mean()),
+            "p_g_gt_09": float((gv > 0.9).mean()),
             "mean_m": float(mv.mean()),
             "std_m": float(mv.std()),
             "mean_abs_m_minus_1": float(np.abs(mv - 1).mean()),
@@ -622,7 +648,9 @@ def _gate_summary(
                 "split": split,
                 "bin": bin_index,
                 "mean_m": float(np.concatenate(values_m).mean()),
+                "std_m": float(np.concatenate(values_m).std()),
                 "mean_g": float(np.concatenate(values_g).mean()),
+                "std_g": float(np.concatenate(values_g).std()),
                 "input_term_rms": float(np.sqrt(np.mean(input_values ** 2))),
                 "history_term_rms": float(np.sqrt(np.mean(history_values ** 2))),
             })
