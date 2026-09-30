@@ -57,6 +57,18 @@ def test_gate_initialization_is_function_preserving() -> None:
     assert torch.equal(base["spike"][1], gate["spike"][1])
 
 
+def test_gate_bias_has_explicit_zero_weight_decay() -> None:
+    p = replace(_small_protocol(), weight_decay=0.25)
+    model = exp.ContextWriteGateNet(exp._exp_run(exp.ExpSpec("GJ", 11)), p)
+    optimizer = exp._make_optimizer(model, p)
+    group_by_decay = {float(group["weight_decay"]): group for group in optimizer.param_groups}
+    assert 0.0 in group_by_decay
+    assert 0.25 in group_by_decay
+    bias_id = id(model.gate_bias)
+    assert any(id(parameter) == bias_id for parameter in group_by_decay[0.0]["params"])
+    assert all(id(parameter) != bias_id for parameter in group_by_decay[0.25]["params"])
+
+
 def test_gf_freezes_all_non_gate_parameters() -> None:
     p = _small_protocol()
     model = exp.ContextWriteGateNet(exp._exp_run(exp.ExpSpec("GF", 11)), p)
