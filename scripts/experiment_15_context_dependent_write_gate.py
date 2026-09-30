@@ -838,6 +838,32 @@ def _probe_seed_means(frame: pd.DataFrame) -> pd.DataFrame:
     )[metrics_columns].mean()
 
 
+def _probe_gains(seed_means: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    groups = ["case", "seed", "layer", "state", "decoder"]
+    for key, group in seed_means.groupby(groups, dropna=False, sort=False):
+        lookup = group.set_index("aggregation")
+        for name, left, right in (
+            ("G_resolved", "fixed250_ordered", "whole_count"),
+            ("G_order", "fixed250_ordered", "fixed250_shuffled"),
+            ("G_relative_order", "relative10_ordered", "relative10_shuffled"),
+            ("Gap_rel10_whole", "relative10_ordered", "whole_count"),
+        ):
+            if left in lookup.index and right in lookup.index:
+                rows.append({
+                    **dict(zip(groups, key)),
+                    "gain": name,
+                    **{
+                        f"{split}_delta": float(
+                            lookup.loc[left, f"{split}_ba"]
+                            - lookup.loc[right, f"{split}_ba"]
+                        )
+                        for split in SPLITS
+                    },
+                })
+    return pd.DataFrame(rows)
+
+
 def finalize(config: Config) -> dict[str, Any]:
     _, lock, _ = _load_core(config)
     aggregate = config.results_dir / "aggregate"
@@ -888,8 +914,12 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     probe_frame = pd.DataFrame(probe_rows)
     probe_frame.to_csv(aggregate / "phase1_probe_runs.csv", index=False)
-    _probe_seed_means(probe_frame).to_csv(
+    probe_seed_means = _probe_seed_means(probe_frame)
+    probe_seed_means.to_csv(
         aggregate / "phase1_probe_seed_means.csv", index=False
+    )
+    _probe_gains(probe_seed_means).to_csv(
+        aggregate / "phase1_probe_gains.csv", index=False
     )
     pd.DataFrame(gate_rows).to_csv(
         aggregate / "phase1_gate_summary.csv", index=False
@@ -978,8 +1008,19 @@ def finalize(config: Config) -> dict[str, Any]:
     ).mean(numeric_only=True).to_csv(
         aggregate / "phase1_5_native_seed_means.csv", index=False
     )
-    pd.DataFrame(intervention_probe_rows).to_csv(
+    intervention_probe = pd.DataFrame(intervention_probe_rows)
+    intervention_probe.to_csv(
         aggregate / "phase1_5_probe_runs.csv", index=False
+    )
+    intervention_probe_seed_means = intervention_probe.groupby(
+        ["parent_case", "seed", "intervention", "layer", "state", "aggregation", "decoder"],
+        as_index=False,
+        dropna=False,
+    )[[column for column in intervention_probe.columns if column.endswith(
+        ("_ba", "_accuracy", "_macro_f1", "_gap")
+    )]].mean()
+    intervention_probe_seed_means.to_csv(
+        aggregate / "phase1_5_probe_seed_means.csv", index=False
     )
 
     report = {
