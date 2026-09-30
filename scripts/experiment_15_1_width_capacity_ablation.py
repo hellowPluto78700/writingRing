@@ -181,13 +181,11 @@ def _require_exp15_reference(config: Config) -> dict[str, Any]:
     required = (
         "phase1_native_runs.csv",
         "phase1_native_per_user.csv",
-        "phase1_probe_seed_means.csv",
-        "phase1_probe_gains.csv",
+        "phase1_probe_runs.csv",
         "phase1_gate_summary.csv",
         "phase1_gate_phase10.csv",
-        "phase1_5_native_seed_means.csv",
-        "phase1_5_native_deltas.csv",
-        "phase1_5_probe_seed_means.csv",
+        "phase1_5_native_runs.csv",
+        "phase1_5_probe_runs.csv",
     )
     missing = [
         name
@@ -688,9 +686,15 @@ def finalize(config: Config) -> dict[str, Any]:
     )
 
     probe_128 = _add_width(
-        _read_exp15(config, "phase1_probe_seed_means.csv"), 128
+        _read_exp15(config, "phase1_probe_runs.csv"), 128
     )
-    probe_frame = pd.DataFrame(probe_rows)
+    probe_frame = pd.concat(
+        [pd.DataFrame(probe_rows), probe_128],
+        ignore_index=True,
+    )
+    probe_frame.to_csv(
+        aggregate / "phase1_probe_runs.csv", index=False
+    )
     probe_seed_means = probe_frame.groupby(
         [
             "width",
@@ -712,25 +716,18 @@ def finalize(config: Config) -> dict[str, Any]:
             )
         ]
     ].mean()
-    probe_seed_means = pd.concat(
-        [probe_seed_means, probe_128],
-        ignore_index=True,
-    )
     probe_seed_means.to_csv(
         aggregate / "phase1_probe_seed_means.csv", index=False
     )
 
     gain_rows: list[pd.DataFrame] = []
-    for width in TRAIN_WIDTHS:
+    for width in WIDTHS:
         current = probe_seed_means[probe_seed_means.width == width].drop(
             columns="width"
         )
         gains = exp15._probe_gains(current)
         gains.insert(0, "width", width)
         gain_rows.append(gains)
-    gain_rows.append(
-        _add_width(_read_exp15(config, "phase1_probe_gains.csv"), 128)
-    )
     pd.concat(gain_rows, ignore_index=True).to_csv(
         aggregate / "phase1_probe_gains.csv", index=False
     )
@@ -753,6 +750,35 @@ def finalize(config: Config) -> dict[str, Any]:
     )
     gate_phase_frame.to_csv(
         aggregate / "phase1_gate_phase10.csv", index=False
+    )
+
+    paired_contrasts: list[dict[str, Any]] = []
+    for width in WIDTHS:
+        for seed in SEEDS:
+            current = native_frame[
+                (native_frame.width == width) & (native_frame.seed == seed)
+            ].set_index("case")
+            for contrast, left, right in (
+                ("GF_minus_B0", "GF", "B0"),
+                ("GJ_minus_C0", "GJ", "C0"),
+                ("GF_minus_C0", "GF", "C0"),
+            ):
+                paired_contrasts.append(
+                    {
+                        "width": width,
+                        "seed": seed,
+                        "contrast": contrast,
+                        **{
+                            f"{split}_delta": float(
+                                current.loc[left, f"{split}_ba"]
+                                - current.loc[right, f"{split}_ba"]
+                            )
+                            for split in SPLITS
+                        },
+                    }
+                )
+    pd.DataFrame(paired_contrasts).to_csv(
+        aggregate / "phase1_paired_contrasts.csv", index=False
     )
 
     native_summary = native_frame.groupby(
@@ -845,21 +871,23 @@ def finalize(config: Config) -> dict[str, Any]:
                             )["rows"]
                         )
 
-    intervention_native = pd.DataFrame(intervention_native_rows)
-    intervention_seed_means = intervention_native.groupby(
-        ["width", "case", "seed", "intervention"],
-        as_index=False,
-    ).mean(numeric_only=True)
-    intervention_seed_means = pd.concat(
+    intervention_native = pd.concat(
         [
-            intervention_seed_means,
+            pd.DataFrame(intervention_native_rows),
             _add_width(
-                _read_exp15(config, "phase1_5_native_seed_means.csv"),
+                _read_exp15(config, "phase1_5_native_runs.csv"),
                 128,
             ),
         ],
         ignore_index=True,
     )
+    intervention_native.to_csv(
+        aggregate / "phase1_5_native_runs.csv", index=False
+    )
+    intervention_seed_means = intervention_native.groupby(
+        ["width", "case", "seed", "intervention"],
+        as_index=False,
+    ).mean(numeric_only=True)
     intervention_seed_means.to_csv(
         aggregate / "phase1_5_native_seed_means.csv", index=False
     )
@@ -896,7 +924,19 @@ def finalize(config: Config) -> dict[str, Any]:
         aggregate / "phase1_5_native_deltas.csv", index=False
     )
 
-    intervention_probe = pd.DataFrame(intervention_probe_rows)
+    intervention_probe = pd.concat(
+        [
+            pd.DataFrame(intervention_probe_rows),
+            _add_width(
+                _read_exp15(config, "phase1_5_probe_runs.csv"),
+                128,
+            ),
+        ],
+        ignore_index=True,
+    )
+    intervention_probe.to_csv(
+        aggregate / "phase1_5_probe_runs.csv", index=False
+    )
     intervention_probe_seed_means = intervention_probe.groupby(
         [
             "width",
@@ -919,16 +959,6 @@ def finalize(config: Config) -> dict[str, Any]:
             )
         ]
     ].mean()
-    intervention_probe_seed_means = pd.concat(
-        [
-            intervention_probe_seed_means,
-            _add_width(
-                _read_exp15(config, "phase1_5_probe_seed_means.csv"),
-                128,
-            ),
-        ],
-        ignore_index=True,
-    )
     intervention_probe_seed_means.to_csv(
         aggregate / "phase1_5_probe_seed_means.csv", index=False
     )
