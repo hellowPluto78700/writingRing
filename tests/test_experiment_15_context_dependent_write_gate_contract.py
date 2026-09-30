@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import numpy as np
+import pytest
 import torch
 
 from core_benchmark_v1.model import BenchmarkNet
@@ -162,6 +163,6 @@ def test_probe_gains_use_ordered_minus_matched_shuffled() -> None:
             "test_ba": ba,
         })
     gains = exp._probe_gains(pd.DataFrame(rows)).set_index("gain")
-    assert gains.loc["G_order", "test_delta"] == 0.08
-    assert gains.loc["G_relative_order", "test_delta"] == 0.10
-    assert gains.loc["G_resolved", "test_delta"] == 0.15
+    assert gains.loc["G_order", "test_delta"] == pytest.approx(0.08)
+    assert gains.loc["G_relative_order", "test_delta"] == pytest.approx(0.10)
+    assert gains.loc["G_resolved", "test_delta"] == pytest.approx(0.15)
