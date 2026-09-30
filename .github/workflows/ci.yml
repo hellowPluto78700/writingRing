@@ -1,21 +1,50 @@
-name: CI
+name: Shared core CI
 
 on:
   pull_request:
+    paths:
+      - 'src/**'
+      - 'snn/**'
+      - 'core/**'
+      - 'core_benchmark_v1/**'
+      - 'utils/**'
+      - 'scripts/common/**'
+      - 'scripts/utils/**'
+      - 'tests/conftest.py'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'snn/**'
+      - 'core/**'
+      - 'core_benchmark_v1/**'
+      - 'utils/**'
+      - 'scripts/common/**'
+      - 'scripts/utils/**'
+      - 'tests/conftest.py'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: shared-core-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fast-checks:
+  contract-regression:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+      MPLBACKEND: Agg
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -34,153 +63,8 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e '.[test,snn]'
 
-      - name: Validate Exp5.4.2 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_5_4_2_screen_cpu.bash
-            scripts/bash_script/SNN_Bash/submit_exp_5_4_2_refine_cpu.bash
-            scripts/bash_script/SNN_Bash/prepare_exp_5_4_2_source_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_2_screen_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_2_screen_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_2_refine_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_2_refine_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_2_final_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_2_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Validate Exp5.4.3 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_5_4_3_capacity_cpu.bash
-            scripts/bash_script/SNN_Bash/submit_exp_5_4_3_extension_cpu.bash
-            scripts/bash_script/SNN_Bash/prepare_exp_5_4_3_reference_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_3_capacity_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_capacity_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_3_extension_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_extension_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_5_4_3_final_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_5_4_3_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Validate Exp7.2.6 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_7_2_6_cpu.bash
-            scripts/bash_script/SNN_Bash/prepare_exp_7_2_6_frozen_l2_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_frozen_head_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_mechanism_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_e2e_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_probe_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_7_2_6_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Validate Exp7.2.6.1 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_7_2_6_1_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_1_mean_ce_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_1_probe_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_7_2_6_1_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Validate Exp7.2.6.2 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_7_2_6_2_cpu.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_2_bias_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_2_probe_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_7_2_6_2_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Validate Exp7.2.6.3 Slurm scripts
-        run: |
-          scripts=(
-            scripts/bash_script/SNN_Bash/submit_exp_7_2_6_3_cpu.bash
-            scripts/bash_script/SNN_Bash/prepare_exp_7_2_6_3_cache_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_3_mechanism_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_3_head_cpu_array.bash
-            scripts/bash_script/SNN_Bash/run_exp_7_2_6_3_crosscheck_cpu_array.bash
-            scripts/bash_script/SNN_Bash/finalize_exp_7_2_6_3_cpu.bash
-          )
-          for script in "${scripts[@]}"; do
-            test -f "$script"
-            bash -n "$script"
-          done
-
-      - name: Run CI contract checks
+      - name: Run shared-impact contract regression
         run: |
           python -m pytest -q --durations=10 \
             tests/test_repository_source_syntax.py \
-            tests/test_experiment_0_1_contract.py \
-            tests/test_experiment_0_2_2_capacity_preserving_loss_contract.py \
-            tests/test_with_gyro_experiment_0_2_contract.py \
-            tests/test_experiment_3_0_2_contract.py \
-            tests/test_experiment_3_0_3_contract.py \
-            tests/test_experiment_3_0_4_contract.py \
-            tests/test_experiment_3_0_5_to_3_0_7_contract.py \
-            tests/test_experiment_3_1_contract.py \
-            tests/test_experiment_3_2_contract.py \
-            tests/test_experiment_3_3_contract.py \
-            tests/test_experiment_3_4_contract.py \
-            tests/test_experiment_3_4_1_contract.py \
-            tests/test_experiment_4_0_contract.py \
-            tests/test_experiment_4_0_1_contract.py \
-            tests/test_experiment_4_0_3_contract.py \
-            tests/test_experiment_4_0_4_contract.py \
-            tests/test_experiment_4_0_5_contract.py \
-            tests/test_experiment_4_0_6_contract.py \
-            tests/test_experiment_4_1_4_2_contract.py \
-            tests/test_experiment_4_3_contract.py \
-            tests/test_experiment_4_3_notebook_contract.py \
-            tests/test_experiment_4_4_1_contract.py \
-            tests/test_experiment_4_4_2_contract.py \
-            tests/test_experiment_4_4_3_contract.py \
-            tests/test_experiment_5_0_contract.py \
-            tests/test_experiment_5_0_1_contract.py \
-            tests/test_experiment_5_1_contract.py \
-            tests/test_experiment_5_2_1_contract.py \
-            tests/test_experiment_5_2_2_contract.py \
-            tests/test_experiment_5_3_contract.py \
-            tests/test_experiment_5_3_1_contract.py \
-            tests/test_experiment_5_3_2_contract.py \
-            tests/test_experiment_5_3_2_1_contract.py \
-            tests/test_experiment_5_3_2_2_contract.py \
-            tests/test_experiment_5_3_2_3_contract.py \
-            tests/test_experiment_5_4_contract.py \
-            tests/test_experiment_5_4_1_contract.py \
-            tests/test_experiment_5_4_2_contract.py \
-            tests/test_experiment_5_4_2_slurm_ci.py \
-            tests/test_experiment_5_4_3_contract.py \
-            tests/test_experiment_5_5_contract.py \
-            tests/test_experiment_5_5_1_contract.py \
-            tests/test_experiment_5_5_1_1_contract.py \
-            tests/test_experiment_5_5_2_contract.py \
-            tests/test_experiment_5_5_3_contract.py \
-            tests/test_experiment_5_5_4_contract.py \
-            tests/test_experiment_7_2_4_global_window_eval_contract.py \
-            tests/test_experiment_7_2_5_output_synaptic_alpha_contract.py \
-            tests/test_experiment_7_2_6_output_readout_loss_shaping_contract.py \
-            tests/test_experiment_7_2_6_1_sum_vs_mean_ce_contract.py \
-            tests/test_experiment_7_2_6_2_mean_ce_bias_contract.py \
-            tests/test_experiment_7_2_6_3_linear_vs_lif_contract.py \
-            tests/test_experiment_8_1_1_two_layer_mt_factorial_contract.py
+            tests/test_*contract*.py
