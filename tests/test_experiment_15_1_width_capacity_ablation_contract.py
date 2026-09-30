@@ -107,9 +107,16 @@ def test_gate_initialization_remains_function_preserving(width: int) -> None:
     assert torch.equal(baseline_out["spike"][1], gated_out["spike"][1])
 
 
-def test_width_specific_run_keys_do_not_collide() -> None:
-    specs = exp.baseline_specs() + exp.phase1_specs() + exp.phase1_5_specs()
-    keys = [spec.key for spec in specs]
-    assert len(keys) == len(set(keys))
+def test_width_specific_run_keys_are_unique_within_training_phases() -> None:
+    baseline_keys = [spec.key for spec in exp.baseline_specs()]
+    phase1_keys = [spec.key for spec in exp.phase1_specs()]
+    phase15_keys = [spec.key for spec in exp.phase1_5_specs()]
+
+    assert len(baseline_keys) == len(set(baseline_keys))
+    assert len(phase1_keys) == len(set(phase1_keys))
+    assert len(phase15_keys) == len(set(phase15_keys))
+    assert set(baseline_keys).isdisjoint(phase1_keys)
+    assert set(phase15_keys).issubset(set(phase1_keys))
+
     assert exp.WidthSpec(64, "B0", 11).key == "H64__B0__seed11"
     assert exp.WidthSpec(96, "GJ", 37).key == "H96__GJ__seed37"
