@@ -1088,10 +1088,36 @@ def finalize(config: Config) -> dict[str, Any]:
     intervention_native.to_csv(
         aggregate / "phase1_5_native_runs.csv", index=False
     )
-    intervention_native.groupby(
+    intervention_seed_means = intervention_native.groupby(
         ["case", "seed", "intervention"], as_index=False
-    ).mean(numeric_only=True).to_csv(
+    ).mean(numeric_only=True)
+    intervention_seed_means.to_csv(
         aggregate / "phase1_5_native_seed_means.csv", index=False
+    )
+    intervention_deltas: list[dict[str, Any]] = []
+    for (case, seed), group in intervention_seed_means.groupby(
+        ["case", "seed"], sort=False
+    ):
+        lookup = group.set_index("intervention")
+        if "A0" not in lookup.index:
+            continue
+        for intervention in ("A1", "A2", "A3", "A4", "A4b"):
+            if intervention not in lookup.index:
+                continue
+            intervention_deltas.append({
+                "case": case,
+                "seed": seed,
+                "contrast": f"A0_minus_{intervention}",
+                **{
+                    f"{split}_delta": float(
+                        lookup.loc["A0", f"{split}_ba"]
+                        - lookup.loc[intervention, f"{split}_ba"]
+                    )
+                    for split in SPLITS
+                },
+            })
+    pd.DataFrame(intervention_deltas).to_csv(
+        aggregate / "phase1_5_native_deltas.csv", index=False
     )
     intervention_probe = pd.DataFrame(intervention_probe_rows)
     intervention_probe.to_csv(
