@@ -140,6 +140,33 @@ def prepare(config: Config) -> dict[str, Any]:
     }
     payload["identity"] = digest(payload)
     save_json(config.results_dir / "protocol.json", payload)
+    source_paths = [
+        Path(__file__).resolve(),
+        config.repo_root / "core_benchmark_v1" / "model.py",
+        config.repo_root / "core_benchmark_v1" / "probes.py",
+        config.repo_root / "core_benchmark_v1" / "data.py",
+        config.repo_root / "core_benchmark_v1" / "training.py",
+    ]
+    save_json(
+        config.results_dir / "source_manifest.json",
+        {
+            "files": {
+                str(path.relative_to(config.repo_root)): file_hash(path)
+                for path in source_paths
+            }
+        },
+    )
+    save_json(
+        config.results_dir / "locked_core_contract.json",
+        {
+            "core_identity": lock["identity"],
+            "core_protocol_hash": lock["protocol_hash"],
+            "core_dataset_hash": lock["dataset_hash"],
+            "users": lock["data_metadata"]["users"],
+            "seeds": list(SEEDS),
+            "shifts": [list(value) for value in SHIFTS],
+        },
+    )
     return payload
 
 
@@ -874,6 +901,36 @@ def finalize(config: Config) -> dict[str, Any]:
     probe_rows: list[dict[str, Any]] = []
     gate_rows: list[dict[str, Any]] = []
     gate_phase_rows: list[dict[str, Any]] = []
+
+    for seed in SEEDS:
+        core_directory = config.core_results_dir / "runs" / f"O0__seed{seed}"
+        core_native = json.loads(
+            (core_directory / "native.json").read_text(encoding="utf-8")
+        )
+        baseline_row: dict[str, Any] = {
+            "case": "B0",
+            "seed": seed,
+            "train_test_gap": core_native["train_test_gap"],
+        }
+        for split in SPLITS:
+            for name, value in core_native["splits"][split].items():
+                baseline_row[f"{split}_{name}"] = value
+        native_rows.append(baseline_row)
+        per_user_rows.extend(
+            {"case": "B0", "seed": seed, **item}
+            for item in core_native["users"]
+        )
+        core_probes = json.loads(
+            (core_directory / "probes.json").read_text(encoding="utf-8")
+        )["rows"]
+        probe_rows.extend(
+            {
+                **item,
+                "case": "B0",
+            }
+            for item in core_probes
+            if item["layer"] == "L2" and item["state"] == "spike"
+        )
 
     for spec in phase1_specs():
         directory = config.results_dir / "runs" / spec.key
