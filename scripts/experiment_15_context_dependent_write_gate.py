@@ -212,6 +212,8 @@ class ContextWriteGateNet(BenchmarkNet):
             if history_override is not None:
                 used_history = history_override[:, t]
             a = input_term + used_history + self.gate_bias
+            if capture_gate_grad:
+                a.retain_grad()
             g = torch.sigmoid(a)
             multiplier = g / Q_INIT if forced_m is None else forced_m[:, t]
 
@@ -246,8 +248,6 @@ class ContextWriteGateNet(BenchmarkNet):
             return F.pad(result, (0, steps - result.shape[1]))
 
         a_stack = stack2(gate_a)
-        if capture_gate_grad:
-            a_stack.retain_grad()
 
         return {
             "spike": (stack3(spikes[0]), stack3(spikes[1])),
@@ -260,6 +260,7 @@ class ContextWriteGateNet(BenchmarkNet):
             "gate_a": a_stack,
             "gate_input_term": stack2(gate_in),
             "gate_history_term": stack2(gate_hist),
+            "gate_a_nodes": gate_a if capture_gate_grad else None,
         }
 
 
@@ -345,8 +346,9 @@ def _gradient_diagnostic(
         row[f"grad__{name}"] = grad
         row[f"relative_grad__{name}"] = grad / (norm + 1e-12)
 
-    if trajectory["gate_a"].grad is not None:
-        gradient = trajectory["gate_a"].grad.detach().abs()
+    nodes = trajectory["gate_a_nodes"]
+    if nodes is not None and all(node.grad is not None for node in nodes):
+        gradient = torch.stack([node.grad.detach().abs() for node in nodes], dim=1)
         phase_values: list[float] = []
         for bin_index in range(10):
             values: list[torch.Tensor] = []
@@ -683,7 +685,6 @@ def evaluate_one(
     if gates:
         gate_summary = _gate_summary(gates, arrays)
         save_json(directory / "gate_summary.json", gate_summary)
-        save_npz(directory / "gate_traces.npz", gates)
     return {"status": "PASS", "run": spec.key}
 
 
