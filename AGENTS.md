@@ -19,7 +19,7 @@ Knowledge priority:
 2. `README.md`
 3. current code and tests
 4. `docs/plans/**`
-5. FROZEN TaskSpec for the active task
+5. active-task instructions or plan, when one exists
 
 When sources materially disagree, resolve the conflict instead of guessing.
 
@@ -124,153 +124,44 @@ Valid reasons to deviate include a workload that is demonstrably GPU-bound, requ
 
 For new experiment implementations, treat this multi-CPU pattern as the repository default rather than an experiment-specific optimization.
 
-# Roles
+# Agent execution model
 
-* PRIMARY: intent, routing, planning, orchestration, documentation.
-* `luna_probe`: targeted read-only investigation.
-* `luna_worker`: implementation and local repair loop.
-* `luna_verifier`: independent verification.
+PRIMARY owns end-to-end task execution.
 
-PRIMARY may directly inspect code and tests. Do not spawn Probe just to answer a simple implementation question.
+PRIMARY is responsible for understanding intent, inspecting repository state,
+planning when useful, implementing changes or delegating implementation,
+running relevant validation, reviewing results, and documenting durable
+findings when appropriate.
 
-# Task routing
+PRIMARY may use subagents when they improve efficiency, parallelism,
+specialization, or independent verification. Subagent use is optional unless
+the active runtime itself requires delegation.
 
-## Routing priority
+Possible specialist roles include:
 
-FAST_FIX is the default workflow.
+* targeted read-only investigation;
+* implementation and local repair;
+* independent verification;
+* experiment or result analysis.
 
-PRIMARY MUST use FAST_FIX when:
+PRIMARY decides:
 
-* the requested behavior is explicit;
-* the change is localized;
-* no unresolved repository fact blocks implementation;
-* no schema/file-format/public-API/persistent-artifact contract must change.
+* whether a subagent is needed;
+* which role to use;
+* how many subagents to use;
+* whether work should run sequentially or in parallel;
+* whether independent verification is worthwhile;
+* whether a written plan or persistent task state is useful.
 
-When these conditions hold:
+Do not delegate merely to satisfy a workflow. PRIMARY remains responsible for
+the final result even when work is delegated.
 
-* MUST NOT spawn luna_probe;
-* MUST NOT create or freeze a TaskSpec;
-* MUST NOT spawn luna_verifier.
+PRIMARY may directly inspect code, tests, documentation, experiment outputs,
+and repository history. It may also implement and validate changes directly.
 
-The fact that code has callers or consumers does NOT by itself require STANDARD.
-
-Use STANDARD only when PRIMARY can name a concrete cross-module contract
-that may change or a concrete unknown that must be resolved before implementation.
-
-Do not Probe merely to increase confidence.
-
-## FAST_FIX
-
-Use FAST_FIX when all of the following are true:
-
-* requested behavior is explicit;
-* the change is localized;
-* no unresolved repository fact blocks implementation;
-* no schema, file-format, public API, persistent artifact, timestamp,
-  channel, or other durable contract must change;
-* no project-level architecture decision is required.
-
-```text
-PRIMARY -> worker -> done
-```
-
-When these conditions hold:
-
-MUST NOT spawn luna_probe;
-MUST NOT create or freeze a TaskSpec;
-MUST NOT spawn luna_verifier;
-MUST NOT update WORKBOARD;
-MUST NOT run full pytest by default.
-
-The existence of callers, consumers, or multiple touched files/modules does
-NOT by itself require STANDARD.
-
-Run focused tests and relevant checks.
-
-Escalate only when PRIMARY or worker can name a concrete contract ambiguity,
-unresolved repository fact, broader scope requirement, or meaningful
-regression risk.
-
-## STANDARD
-
-Use STANDARD only when at least one of the following is true:
-
-a concrete cross-module or producer/consumer contract may change;
-an unresolved repository fact must be established before safe implementation;
-the behavior crosses a durable interface whose invariant must be preserved;
-the implementation has material regression risk that justifies independent
-verification.
-
-```text
-[probe only if a concrete unresolved fact exists] -> freeze -> worker -> verifier
-```
-
-Probe is not a mandatory workflow stage.
-
-PRIMARY may inspect code, tests, and documentation directly and freeze a task
-without Probe when the required repository facts are already established.
-
-Freeze WHAT must be true, not HOW to implement it.
-
-A STANDARD TaskSpec should contain only:
-
-Goal
-Context, only when necessary
-Required behavior
-Preserved contracts
-Allowed write scope
-Acceptance criteria
-Validation
-Dependencies, only when real
-Replan triggers
-
-Do not freeze helper names, internal class/function structure, algorithms,
-or exact modified files unless those details are themselves contractual.
-
-## HIGH_RISK
-
-Use STANDARD plus stronger verification/integration validation for changes
-involving:
-
-schemas or file formats;
-public APIs;
-pipeline contracts;
-timestamps or channel semantics;
-persisted artifacts;
-broad architecture or migrations.
-
-HIGH_RISK always requires independent verification.
-
-Full pytest or E2E is still required only when justified by the affected
-risk surface.
-
-# Worker rules
-
-Worker owns the normal loop:
-
-```text
-inspect -> implement -> test -> fix -> retest -> self-review
-```
-
-Ordinary bugs, missed edge cases, local refactors, and test fixes do not require replanning.
-
-Use `NEEDS_REPLAN` only when correct implementation requires a material TaskSpec, contract, dependency, architecture, or write-scope change.
-
-Use `BLOCKED` for genuine environment, data, access, or tool failures.
-
-# Verification rules
-
-Verifier checks the complete relevant task surface before returning.
-
-* `PASS`: implementation satisfies the TaskSpec.
-* `FAIL`: TaskSpec is valid; implementation needs repair.
-* `REPLAN`: TaskSpec itself is materially wrong or stale.
-
-Batch all currently discoverable blocking findings into one FAIL.
-
-Do not FAIL for style preferences, optional cleanup, or speculative risks.
-
-`UNVERIFIED` test evidence alone is not a failure.
+When subagents are used, give them the minimum context and scope required for
+their task. Avoid redundant investigation, duplicate validation, or artificial
+handoffs that do not improve the outcome.
 
 # Validation
 
@@ -290,7 +181,7 @@ Do not repeatedly rerun an unchanged expensive command after environment failure
 
 # Plans and documentation
 
-Use planning files only for substantial STANDARD/HIGH_RISK work.
+Use planning files only when the work is substantial enough that persistent planning or orchestration state is useful.
 
 Prefer behavior-oriented tasks over file-by-file micro-tasks.
 
@@ -300,7 +191,7 @@ Use:
 * `docs/plans/**` for substantial planning/orchestration;
 * `WORKBOARD.md` only when persistent multi-task state is useful.
 
-FAST_FIX normally requires none of these.
+Simple or localized tasks normally require none of these.
 
 ## Plan quality
 
@@ -330,14 +221,14 @@ Allowed write scope should prevent scope creep without predicting every file
 the worker may need to touch.
 
 Ordinary implementation bugs, local refactors, test fixture changes, missed
-edge cases, and implementation choices inside the frozen behavior and write
-scope are NOT reasons to replan.
+edge cases, and implementation choices that remain within the requested
+behavior are not reasons to create or rewrite a plan.
 
 # Continuous execution
 
 When asked to complete a plan, continue while runnable work remains.
 
-Do not stop merely because a Probe, Worker, Verifier, or individual task finished.
+Do not stop merely because a subagent or individual task finished.
 
 Stop only when:
 
