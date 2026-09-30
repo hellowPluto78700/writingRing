@@ -200,6 +200,10 @@ def _require_exp15_reference(config: Config) -> dict[str, Any]:
 def prepare(config: Config) -> dict[str, Any]:
     core, lock, _ = _load_core(config)
     exp15_manifest = _require_exp15_reference(config)
+    if exp15_manifest["core_identity"] != lock["identity"]:
+        raise ValueError(
+            "Exp15 H128 reference and current CoreBenchmark do not share the same core identity"
+        )
     for width in WIDTHS:
         make_width_protocol(core, width)
 
@@ -256,15 +260,27 @@ def prepare(config: Config) -> dict[str, Any]:
             }
         },
     )
+    exp15_aggregate = config.exp15_results_dir / "aggregate"
+    exp15_reference_files = {
+        name: file_hash(exp15_aggregate / name)
+        for name in (
+            "manifest.json",
+            "phase1_native_runs.csv",
+            "phase1_native_per_user.csv",
+            "phase1_probe_runs.csv",
+            "phase1_gate_summary.csv",
+            "phase1_gate_phase10.csv",
+            "phase1_5_native_runs.csv",
+            "phase1_5_probe_runs.csv",
+        )
+    }
     save_json(
         config.results_dir / "reference_manifest.json",
         {
             "core_identity": lock["identity"],
             "core_dataset_hash": lock["dataset_hash"],
             "exp15_manifest": exp15_manifest,
-            "exp15_manifest_hash": file_hash(
-                config.exp15_results_dir / "aggregate" / "manifest.json"
-            ),
+            "exp15_reference_files": exp15_reference_files,
         },
     )
     return payload
@@ -602,7 +618,20 @@ def _read_exp15(config: Config, name: str) -> pd.DataFrame:
 
 
 def finalize(config: Config) -> dict[str, Any]:
-    _require_exp15_reference(config)
+    exp15_manifest = _require_exp15_reference(config)
+    core, lock, _ = _load_core(config)
+    if exp15_manifest["core_identity"] != lock["identity"]:
+        raise ValueError(
+            "Exp15 H128 reference and current CoreBenchmark do not share the same core identity"
+        )
+    make_width_protocol(core, 128)
+    reference_lock = json.loads(
+        (config.results_dir / "reference_manifest.json").read_text(encoding="utf-8")
+    )
+    for name, expected in reference_lock["exp15_reference_files"].items():
+        actual = file_hash(config.exp15_results_dir / "aggregate" / name)
+        if actual != expected:
+            raise ValueError(f"Exp15 reference artifact changed after prepare: {name}")
     aggregate = config.results_dir / "aggregate"
     aggregate.mkdir(parents=True, exist_ok=True)
 
