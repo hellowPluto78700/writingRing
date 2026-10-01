@@ -335,6 +335,27 @@ def _budget_eval(model: nn.Module, arrays: dict[str, np.ndarray], p: Protocol,
     }
 
 
+def _gate_eval_stats(model: MatchedBudgetNet, arrays: dict[str, np.ndarray], p: Protocol, seed: int, split: str) -> dict[str, float]:
+    sample_means = []
+    temporal_stds = []
+    p90_p10 = []
+    model.eval()
+    with torch.no_grad():
+        for x, _, lengths in exp16.loader(arrays, split, p, seed):
+            gates = model(x, lengths)["gate_g"]
+            for i, length in enumerate(lengths.tolist()):
+                valid = gates[i, :length]
+                sample_means.append(float(valid.mean()))
+                temporal_stds.append(float(valid.std(unbiased=False)))
+                p90_p10.append(float(torch.quantile(valid, 0.9) - torch.quantile(valid, 0.1)))
+    return {
+        "gate_mean_of_sample_means": float(np.mean(sample_means)),
+        "gate_std_of_sample_means": float(np.std(sample_means)),
+        "gate_mean_within_sample_std": float(np.mean(temporal_stds)),
+        "gate_mean_p90_minus_p10": float(np.mean(p90_p10)),
+    }
+
+
 def _split_eval(model: nn.Module, arrays: dict[str, np.ndarray], p: Protocol,
                 seed: int, split: str) -> dict[str, float]:
     return exp16._split_eval(model, arrays, p, seed, split)
@@ -629,6 +650,8 @@ def train_one(config: Config, spec: ExpSpec) -> dict[str, Any]:
             "val_mean_logit_ce": val["mean_logit_ce"],
             "sampler_hash": _permutation_hash(_epoch_permutation(len(arrays["train_y"]), spec.seed, epoch)),
         }
+        if isinstance(model, MatchedBudgetNet):
+            row.update(_gate_eval_stats(model, arrays, p, spec.seed, "val"))
         compliant = True
         if spec.constrained:
             assert spec.rho is not None
@@ -974,8 +997,7 @@ def main(argv: list[str] | None = None) -> None:
     phase0 = sub.add_parser("phase0")
     phase0.add_argument("--task-id", type=int, required=True)
     sub.add_parser("finalize-calibration")
-    pair = sub.add_parser("train-pair")
-    pair.add_argument("--task-id", type=int, required=True)
+    pair = sub.add_parser("train-pair")    pair.add_argument("--task-id", type=int, required=True)
     replay = sub.add_parser("replay")
     replay.add_argument("--task-id", type=int, required=True)
     sub.add_parser("finalize")
@@ -997,7 +1019,8 @@ def main(argv: list[str] | None = None) -> None:
             payload["pair_tasks"] = [
                 {
                     **{key: value for key, value in task.items() if key != "specs"},
-                    "specs": [asdict(spec) for spec in task["specs"]],                }
+                    "specs": [asdict(spec) for spec in task["specs"]],
+                }
                 for task in pair_tasks(selected)
             ]
         print(json.dumps(payload, indent=2))
