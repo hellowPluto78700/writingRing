@@ -367,14 +367,6 @@ def _activity_summary(
             )
             longest = _longest_runs(z, lengths)
             episodes = _episode_counts(z, lengths)
-            alpha = (
-                1.0
-                - 2.0
-                ** -np.asarray(
-                    [v for shift in SHIFTS[layer_index] for v in [shift]],
-                    dtype=float,
-                )
-            )
             # BenchmarkNet assigns contiguous near-equal groups. Reconstruct the
             # exact per-neuron alpha vector from the locked shift tuple.
             q, r = divmod(p.width, len(SHIFTS[layer_index]))
@@ -686,7 +678,6 @@ def run_scale_diagnostic(
                 p,
                 verify=(batch_index == 0),
             )
-            valid = valid_mask(lengths, x.shape[1]).numpy()
             raw = trace["raw_drive"].numpy()
             actual = trace["actual_drive"].numpy()
             for i, length in enumerate(lengths.tolist()):
