@@ -917,8 +917,6 @@ def prepare(config: Config) -> dict[str, Any]:
 
     # Formal cases must start from the exact same parameter state for a seed.
     for seed in FORMAL_SEEDS:
-        reference = _make_model(formal_specs()[seed // 100 if False else 0], p)
-        del reference
         states = []
         for case, kind, param in FORMAL_CASES:
             model = _make_model(ExpSpec(case, seed, kind, param), p)
