@@ -1,0 +1,37 @@
+{
+  "checkpoint_rule": {
+    "ce_selector_val_ba_retention_seed_count": 1,
+    "required_seed_count": 2,
+    "selected_checkpoint_rule": "ba_first",
+    "selection_source": "validation_only",
+    "test_metrics_not_used_for_decision": true
+  },
+  "experiment": "experiment_16_prefix_supervised_selective_memory",
+  "functional_ablation_rows": 36,
+  "phase1_5_completed_runs": 0,
+  "phase1_decision": {
+    "enable_phase1_5": false,
+    "gp_minus_g0": 0.0025352733686067053,
+    "interaction": 0.0049903799903801005,
+    "metric": "validation native BA interaction",
+    "p0_minus_c0": -0.0024551066217733952,
+    "per_seed_interaction": {
+      "11": 0.04906806156806154,
+      "23": 0.0,
+      "37": -0.03409692159692146
+    },
+    "positive_interaction_seed_count": 1,
+    "reason": "no stable positive Gate x Prefix validation interaction",
+    "required_seed_count": 2,
+    "test_metrics_not_used": true
+  },
+  "prefix_selection": {
+    "lambda_prefix": 0.0,
+    "rule": "smallest lambda with eligible lookahead on at least 2/3 seeds",
+    "selection_source": "validation_only",
+    "status": "no_validation_supported_prefix",
+    "test_metrics_not_used": true
+  },
+  "protocol": "prefix_selective_memory_v1",
+  "status": "PASS"
+}

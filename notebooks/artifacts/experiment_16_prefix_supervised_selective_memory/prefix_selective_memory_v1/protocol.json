@@ -1,0 +1,96 @@
+{
+  "core_dataset_hash": "d57813f9cb16f3624dfed10e294ab6c4a9005f0384f025145fcc37f4634ffd0a",
+  "core_identity": "85ccaddc963c4502624f02b11ba420bb5c1ac9037abd2715b11b0f52ca175d99",
+  "experiment_id": "experiment_16_prefix_supervised_selective_memory",
+  "functional_ablations": [
+    "learned",
+    "gate_one",
+    "gate_time_mean",
+    "gate_time_shuffle"
+  ],
+  "gate": {
+    "equation": "g_t=sigmoid(G_z z_t + G_h h_{t-1} + b); L2 input=current*g_t",
+    "geometry": "Exp15 scalar context-dependent gate",
+    "initial_g": 0.9,
+    "no_g_over_q_amplification": true,
+    "suppressive_only": true
+  },
+  "identity": "83d59a6fb2ae5843ee26d1bcc3cbfd2ad54c5bf5faedbb0096ac21e44e501e9e",
+  "phase0a": {
+    "purpose": "same WCCE trajectory; compare BA-first versus minimum-validation-CE checkpoint selection",
+    "selectors": [
+      "ba_first",
+      "ce_min"
+    ],
+    "tasks": 3
+  },
+  "phase0b": {
+    "base_epochs": [
+      10,
+      20,
+      30,
+      50
+    ],
+    "lambda_candidates": [
+      0.0,
+      0.01,
+      0.03,
+      0.05,
+      0.1
+    ],
+    "min_seed_support": 2,
+    "prefix_phases": [
+      0.5,
+      0.75
+    ],
+    "prefix_weights": [
+      0.5,
+      0.5
+    ],
+    "purpose": "validation-only Prefix coefficient calibration by one-epoch lookahead",
+    "tasks": 60,
+    "val_ba_retention_pp": 0.5,
+    "val_ce_min_improvement": 0.005
+  },
+  "phase1_5_cases": [
+    "GP_stopR",
+    "GP_gate",
+    "GP_noGate"
+  ],
+  "phase1_5_tasks": 9,
+  "phase1_cases": [
+    "C0",
+    "P0",
+    "G0",
+    "GP_J"
+  ],
+  "phase1_tasks": 12,
+  "prefix_routes": {
+    "GP_J": "joint",
+    "GP_gate": "gate_only",
+    "GP_noGate": "no_gate",
+    "GP_stopR": "stopR",
+    "P0": "joint"
+  },
+  "protocol_version": "prefix_selective_memory_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "selection_leakage_rule": "Phase0 selector/lambda decisions use validation only; test is never read by selection functions.",
+  "shifts": [
+    [
+      2,
+      3,
+      4
+    ],
+    [
+      2,
+      3,
+      4
+    ]
+  ],
+  "tau_mem_ms": 22.54,
+  "width": 128
+}

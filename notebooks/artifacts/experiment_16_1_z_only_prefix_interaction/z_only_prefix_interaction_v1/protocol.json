@@ -1,0 +1,45 @@
+{
+  "allocation": {
+    "hostname": "cpu036",
+    "processor": "x86_64",
+    "slurm_cpus_per_task": "1",
+    "slurm_job_id": "65107098",
+    "slurm_job_nodelist": "cpu036"
+  },
+  "checkpoint_selection": "native validation BA, then validation CE, then earliest epoch",
+  "core_dataset_hash": "d57813f9cb16f3624dfed10e294ab6c4a9005f0384f025145fcc37f4634ffd0a",
+  "core_identity": "85ccaddc963c4502624f02b11ba420bb5c1ac9037abd2715b11b0f52ca175d99",
+  "experiment_id": "experiment_16_1_z_only_prefix_interaction",
+  "gate_init_q": 0.9,
+  "gate_modes": {
+    "z_history": "g_t=sigmoid(G_z z_t+G_h h_{t-1}+b_g)",
+    "z_only": "g_t=sigmoid(G_z z_t+b_g)"
+  },
+  "gated_task_count": 24,
+  "prefix_definition": {
+    "phases": [
+      0.5,
+      0.75
+    ],
+    "weights": [
+      0.5,
+      0.5
+    ]
+  },
+  "prefix_lambdas": [
+    0.01,
+    0.03,
+    0.05
+  ],
+  "protocol_version": "z_only_prefix_interaction_v1",
+  "seeds": [
+    11,
+    23,
+    37
+  ],
+  "single_node_required": false,
+  "task_count": 36,
+  "tau_mem_ms": 22.54,
+  "test_metrics_never_used_for_training_or_checkpoint_selection": true,
+  "width": 128
+}
