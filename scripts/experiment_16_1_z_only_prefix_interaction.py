@@ -151,7 +151,7 @@ def prepare(config: Config) -> dict[str, Any]:
         "task_count": len(specs()),
         "gated_task_count": len(gated_specs()),
         "allocation": allocation,
-        "single_node_required": True,
+        "single_node_required": False,
         "test_metrics_never_used_for_training_or_checkpoint_selection": True,
         "width": p.width,
         "tau_mem_ms": p.tau_mem_ms,
@@ -750,8 +750,6 @@ def finalize(config: Config) -> dict[str, Any]:
 
     native = _native_rows(config)
     hosts = sorted(set(native["hostname"]))
-    if len(hosts) != 1:
-        raise AssertionError(f"Exp16.1 requires one physical node; got {hosts}")
     native.to_csv(aggregate / "native_runs.csv", index=False)
 
     probes = _probe_rows(config)
@@ -846,12 +844,13 @@ def finalize(config: Config) -> dict[str, Any]:
         "status": "PASS",
         "experiment": EXPERIMENT_ID,
         "protocol": PROTOCOL_VERSION,
-        "hostname": hosts[0],
+        "hostnames": hosts,
         "training_runs": len(native),
         "gated_runs": len(gated_specs()),
         "interaction_rows": len(interactions),
         "prefix_lambdas": list(PREFIX_LAMBDAS),
-        "single_node_verified": True,
+        "single_node_verified": len(hosts) == 1,
+        "scheduler_mode": "independent_slurm_array_tasks",
     }
     save_json(aggregate / "manifest.json", report)
     return report

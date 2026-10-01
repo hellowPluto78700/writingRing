@@ -115,34 +115,41 @@ Every gated checkpoint is evaluated without retraining under:
 
 A functional selective gate should show meaningful degradation when learned timing/content alignment is destroyed.
 
-## Single-node execution contract
+## Slurm execution contract
 
-Exp16 showed nominally equivalent lambda=0 controls could diverge across node families. Exp16.1 therefore uses one Slurm allocation:
+Exp16.1 now uses the same per-run scheduling pattern as the earlier experiments. Each independent training or ablation task requests one CPU and may be scheduled on any available Unity node.
 
-- nodes = 1;
-- ntasks = 1;
-- cpus-per-task = 30;
-- memory = 100 GB;
-- wall time = 2 hours.
+Training array:
+- 36 tasks: array 0-35;
+- maximum concurrency 30;
+- 1 CPU per task;
+- 12 GB memory per task;
+- 2 hour limit per task.
 
-Inside that allocation, up to 30 independent training processes run concurrently. There are 36 runs total, so the final six start as workers free up.
+Functional-ablation array:
+- 24 tasks: array 0-23;
+- maximum concurrency 24;
+- 1 CPU per task;
+- 12 GB memory per task;
+- 2 hour limit per task.
 
 All numerical libraries are fixed to one thread per process: OMP_NUM_THREADS=1, MKL_NUM_THREADS=1, OPENBLAS_NUM_THREADS=1, NUMEXPR_NUM_THREADS=1.
 
-After training, all 24 gated checkpoints run functional ablations in the same allocation.
-
-Every checkpoint records hostname. Finalization fails if more than one hostname appears.
+Every checkpoint records hostname. Finalization reports the observed node set so node-family variation can be inspected, but it no longer requires all cases to share one physical node.
 
 ## Submission
 
 From the repository root on Unity:
 
 git pull origin main
-sbatch --parsable scripts/bash_script/SNN_Bash/run_exp_16_1_single_node_cpu.bash
+bash scripts/bash_script/SNN_Bash/submit_exp_16_1_cpu.bash
 
-The single job performs prepare -> 36 training runs -> 24 gated functional-ablation runs -> aggregate/finalize.
+The wrapper submits:
+prepare -> 36-task training array -> 24-task functional-ablation array -> finalize
 
-Child stdout/stderr are written under notebooks/artifacts/experiment_16_1_z_only_prefix_interaction/z_only_prefix_interaction_v1/launcher_logs/.
+with afterok dependencies between stages.
+
+Individual array tasks write their normal Slurm stdout/stderr according to the cluster output configuration.
 
 ## Main interpretation files
 

@@ -193,38 +193,36 @@ def test_training_selection_uses_validation_only() -> None:
     assert "test_ba" not in source
 
 
-def test_finalizer_hard_fails_on_multiple_hosts() -> None:
+def test_finalizer_reports_hosts_without_requiring_one_node() -> None:
     source = inspect.getsource(exp.finalize)
-    assert "if len(hosts) != 1" in source
-    assert "requires one physical node" in source
-    assert "single_node_verified" in source
+    assert '"hostnames": hosts' in source
+    assert '"single_node_verified": len(hosts) == 1' in source
+    assert '"scheduler_mode": "independent_slurm_array_tasks"' in source
+    assert "requires one physical node" not in source
 
 
-def test_launcher_runs_all_tasks_inside_current_allocation() -> None:
-    source = inspect.getsource(exp.launch)
-    assert "ThreadPoolExecutor" in source
-    assert "max_workers=max_workers" in source
-    assert "range(count)" in source
-    assert "subprocess" in inspect.getsource(exp._launch_one)
-
-
-def test_slurm_script_requests_one_node_thirty_cpus() -> None:
+def test_slurm_arrays_request_one_cpu_per_task() -> None:
     root = exp.find_repo_root()
-    script = (
-        root
-        / "scripts"
-        / "bash_script"
-        / "SNN_Bash"
-        / "run_exp_16_1_single_node_cpu.bash"
-    ).read_text(encoding="utf-8")
-    assert "#SBATCH --nodes=1" in script
-    assert "#SBATCH --ntasks=1" in script
-    assert "#SBATCH --cpus-per-task=30" in script
-    assert "#SBATCH --mem=100G" in script
-    assert "#SBATCH --time=02:00:00" in script
-    assert "launch-train" in script
-    assert "launch-ablation" in script
-    assert "OMP_NUM_THREADS=1" in script
+    bash_root = root / "scripts" / "bash_script" / "SNN_Bash"
+    train = (bash_root / "run_exp_16_1_train_cpu_array.bash").read_text(encoding="utf-8")
+    ablate = (bash_root / "run_exp_16_1_ablation_cpu_array.bash").read_text(encoding="utf-8")
+    submit = (bash_root / "submit_exp_16_1_cpu.bash").read_text(encoding="utf-8")
+
+    assert "#SBATCH --array=0-35%30" in train
+    assert "#SBATCH --cpus-per-task=1" in train
+    assert "#SBATCH --mem=12G" in train
+    assert "#SBATCH --time=02:00:00" in train
+    assert " train --task-id " in train
+    assert "OMP_NUM_THREADS=1" in train
+
+    assert "#SBATCH --array=0-23%24" in ablate
+    assert "#SBATCH --cpus-per-task=1" in ablate
+    assert "#SBATCH --mem=12G" in ablate
+    assert " ablation --task-id " in ablate
+
+    assert "run_exp_16_1_train_cpu_array.bash" in submit
+    assert "run_exp_16_1_ablation_cpu_array.bash" in submit
+    assert "--dependency=afterok:" in submit
 
 
 def test_functional_ablation_contract() -> None:
