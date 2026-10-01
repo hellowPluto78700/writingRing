@@ -18,7 +18,7 @@ def _p():
         width=6,
         input_channels=3,
         total_channels=3,
-        steps=8,
+        steps=16,
         labels=("A", "B", "C"),
         batch_size=4,
         max_epochs=3,
