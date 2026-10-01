@@ -1021,6 +1021,11 @@ def finalize(config: Config) -> dict[str, Any]:
         .mean(numeric_only=True)
     )
     scale_group.to_csv(aggregate / "scale_compensation_tau.csv", index=False)
+    (
+        scale_group.groupby(["case", "tau_group"], as_index=False)
+        .mean(numeric_only=True)
+        .to_csv(aggregate / "scale_compensation_tau_mean.csv", index=False)
+    )
 
     # Phase0 objective/run-tail diagnostic.
     objective_activity = []
@@ -1037,6 +1042,63 @@ def finalize(config: Config) -> dict[str, Any]:
     objective_probe_frame.to_csv(
         aggregate / "run_tail_probe_diagnostic.csv", index=False
     )
+    (
+        objective_activity_frame.groupby(
+            ["case", "layer", "tau_group"], as_index=False
+        )
+        .mean(numeric_only=True)
+        .to_csv(aggregate / "objective_activity_mean.csv", index=False)
+    )
+    run_curve = objective_probe_frame[
+        objective_probe_frame["family"] == "run_reward"
+    ]
+    (
+        run_curve.groupby(
+            ["objective_case", "feature", "decoder"], as_index=False
+        )
+        .mean(numeric_only=True)
+        .to_csv(aggregate / "run_cap_curve_mean.csv", index=False)
+    )
+    incremental_rows: list[dict[str, Any]] = []
+    early_tail = objective_probe_frame[
+        objective_probe_frame["family"] == "early_tail"
+    ]
+    for (objective_case, seed, decoder), group in early_tail.groupby(
+        ["objective_case", "seed", "decoder"]
+    ):
+        values = group.set_index("feature")
+        for cap in EARLY_TAIL_CAPS:
+            early_name = f"early{cap}"
+            tail_name = f"tail{cap}"
+            concat_name = f"early_tail{cap}"
+            if not all(name in values.index for name in (early_name, tail_name, concat_name)):
+                continue
+            incremental_rows.append(
+                {
+                    "objective_case": objective_case,
+                    "seed": seed,
+                    "decoder": decoder,
+                    "cap": cap,
+                    "early_test_ba": float(values.loc[early_name, "test_ba"]),
+                    "tail_test_ba": float(values.loc[tail_name, "test_ba"]),
+                    "early_tail_test_ba": float(values.loc[concat_name, "test_ba"]),
+                    "tail_incremental_pp": 100.0
+                    * (
+                        float(values.loc[concat_name, "test_ba"])
+                        - float(values.loc[early_name, "test_ba"])
+                    ),
+                }
+            )
+    incremental = pd.DataFrame(incremental_rows)
+    incremental.to_csv(aggregate / "early_tail_incremental.csv", index=False)
+    if not incremental.empty:
+        (
+            incremental.groupby(
+                ["objective_case", "decoder", "cap"], as_index=False
+            )
+            .mean(numeric_only=True)
+            .to_csv(aggregate / "early_tail_incremental_mean.csv", index=False)
+        )
 
     # Formal training.
     native_rows: list[dict[str, Any]] = []
@@ -1078,6 +1140,13 @@ def finalize(config: Config) -> dict[str, Any]:
     native_frame.to_csv(aggregate / "formal_native.csv", index=False)
     probe_frame.to_csv(aggregate / "formal_probes.csv", index=False)
     activity_frame.to_csv(aggregate / "formal_activity.csv", index=False)
+    (
+        activity_frame.groupby(
+            ["case", "split", "layer", "tau_group"], as_index=False
+        )
+        .mean(numeric_only=True)
+        .to_csv(aggregate / "formal_activity_mean.csv", index=False)
+    )
 
     # Primary deltas relative to the exact linear-WCCE parameterization.
     delta_rows = []
