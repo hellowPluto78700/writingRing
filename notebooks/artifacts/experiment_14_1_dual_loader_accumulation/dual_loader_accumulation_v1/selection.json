@@ -1,0 +1,28 @@
+{
+  "c0_validation": {
+    "native_ba_mean": 0.5746432579765913,
+    "native_prefix50_ba_mean": 0.24770121853455188,
+    "native_prefix75_ba_mean": 0.43372615039281714,
+    "relative10_no_bias_ba_mean": 0.6759579926246593,
+    "retrieval_l2_spike_mean": 0.6600529100529101,
+    "wholecount_no_bias_ba_mean": 0.5733986692320024
+  },
+  "combined": {
+    "reason": "combined cases require selected candidates from both phase and prefix families",
+    "status": "not_applicable"
+  },
+  "phase": {
+    "c0_retrieval_l2_spike_mean": 0.6600529100529101,
+    "lambda": 0.01,
+    "native_val_ba_mean": 0.5697350489017156,
+    "retrieval_l2_spike_mean": 0.6550585217251884,
+    "rule": "native BA >= C0-1pp; maximize L2 spike retrieval; within 0.5pp choose smaller lambda",
+    "status": "selected"
+  },
+  "prefix": {
+    "lambda": null,
+    "reason": "no prefix lambda satisfies native and relative10 validation BA >= C0 - 1pp",
+    "rule": "native BA >= C0-1pp and relative10 >= C0-1pp; maximize wholecount; tie by smaller collapse gap then lambda",
+    "status": "no_eligible_candidate"
+  }
+}
