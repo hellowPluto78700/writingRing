@@ -565,13 +565,17 @@ def _group_summary(neurons: pd.DataFrame) -> pd.DataFrame:
         .mean()
         .reset_index()
     )
-    grouped["fraction_neurons_mean_occupancy_gt_0p5"] = (
+    fractions = (
         neurons.assign(flag=neurons["mean_occupancy"] > 0.5)
         .groupby(["case", "seed", "split", "tau_group"])["flag"]
         .mean()
-        .reset_index(drop=True)
+        .reset_index(name="fraction_neurons_mean_occupancy_gt_0p5")
     )
-    return grouped
+    return grouped.merge(
+        fractions,
+        on=["case", "seed", "split", "tau_group"],
+        how="left",
+    )
 
 
 def _counterfactual_group_summary(frame: pd.DataFrame) -> pd.DataFrame:
