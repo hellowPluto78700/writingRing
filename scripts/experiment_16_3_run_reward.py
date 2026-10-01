@@ -972,6 +972,21 @@ def prepare(config: Config) -> dict[str, Any]:
     return payload
 
 
+def _mean_table(
+    frame: pd.DataFrame,
+    by: list[str],
+    *,
+    exclude: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    blocked = set(by) | set(exclude)
+    numeric = [
+        column
+        for column in frame.select_dtypes(include=[np.number]).columns
+        if column not in blocked
+    ]
+    return frame.groupby(by, as_index=False)[numeric].mean()
+
+
 def _probe_metric(
     frame: pd.DataFrame,
     case: str,
@@ -1007,16 +1022,17 @@ def finalize(config: Config) -> dict[str, Any]:
         scale_frames.append(pd.read_csv(path))
     scale = pd.concat(scale_frames, ignore_index=True)
     scale.to_csv(aggregate / "scale_compensation_neurons.csv", index=False)
-    scale_group = (
-        scale.groupby(["case", "seed", "tau_group"], as_index=False)
-        .mean(numeric_only=True)
+    scale_group = _mean_table(
+        scale,
+        ["case", "seed", "tau_group"],
+        exclude=("neuron",),
     )
     scale_group.to_csv(aggregate / "scale_compensation_tau.csv", index=False)
-    (
-        scale_group.groupby(["case", "tau_group"], as_index=False)
-        .mean(numeric_only=True)
-        .to_csv(aggregate / "scale_compensation_tau_mean.csv", index=False)
-    )
+    _mean_table(
+        scale_group,
+        ["case", "tau_group"],
+        exclude=("seed",),
+    ).to_csv(aggregate / "scale_compensation_tau_mean.csv", index=False)
 
     # Phase0 objective/run-tail diagnostic.
     objective_activity = []
@@ -1033,23 +1049,19 @@ def finalize(config: Config) -> dict[str, Any]:
     objective_probe_frame.to_csv(
         aggregate / "run_tail_probe_diagnostic.csv", index=False
     )
-    (
-        objective_activity_frame.groupby(
-            ["case", "layer", "tau_group"], as_index=False
-        )
-        .mean(numeric_only=True)
-        .to_csv(aggregate / "objective_activity_mean.csv", index=False)
-    )
+    _mean_table(
+        objective_activity_frame,
+        ["case", "layer", "tau_group"],
+        exclude=("seed",),
+    ).to_csv(aggregate / "objective_activity_mean.csv", index=False)
     run_curve = objective_probe_frame[
         objective_probe_frame["family"] == "run_reward"
     ]
-    (
-        run_curve.groupby(
-            ["objective_case", "feature", "decoder"], as_index=False
-        )
-        .mean(numeric_only=True)
-        .to_csv(aggregate / "run_cap_curve_mean.csv", index=False)
-    )
+    _mean_table(
+        run_curve,
+        ["objective_case", "feature", "decoder"],
+        exclude=("seed",),
+    ).to_csv(aggregate / "run_cap_curve_mean.csv", index=False)
     incremental_rows: list[dict[str, Any]] = []
     early_tail = objective_probe_frame[
         objective_probe_frame["family"] == "early_tail"
@@ -1083,13 +1095,11 @@ def finalize(config: Config) -> dict[str, Any]:
     incremental = pd.DataFrame(incremental_rows)
     incremental.to_csv(aggregate / "early_tail_incremental.csv", index=False)
     if not incremental.empty:
-        (
-            incremental.groupby(
-                ["objective_case", "decoder", "cap"], as_index=False
-            )
-            .mean(numeric_only=True)
-            .to_csv(aggregate / "early_tail_incremental_mean.csv", index=False)
-        )
+        _mean_table(
+            incremental,
+            ["objective_case", "decoder", "cap"],
+            exclude=("seed",),
+        ).to_csv(aggregate / "early_tail_incremental_mean.csv", index=False)
 
     # Formal training.
     native_rows: list[dict[str, Any]] = []
@@ -1131,13 +1141,11 @@ def finalize(config: Config) -> dict[str, Any]:
     native_frame.to_csv(aggregate / "formal_native.csv", index=False)
     probe_frame.to_csv(aggregate / "formal_probes.csv", index=False)
     activity_frame.to_csv(aggregate / "formal_activity.csv", index=False)
-    (
-        activity_frame.groupby(
-            ["case", "split", "layer", "tau_group"], as_index=False
-        )
-        .mean(numeric_only=True)
-        .to_csv(aggregate / "formal_activity_mean.csv", index=False)
-    )
+    _mean_table(
+        activity_frame,
+        ["case", "split", "layer", "tau_group"],
+        exclude=("seed",),
+    ).to_csv(aggregate / "formal_activity_mean.csv", index=False)
 
     # Primary deltas relative to the exact linear-WCCE parameterization.
     delta_rows = []
@@ -1211,7 +1219,11 @@ def finalize(config: Config) -> dict[str, Any]:
         aggregate / "formal_deltas_vs_linear.csv",
         index=False,
     )
-    delta_frame.groupby("case", as_index=False).mean(numeric_only=True).to_csv(
+    _mean_table(
+        delta_frame,
+        ["case"],
+        exclude=("seed",),
+    ).to_csv(
         aggregate / "formal_deltas_vs_linear_mean.csv",
         index=False,
     )
