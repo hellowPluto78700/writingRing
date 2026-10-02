@@ -179,5 +179,7 @@ def test_validation_selection_functions_do_not_reference_test_metrics() -> None:
 
 def test_phase1_5_decision_is_positive_interaction_only() -> None:
     source = inspect.getsource(exp.finalize_phase1)
-    assert "interaction > 0 and prefix_gain > 0" in source
+    assert "interaction > 0" in source
+    assert "prefix_gain > 0" in source
+    assert "positive_seed_count >= MIN_SEED_SUPPORT" in source
     assert "validation native BA interaction" in source

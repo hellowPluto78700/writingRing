@@ -135,11 +135,13 @@ def test_slurm_contract_files():
     phase1 = (bash / "run_exp_16_2_phase1_pairs_cpu_array.bash").read_text()
     phase2 = (bash / "run_exp_16_2_phase2_replay_cpu_array.bash").read_text()
     submit = (bash / "submit_exp_16_2_cpu.bash").read_text()
+    phase0_finalize = (bash / "finalize_exp_16_2_phase0_cpu.bash").read_text()
     assert "#SBATCH --array=0-11%12" in phase0
     assert "#SBATCH --array=0-11%12" in phase1
     assert "#SBATCH --array=0-11%12" in phase2
     assert "#SBATCH --cpus-per-task=1" in phase0
     assert "#SBATCH --cpus-per-task=1" in phase1
     assert "#SBATCH --cpus-per-task=1" in phase2
-    assert "finalize-calibration" in submit
+    assert "finalize-calibration" in phase0_finalize
+    assert "finalize_exp_16_2_phase0_cpu.bash" in submit
     assert "--dependency=afterok:" in submit
