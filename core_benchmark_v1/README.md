@@ -206,3 +206,9 @@ python -m core_benchmark_v1 --results /tmp/core-benchmark-smoke smoke
 ```
 
 The focused suite checks case/dependency mapping, current and reset equations, reference-neuron forward/backward parity, paired initialization, loss/padding support, sample-wise shuffling, true no-bias preprocessing, cohort identity, frozen depth controls, readout-only adaptation, immutable checkpoint evaluation, strict aggregation, Slurm dry-run contracts, and execution of all eight notebooks on finalized synthetic artifacts. Synthetic BA values are not research results. Running these checks does not submit production Slurm jobs.
+
+## Optional extensions
+
+Optional studies that reuse the locked CoreBenchmark data/model/probe contract without changing the v1.1 run matrix live under `core_benchmark_v1/extensions/`.
+
+- `extensions/output_residual_leakage/`: 11-point output beta sweep under WCCE/TSCE with endpoint residual correction, full Core probes, firing/persistence diagnostics, high/low-rate group probes, pruning controls, and a separate Slurm pipeline. It is not part of the canonical 36-run CoreBenchmark v1.1 manifest.
