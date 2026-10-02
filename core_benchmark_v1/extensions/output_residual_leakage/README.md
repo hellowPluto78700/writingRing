@@ -56,7 +56,7 @@ For L1/L2 the extension saves firing-rate distributions, fractions below 1/5 Hz 
 
 Train-rate-defined high30 and low30 groups receive no-bias WholeCount, Fixed250 ordered, and Relative10 ordered probes at L1 and L2.
 
-A separate pruning stage removes top/bottom 10/20/30% L2 neurons by training-user firing rate and evaluates both fixed-W damage and frozen-backbone output-W retraining.
+Pruning removes top/bottom 10/20/30% L2 neurons by training-user firing rate and evaluates both fixed-W damage and frozen-backbone output-W retraining. In Slurm execution it shares the same postprocess task as probes/diagnostics rather than using a second array.
 
 A selected-checkpoint gradient diagnostic bins `||dL/de[t]||` into ten normalized sequence-time bins.
 
@@ -72,9 +72,8 @@ Commands:
 python -m core_benchmark_v1.extensions.output_residual_leakage plan
 python -m core_benchmark_v1.extensions.output_residual_leakage prepare
 python -m core_benchmark_v1.extensions.output_residual_leakage run --task-id 0
-python -m core_benchmark_v1.extensions.output_residual_leakage analyze --task-id 0
-python -m core_benchmark_v1.extensions.output_residual_leakage prune --task-id 0
+python -m core_benchmark_v1.extensions.output_residual_leakage postprocess --task-id 0
 python -m core_benchmark_v1.extensions.output_residual_leakage finalize
 ```
 
-The Slurm pipeline uses one preparation job, a 66-task training array, a dependent 66-task probe/diagnostic array, an independent dependent 66-task pruning array, and a finalizer that only consumes artifacts and fails closed on missing runs.
+The Slurm pipeline uses one preparation job, a 66-task training array, one dependent 66-task combined postprocess array (probes/diagnostics followed by pruning/W-retraining), and a finalizer that only consumes artifacts and fails closed on missing runs. Postprocess is stage-resumable: existing `analysis_complete.json` or `pruning_complete.json` markers skip the corresponding completed stage.
