@@ -112,3 +112,22 @@ def test_beta1_wcce_evidence_gradient_equals_core_o0_gradient() -> None:
     core_value.backward()
 
     torch.testing.assert_close(extension_evidence.grad, core_evidence.grad, rtol=1e-5, atol=2e-6)
+
+def test_slurm_workers_resolve_common_from_submit_root() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    slurm = root / "core_benchmark_v1" / "extensions" / "output_residual_leakage" / "slurm"
+    workers = ("prepare.bash", "run_array.bash", "analyze_array.bash", "prune_array.bash", "finalize.bash")
+    for name in workers:
+        source = (slurm / name).read_text()
+        assert '$(dirname "$0")' not in source
+        assert "SLURM_SUBMIT_DIR" in source
+        assert "common.bash" in source
+
+    common = (slurm / "common.bash").read_text()
+    assert 'REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"' in common
+
+    submit = (slurm / "submit.bash").read_text()
+    assert "export REPO_ROOT=" in submit
+    assert "--export=ALL" in submit
