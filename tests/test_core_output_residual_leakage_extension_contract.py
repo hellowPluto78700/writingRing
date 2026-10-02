@@ -118,7 +118,7 @@ def test_slurm_workers_resolve_common_from_submit_root() -> None:
 
     root = Path(__file__).resolve().parents[1]
     slurm = root / "core_benchmark_v1" / "extensions" / "output_residual_leakage" / "slurm"
-    workers = ("prepare.bash", "run_array.bash", "analyze_array.bash", "prune_array.bash", "finalize.bash")
+    workers = ("prepare.bash", "run_array.bash", "analyze_array.bash", "prune_array.bash", "postprocess_array.bash", "finalize.bash")
     for name in workers:
         source = (slurm / name).read_text()
         assert '$(dirname "$0")' not in source
@@ -132,3 +132,30 @@ def test_slurm_workers_resolve_common_from_submit_root() -> None:
     submit = (slurm / "submit.bash").read_text()
     assert "export REPO_ROOT=" in submit
     assert "--export=ALL" in submit
+
+
+def test_submit_uses_single_combined_postprocess_array() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    slurm = root / "core_benchmark_v1" / "extensions" / "output_residual_leakage" / "slurm"
+    submit = (slurm / "submit.bash").read_text()
+    postprocess = (slurm / "postprocess_array.bash").read_text()
+    assert "postprocess_array.bash" in submit
+    assert 'analyze_array.bash' not in submit
+    assert 'prune_array.bash' not in submit
+    assert '--dependency="afterok:$train"' in submit
+    assert '--dependency="afterok:$postprocess"' in submit
+    assert " postprocess --task-id " in postprocess
+
+
+def test_postprocess_is_stage_resumable() -> None:
+    import inspect
+    from core_benchmark_v1.extensions.output_residual_leakage import runner
+
+    source = inspect.getsource(runner.run_postprocess)
+    assert 'analysis_complete.json' in source
+    assert 'pruning_complete.json' in source
+    assert 'already_complete' in source
+    assert 'run_analysis(root, spec)' in source
+    assert 'run_pruning(root, spec)' in source
