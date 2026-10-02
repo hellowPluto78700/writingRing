@@ -129,5 +129,3 @@ The CPU launcher runs:
 Artifacts are written under:
 
 notebooks/artifacts/experiment_17_1_gradient_starvation/gradient_starvation_v1/
-
-[executed on device: acd20ea31325 (425a23ad-a806-44e3-abed-ce7b563d3969)]
