@@ -65,7 +65,7 @@ def test_beta0_has_no_cross_timestep_residual_retention() -> None:
     evidence = torch.tensor([[[0.4], [0.0], [0.0]]], dtype=torch.float32)
     lengths = torch.tensor([3])
     out = residual_leakage_output(evidence, lengths, beta=0.0, threshold=0.5, slope=25.0)
-    assert out["residual"][0, 0, 0].item() == 0.4
+    torch.testing.assert_close(out["residual"][0, 0, 0], torch.tensor(0.4), rtol=0, atol=1e-7)
     assert out["pre_reset"][0, 1, 0].item() == 0.0
     assert out["residual"][0, 1, 0].item() == 0.0
 
