@@ -124,6 +124,7 @@ def test_slurm_workers_resolve_common_from_submit_root() -> None:
         assert '$(dirname "$0")' not in source
         assert "SLURM_SUBMIT_DIR" in source
         assert "common.bash" in source
+        assert "#SBATCH --time=01:00:00" in source
 
     common = (slurm / "common.bash").read_text()
     assert 'REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"' in common
