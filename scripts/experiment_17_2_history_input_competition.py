@@ -400,10 +400,8 @@ def _accumulate_batch(
             (mem_carry + syn_history - p.threshold) * valid
         ).sum((0, 1)).detach().cpu().numpy()
         acc["full_margin"] += (
-            (mem_carry + syn_state - syn_history - p.threshold) * valid
+            (mem_carry + syn_state - p.threshold) * valid
         ).sum((0, 1)).detach().cpu().numpy()
-        # full_margin above simplifies to mem_carry + syn_state - threshold,
-        # while retaining the explicit decomposition in the source expression.
 
         if layer == 1 and "raw_zero_l2_spike" in replay:
             raw_active = replay["raw_input_active"] & valid_bt
