@@ -129,3 +129,61 @@ The CPU launcher runs:
 Artifacts are written under:
 
 notebooks/artifacts/experiment_17_1_gradient_starvation/gradient_starvation_v1/
+
+## Post-hoc validation — routing bottleneck versus representation bottleneck
+
+Phase 1 produced a mixed outcome: C1 strongly increased class selectivity in the frozen epoch-20 low-occupancy population, but native OOD BA did not improve consistently, and that population also became more active. Before implementing persistent-readout attenuation, run an artifact-only validation to distinguish two remaining explanations.
+
+### Question
+
+Did C1 actually make the fixed epoch-20 low group more transferable to unseen users, while the native main head failed to exploit it?
+
+If yes, the remaining limitation is consistent with an evidence-routing bottleneck. If no, then higher train-side class eta-squared is not sufficient evidence that the rescued representation itself transfers.
+
+### Locked probe geometry
+
+For every selected C0/C1/C2/C3 checkpoint and seed 11/23/37:
+
+- reuse the exact epoch-20 `low` and `high` groups stored by the original experiment;
+- cross-check checkpoint group indices against the epoch-20 bootstrap `groups.json`;
+- do not redefine groups using the selected checkpoint, validation data, or test data;
+- extract L2 spike WholeCount features by summing valid spike activity across time;
+- fit the standard CoreBenchmark `no_bias` logistic probe;
+- scale using train data only;
+- select probe C using validation BA only;
+- report train, validation, and test BA plus train-test gap;
+- never retrain or modify the SNN.
+
+The primary contrast is:
+
+[
+Delta_{mathrm{low}} =
+BA_{mathrm{test}}^{mathrm{C1,low}}
+-
+BA_{mathrm{test}}^{mathrm{C0,low}}.
+]
+
+The high-group probe is a matched contextual control.
+
+### Interpretation contract
+
+**Routing-bottleneck support:** C1 substantially and consistently improves fixed-low-group test BA relative to C0, while native C1 test BA remains approximately unchanged. This means transferable information exists in the rescued low group but is not effectively converted into native accumulated evidence.
+
+**Representation-bottleneck support:** C1 strongly improves train-side low-group selectivity but fixed-low-group test BA does not improve consistently. In this case, the apparent representation rescue is not itself OOD-transferable, so persistent-readout attenuation is not yet justified as the main next step.
+
+**Mixed result:** low-group test BA improves only in a subset of seeds or only alongside a comparable train-test gap increase. Treat this as insufficient evidence for a clean routing claim.
+
+### Execution
+
+This block is artifact-only and uses the completed Exp17.1 checkpoints:
+
+```bash
+bash scripts/bash_script/SNN_Bash/submit_exp_17_1_posthoc_probe_cpu.bash
+```
+
+It runs 12 independent probe tasks followed by one aggregate job.
+
+Artifacts are written under:
+
+`notebooks/artifacts/experiment_17_1_gradient_starvation/gradient_starvation_v1/posthoc_group_probes/`
+
