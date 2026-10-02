@@ -491,6 +491,24 @@ def run_pruning(root: Path, spec: ExtensionRun) -> dict[str, Any]:
     save_json(directory / "pruning_complete.json", {"status": "PASS", "run": spec.as_dict()})
     return {"run": spec.key, "status": "PASS", "rows": len(rows)}
 
+
+def run_postprocess(root: Path, spec: ExtensionRun) -> dict[str, Any]:
+    directory = root / "runs" / spec.key
+    if not (directory / "train_complete.json").exists():
+        raise FileNotFoundError(f"Train/eval incomplete: {spec.key}")
+    stages: dict[str, str] = {}
+    if (directory / "analysis_complete.json").exists():
+        stages["analysis"] = "already_complete"
+    else:
+        run_analysis(root, spec)
+        stages["analysis"] = "PASS"
+    if (directory / "pruning_complete.json").exists():
+        stages["pruning"] = "already_complete"
+    else:
+        run_pruning(root, spec)
+        stages["pruning"] = "PASS"
+    return {"run": spec.key, "status": "PASS", "stages": stages}
+
 def finalize(root: Path, *, require_pruning: bool = True) -> dict[str, Any]:
     import pandas as pd
     specs = available_runs(root)
@@ -575,7 +593,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("plan")
     prep = sub.add_parser("prepare")
     prep.add_argument("--synthetic", action="store_true")
-    for name in ("run", "analyze", "prune"):
+    for name in ("run", "analyze", "prune", "postprocess"):
         cmd = sub.add_parser(name)
         choose = cmd.add_mutually_exclusive_group(required=True)
         choose.add_argument("--run-key")
@@ -597,15 +615,14 @@ def main(argv: list[str] | None = None) -> None:
         prepare(root, synthetic=True)
         for spec in available_runs(root):
             run_formal(root, spec)
-            run_analysis(root, spec)
-            run_pruning(root, spec)
+            run_postprocess(root, spec)
         print(json.dumps(finalize(root), indent=2))
         return
     if args.command == "finalize":
         print(json.dumps(finalize(root, require_pruning=not args.no_pruning), indent=2))
         return
     spec = resolve_spec(root, args.run_key, args.task_id)
-    fn = {"run": run_formal, "analyze": run_analysis, "prune": run_pruning}[args.command]
+    fn = {"run": run_formal, "analyze": run_analysis, "prune": run_pruning, "postprocess": run_postprocess}[args.command]
     print(json.dumps(fn(root, spec), indent=2))
 
 
