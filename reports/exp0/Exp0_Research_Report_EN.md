@@ -923,3 +923,73 @@ For 0.2, selected best epoch is taken from the original `epochs_trained` field; 
 This is not a BA-based selective exclusion: the excluded rule comes from scheduler status. The five-seed artifact result is retained in the table and CSV; the strict four-seed statistic is explicitly distinct from the original five-seed statistic.
 
 
+
+## Appendix B. Independent withGyro Thread Using the Same Experiment Number
+
+This branch uses Action0 and polarity-split events derived from linear acceleration and gyro-derived angular acceleration. `accel30`, `angular30`, and `combined60` contain 30, 30, and 60 channels respectively; raw IMU is not provided to the probe. It does not train the main-series multi-τ SNN. Exp0.1 channel-ablation v3 has 11 fixed durations and 9 relative-bin counts, linear and 5NN decoders, and five user splits (1,200 train/validation/test result rows). v2 is the 400-row combined60 predecessor and is not double-counted with v3. Exp0.2 evaluates Fixed250/Relative10 × three channel sets × five decoders × five splits = 150 results: 30 linear controls and 120 neural runs. Neural decoders are frozen-linear residual `local`, `transition`, `local_transition`, and GRU32. Residual epoch 0 is a valid baseline checkpoint.
+
+These are independent-split averages and are not combined with the fixed-split main series. The full historical motivation, bug history, and scheduler status for this thread are **not verified from available artifacts**. Implementation and provenance records support this appendix.
+
+### Complete Structured-decoder Aggregate
+
+| representation | channel set | decoder | test BA (%) |
+| --- | --- | --- | --- |
+| fixed250 | accel30 | gru | 54.17±5.88 |
+| fixed250 | accel30 | linear | 52.40±10.77 |
+| fixed250 | accel30 | local | 54.27±10.98 |
+| fixed250 | accel30 | local_transition | 51.40±9.03 |
+| fixed250 | accel30 | transition | 54.85±11.55 |
+| fixed250 | angular30 | gru | 50.36±7.75 |
+| fixed250 | angular30 | linear | 57.12±5.76 |
+| fixed250 | angular30 | local | 56.47±7.52 |
+| fixed250 | angular30 | local_transition | 57.59±5.24 |
+| fixed250 | angular30 | transition | 56.15±8.64 |
+| fixed250 | combined60 | gru | 55.79±11.60 |
+| fixed250 | combined60 | linear | 57.40±11.01 |
+| fixed250 | combined60 | local | 57.15±9.92 |
+| fixed250 | combined60 | local_transition | 59.65±7.10 |
+| fixed250 | combined60 | transition | 58.85±9.08 |
+| relative10 | accel30 | gru | 53.41±8.45 |
+| relative10 | accel30 | linear | 66.76±9.72 |
+| relative10 | accel30 | local | 66.61±8.53 |
+| relative10 | accel30 | local_transition | 68.33±8.62 |
+| relative10 | accel30 | transition | 68.75±8.18 |
+| relative10 | angular30 | gru | 60.55±5.78 |
+| relative10 | angular30 | linear | 75.29±7.01 |
+| relative10 | angular30 | local | 74.70±6.28 |
+| relative10 | angular30 | local_transition | 74.85±6.91 |
+| relative10 | angular30 | transition | 75.71±6.42 |
+| relative10 | combined60 | gru | 57.24±4.41 |
+| relative10 | combined60 | linear | 75.72±9.26 |
+| relative10 | combined60 | local | 75.47±8.55 |
+| relative10 | combined60 | local_transition | 76.89±9.80 |
+| relative10 | combined60 | transition | 76.37±9.02 |
+
+For combined60 Relative10, linear is 75.72±9.26% and `local_transition` is 76.89±9.80%, a +1.16 pp aggregate difference; GRU is 57.24±4.41%, −18.48 pp versus linear. The small aggregate gain is not evidence of reliable nonlinear synergy. For combined60 Fixed250, linear is 57.40±11.01% and `local_transition` is 59.65±7.10%. All sensor/decoder negative results are retained in the table.
+
+## Appendix C. Evidence Package and Verification Notes
+
+The evidence package contains original Unity summary/manifest/provenance text, file SHA256 values, per-seed exports, scheduler task results, key implementation source and healthy reference material, capacity-history summaries, all shift summaries, and report intermediate text. It is not a backup of checkpoint weights or the raw dataset. Chat retrieval records only locatable times and content summaries; it does not fabricate original conversation links.
+
+### Code-evidence Links
+
+| Source file | Pinned verification link |
+| --- | --- |
+| scripts/experiment_0_1/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1/README.md) |
+| scripts/experiment_0_1_1_local234_wholecount/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_1_local234_wholecount/README.md) |
+| scripts/experiment_0_1_2_regularized_general_comparison/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_2_regularized_general_comparison/README.md) |
+| scripts/experiment_0_1_3_doc_faithful_regularization/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_3_doc_faithful_regularization/README.md) |
+| scripts/experiment_0_1_4_parallel_regularization_ablation/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_4_parallel_regularization_ablation/README.md) |
+| scripts/experiment_0_1_5_gradient_calibrated_all_fixes/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_5_gradient_calibrated_all_fixes/README.md) |
+| scripts/experiment_0_1_general_comparison/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_general_comparison/README.md) |
+| scripts/experiment_0_2_endpoint_tail_regularization/README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_2_endpoint_tail_regularization/README.md) |
+| scripts/experiment_0_2_2_capacity_preserving_loss_README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_2_2_capacity_preserving_loss_README.md) |
+| scripts/experiment_0_2_shift_resolved_fire_rate_README.md | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_2_shift_resolved_fire_rate_README.md) |
+| scripts/experiment_0_1_general_comparison.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_general_comparison.py) |
+| scripts/experiment_0_1_growing_prefix_relative10.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_1_growing_prefix_relative10.py) |
+| scripts/experiment_0_2_2_capacity_preserving_loss.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_0_2_2_capacity_preserving_loss.py) |
+| scripts/experiment_5_0_local_evidence_objectives.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_5_0_local_evidence_objectives.py) |
+| scripts/experiment_3_0_1_single_tau_objective_comparison.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_3_0_1_single_tau_objective_comparison.py) |
+| scripts/experiment_4_0_1_multispike_macro_lif.py | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/experiment_4_0_1_multispike_macro_lif.py) |
+| scripts/bash_script/SNN_Bash/run_exp_0_1_3_doc_faithful_regularization_cpu_array.bash | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/bash_script/SNN_Bash/run_exp_0_1_3_doc_faithful_regularization_cpu_array.bash) |
+| scripts/bash_script/SNN_Bash/run_exp_0_1_5_gradient_calibrated_all_fixes_cpu_array.bash | [view](https://github.com/hellowPluto78700/writingRing/blob/db53a7c47eba46956428efec0888aa5a88b5a5a9/scripts/bash_script/SNN_Bash/run_exp_0_1_5_gradient_calibrated_all_fixes_cpu_array.bash) |
