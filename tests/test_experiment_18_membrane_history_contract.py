@@ -85,14 +85,19 @@ def test_parameter_initialization_matches_core_o0():
 
 
 def test_subthreshold_pole_swap_equivalence():
-    p = replace(_p(), threshold=1e9)
+    p = _p()
     o0 = BenchmarkNet(Run("O0", 11, "01_objective", shifts=exp.SHIFTS, objective="wcce"), p)
     u = exp.UHistoryNet(exp.ExpSpec("U_NORMAL", 11), p)
+    with torch.no_grad():
+        for layer in o0.layers:
+            layer.weight.mul_(1e-3)
     u.layers.load_state_dict(o0.layers.state_dict())
     u.head.load_state_dict(o0.head.state_dict())
-    x = torch.randn(3, p.steps, p.input_channels)
+    x = 1e-3 * torch.randn(3, p.steps, p.input_channels)
     lengths = torch.tensor([16, 13, 10])
     a, b = o0(x, lengths), u(x, lengths)
+    assert all(int(v.sum()) == 0 for v in a["spike"])
+    assert all(int(v.sum()) == 0 for v in b["spike"])
     for av, bv in zip(a["pre_reset"], b["pre_reset"]):
         assert torch.allclose(av, bv, atol=2e-6, rtol=1e-6)
 
