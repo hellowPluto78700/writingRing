@@ -6,6 +6,7 @@ import argparse
 from dataclasses import dataclass
 import json
 import math
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -464,6 +465,68 @@ def diagnose(config: Config, case: str, seed: int) -> dict[str, Any]:
     return result
 
 
+def smoke(config: Config) -> dict[str, Any]:
+    """Cheap real-data preflight for both U-history training cases."""
+    p, lock, arrays = _core(config)
+    results: list[dict[str, Any]] = []
+    train_iter = iter(loader(arrays, "train", p, SEEDS[0], shuffle=False))
+    x, y, lengths = next(train_iter)
+    x = x[: min(4, len(x))]
+    y = y[: len(x)]
+    lengths = lengths[: len(x)]
+    for case in CASES:
+        spec = ExpSpec(case, SEEDS[0])
+        model = UHistoryNet(spec, p)
+        optimizer = torch.optim.Adam(model.parameters(), lr=p.learning_rate, weight_decay=p.weight_decay)
+        before = cpu_state(model)
+        optimizer.zero_grad(set_to_none=True)
+        out = model(x, lengths)
+        loss = F.cross_entropy(mean_logits(out["evidence"], lengths), y)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(f"{case}: smoke loss is nonfinite")
+        loss.backward()
+        if not any(param.grad is not None for param in model.parameters()):
+            raise AssertionError(f"{case}: smoke produced no gradients")
+        if any(param.grad is not None and not torch.isfinite(param.grad).all() for param in model.parameters()):
+            raise FloatingPointError(f"{case}: smoke gradient is nonfinite")
+        optimizer.step()
+        after = cpu_state(model)
+        if state_hash(before) == state_hash(after):
+            raise AssertionError(f"{case}: optimizer step did not change model state")
+        with tempfile.TemporaryDirectory(prefix="exp18_smoke_") as tmp:
+            checkpoint = Path(tmp) / "checkpoint.pt"
+            save_torch(checkpoint, {
+                "case": case,
+                "seed": spec.seed,
+                "core_identity": lock["identity"],
+                "model_state_dict": after,
+            })
+            payload = load_torch(checkpoint)
+            restored = UHistoryNet(spec, p)
+            restored.load_state_dict(payload["model_state_dict"], strict=True)
+            restored.eval()
+            with torch.no_grad():
+                logits = mean_logits(restored(x, lengths)["evidence"], lengths)
+            if logits.shape != (len(x), len(p.labels)) or not torch.isfinite(logits).all():
+                raise AssertionError(f"{case}: smoke checkpoint/eval output invalid")
+        results.append({
+            "case": case,
+            "loss": float(loss.detach()),
+            "batch_size": int(len(x)),
+            "checkpoint_roundtrip": True,
+            "eval_finite": True,
+        })
+    return {
+        "status": "PASS",
+        "experiment": EXPERIMENT_ID,
+        "protocol": PROTOCOL_VERSION,
+        "core_identity": lock["identity"],
+        "python": __import__("sys").version.split()[0],
+        "torch": torch.__version__,
+        "cases": results,
+    }
+
+
 def prepare(config: Config) -> dict[str, Any]:
     p, lock, _ = _core(config)
     config.results_dir.mkdir(parents=True, exist_ok=True)
@@ -572,6 +635,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--results", type=Path)
     parser.add_argument("--core-results", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("smoke")
     sub.add_parser("prepare")
     run_p = sub.add_parser("run")
     run_p.add_argument("--case", choices=CASES, required=True)
@@ -582,7 +646,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("finalize")
     args = parser.parse_args(argv)
     config = config_from_args(args)
-    if args.command == "prepare":
+    if args.command == "smoke":
+        result = smoke(config)
+    elif args.command == "prepare":
         result = prepare(config)
     elif args.command == "run":
         result = run_one(config, ExpSpec(args.case, args.seed))
