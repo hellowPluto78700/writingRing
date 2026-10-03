@@ -225,6 +225,7 @@ def train(config: Config, spec: ExpSpec) -> UHistoryNet:
         "epoch": 0, "train_loss": None, "val_ba": best["ba"], "val_mean_logit_ce": best["mean_logit_ce"]
     }]
     stopped_epoch = 0
+    train_loader = loader(arrays, "train", p, spec.seed, shuffle=True)
     for epoch in range(1, p.max_epochs + 1):
         model.train()
         total, count = 0.0, 0
