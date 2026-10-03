@@ -157,6 +157,8 @@ def test_spike_drain_slurm_contract() -> None:
         source = (slurm / name).read_text()
         assert "#SBATCH --time=01:00:00" in source
         assert "common.bash" in source
+        assert "set -eo pipefail" in source
+        assert "set -euo pipefail" not in source
     run_array = (slurm / "run_array.bash").read_text()
     assert "#SBATCH --array=0-32%33" in run_array
     submit = (slurm / "submit.bash").read_text()
