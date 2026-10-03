@@ -128,6 +128,9 @@ def test_slurm_workers_resolve_common_from_submit_root() -> None:
 
     common = (slurm / "common.bash").read_text()
     assert 'REPO_ROOT="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"' in common
+    assert "source /etc/profile" in common
+    assert common.index("source /etc/profile") < common.index("module load conda/latest")
+    assert common.index("source /etc/profile") < common.index("set -u")
 
     submit = (slurm / "submit.bash").read_text()
     assert "export REPO_ROOT=" in submit
