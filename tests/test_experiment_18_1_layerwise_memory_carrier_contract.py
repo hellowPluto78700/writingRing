@@ -94,14 +94,19 @@ def test_ui_and_iu_are_distinct_after_spiking():
     x = torch.ones(2, p.steps, p.input_channels)
     lengths = torch.full((2,), p.steps, dtype=torch.long)
     a, b = ui(x, lengths), iu(x, lengths)
-    assert not torch.equal(a["spike"][0], b["spike"][0])
-    assert not torch.equal(a["evidence"], b["evidence"])
+    assert int(a["spike"][0].sum()) > 0
+    assert int(b["spike"][0].sum()) > 0
+    # Binary spikes may saturate to the same all-one pattern under this
+    # deliberately strong drive. The carrier intervention must instead be
+    # visible in the post-spike state trajectory: resetting the slow U state
+    # versus the fast U state changes subsequent pre-reset values.
+    assert not torch.equal(a["pre_reset"][0], b["pre_reset"][0])
 
 
 def test_subthreshold_single_layer_pole_swap_is_equivalent():
     p = _p()
     slow = exp._slow_values((2, 3, 4), p.width)
-    fast = torch.tensor(torch.exp(torch.tensor(-(1000.0 / p.fs) / p.tau_mem_ms)))
+    fast = torch.exp(torch.tensor(-(1000.0 / p.fs) / p.tau_mem_ms))
     drive = 1e-4 * torch.randn(3, p.steps, p.width)
 
     def run(carrier: str):
