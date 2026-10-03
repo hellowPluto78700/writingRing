@@ -80,12 +80,17 @@ def test_margin_loss_penalizes_insufficient_margin():
 def test_native_checkpoint_selection_metric_remains_raw_wcce_logits():
     p = _p()
     model = exp._model(exp.ExpSpec("I_NWCCE", 11), p)
-    x = torch.randn(3, p.steps, p.input_channels)
+    with torch.no_grad():
+        for layer in model.layers:
+            layer.weight.fill_(0.8)
+        model.head.weight.fill_(0.3)
+    x = torch.ones(3, p.steps, p.input_channels)
     lengths = torch.tensor([16, 14, 11])
     out = model(x, lengths)
     native = mean_logits(out["evidence"], lengths)
     counts = valid_sum(out["spike"][-1], lengths)
     normalized = model.head(exp.normalized_counts(counts))
+    assert int(counts.sum()) > 0
     assert native.shape == normalized.shape
     # The formal selection path must not silently replace native logits
     # with the normalized training-only geometry.
