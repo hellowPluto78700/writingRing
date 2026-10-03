@@ -19,7 +19,7 @@ from core_benchmark_v1.data import loader
 from core_benchmark_v1.model import BenchmarkNet, BinarySpike, mean_logits, valid_mask
 from core_benchmark_v1.probes import run_probes
 from core_benchmark_v1.protocol import Protocol, Run, SPLITS, paired_seed, runs
-from core_benchmark_v1.storage import file_hash, load_torch, save_json, save_npz, save_torch, validate_complete
+from core_benchmark_v1.storage import file_hash, load_torch, save_json, save_npz, save_torch, state_hash, validate_complete
 from core_benchmark_v1.training import cpu_state, metrics
 from scripts import experiment_16_prefix_supervised_selective_memory as exp16
 
