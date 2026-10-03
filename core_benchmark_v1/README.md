@@ -212,3 +212,4 @@ The focused suite checks case/dependency mapping, current and reset equations, r
 Optional studies that reuse the locked CoreBenchmark data/model/probe contract without changing the v1.1 run matrix live under `core_benchmark_v1/extensions/`.
 
 - `extensions/output_residual_leakage/`: 11-point output beta sweep under WCCE/TSCE with endpoint residual correction, full Core probes, firing/persistence diagnostics, high/low-rate group probes, pruning controls, and a separate Slurm pipeline. It is not part of the canonical 36-run CoreBenchmark v1.1 manifest.
+- `extensions/output_spike_drain/`: 11-point beta sweep for end-to-end WCCE with positive-only cap-1 output spikes and output-only full endpoint drain (`beta_drain=1`, zero new evidence), reporting drained vs valid-only BA, drain-capacity diagnostics, standard Core probes, and a separate 33-run Slurm pipeline. It is not part of the canonical CoreBenchmark v1.1 manifest.
