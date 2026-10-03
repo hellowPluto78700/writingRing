@@ -70,10 +70,16 @@ def drain_output_state(
     steps = min(k_required, max_steps)
     membrane = final_membrane
     count = torch.zeros_like(membrane)
-    for _ in range(steps):
-        spike, membrane, _ = lif_step(
+    for step in range(steps):
+        # A unit stops participating once its detached forward backlog is empty.
+        # This preserves exact forward serialization while preventing extra
+        # surrogate-gradient passes through already-drained/subthreshold units.
+        active = required > step
+        spike, candidate_membrane, _ = lif_step(
             torch.zeros_like(membrane), membrane, 1.0, threshold, slope
         )
+        spike = spike * active
+        membrane = torch.where(active, candidate_membrane, membrane)
         count = count + spike
     return {
         "drain_count": count,
