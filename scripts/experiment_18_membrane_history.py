@@ -228,7 +228,7 @@ def train(config: Config, spec: ExpSpec) -> UHistoryNet:
     for epoch in range(1, p.max_epochs + 1):
         model.train()
         total, count = 0.0, 0
-        for x, y, lengths in loader(arrays, "train", p, spec.seed, shuffle=True):
+        for x, y, lengths in train_loader:
             optimizer.zero_grad(set_to_none=True)
             loss = F.cross_entropy(mean_logits(model(x, lengths)["evidence"], lengths), y)
             if not torch.isfinite(loss):
