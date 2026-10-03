@@ -87,6 +87,20 @@ def test_drain_has_no_additional_leakage() -> None:
     )
 
 
+
+
+def test_already_drained_units_get_no_extra_surrogate_gradient() -> None:
+    theta = 0.5
+    final = torch.tensor([[2.4 * theta, 0.4 * theta]], requires_grad=True)
+    out = drain_output_state(
+        final, threshold=theta, slope=10.0, max_steps=32
+    )
+    out["drain_count"].sum().backward()
+    assert final.grad is not None
+    # The second unit starts below threshold and should never participate
+    # in another drain iteration, so its drain-count gradient is exactly zero.
+    assert final.grad[0, 1].item() == 0.0
+
 def test_drain_training_gradient_reaches_head_and_backbone() -> None:
     p = replace(
         Protocol(),
