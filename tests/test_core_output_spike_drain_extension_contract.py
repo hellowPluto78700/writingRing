@@ -90,17 +90,18 @@ def test_drain_has_no_additional_leakage() -> None:
 def test_drain_training_gradient_reaches_head_and_backbone() -> None:
     p = replace(
         Protocol(),
+        profile="smoke",
         width=6,
         input_channels=3,
         total_channels=9,
-        steps=8,
+        steps=16,
         labels=("A", "B", "C"),
         batch_size=2,
     )
     run = Run("TEST_DRAIN", 11, "08_output_spike_drain", objective="wcce")
     model = BenchmarkNet(run, p)
-    x = torch.randn(2, 8, 3)
-    lengths = torch.tensor([8, 6])
+    x = torch.randn(2, 16, 3)
+    lengths = torch.tensor([16, 12])
     y = torch.tensor([0, 1])
     evidence = model(x, lengths)["evidence"]
     out = drained_spike_output(
