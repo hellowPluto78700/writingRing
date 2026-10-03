@@ -94,3 +94,96 @@ prepare
 ```
 
 Each independent run is one CPU task. The training task immediately evaluates its own selected checkpoint. The I_REF diagnostic tasks never retrain O0.
+
+
+## Execution contract
+
+### Required per-run artifacts
+
+For each `U_NORMAL` and `U_DETACH` seed, completion requires:
+
+- `checkpoint.pt`
+- `native.json`
+- canonical CoreBenchmark probe artifacts
+- per-tau activity statistics
+- gradient diagnostics
+- `complete.json` with artifact hashes
+
+These analyses are run-local, lightweight relative to training, and resource-compatible with the training task. They therefore execute in the same Slurm array task:
+
+```text
+train
+  -> checkpoint selection
+  -> native evaluation
+  -> canonical probes
+  -> gradient diagnostics
+  -> complete.json
+```
+
+A Slurm task reaching `COMPLETED` is not sufficient by itself; the run is complete only when all required artifacts above are present and `complete.json` validates them.
+
+### Optional / exploratory artifacts
+
+Exp18.0 has no optional analysis that is required for the primary hypothesis. Additional plots or later exploratory re-analysis must not silently become completion requirements without updating this README.
+
+### Reused reference exception
+
+`I_REF` has no Exp18 training task because it reuses finalized CoreBenchmark O0 checkpoints. Its Exp18-specific gradient diagnostic is therefore a separate small job. This is the intended exception to the per-run train+analysis co-location rule.
+
+### Exact Slurm DAG
+
+```text
+compute-node smoke
+  -> prepare
+      -> 6-task U-history train/evaluate/probe/diagnose array
+      -> 3-task I_REF diagnostic array
+  -> finalize after both job groups succeed
+```
+
+Recommended concurrency for Exp18.0 is 6 because there are only six independent U-history runs. Increasing concurrency provides no benefit for this experiment.
+
+### Environment contract
+
+All Exp18 compute jobs use:
+
+`scripts/bash_script/SNN_Bash/slurm_cpu_env.bash`
+
+The shared bootstrap:
+
+- initializes only the required Unity Lmod pieces;
+- does not source `/etc/profile` wholesale;
+- loads `conda/latest`;
+- activates `writingring-gpu`, falling back to `writingring-viz` only if needed;
+- sets one-core BLAS/OpenMP thread limits;
+- clears `CUDA_VISIBLE_DEVICES` for CPU jobs.
+
+This avoids the observed Unity failure mode in which `/etc/profile.d/z05-lmod-purge.sh` accesses an unset `LMOD_DO_PURGE` variable and terminates batch jobs before Python starts.
+
+### Smoke / preflight
+
+Formal submission is gated by:
+
+```bash
+sbatch scripts/bash_script/SNN_Bash/smoke_exp_18_cpu.bash
+```
+
+The smoke job runs on a compute node with the same environment bootstrap as formal jobs. It checks:
+
+1. Python / NumPy / PyTorch imports;
+2. CoreBenchmark O0 protocol/data/reference-artifact loading;
+3. construction of both `U_NORMAL` and `U_DETACH`;
+4. one real-data forward pass;
+5. WCCE loss and backward pass;
+6. optimizer step with finite gradients;
+7. checkpoint save/load round-trip;
+8. finite evaluation logits after restore.
+
+The formal DAG must not proceed if smoke fails.
+
+### Resume and provenance
+
+- valid `complete.json` with matching provenance -> skip the entire run;
+- valid checkpoint with matching provenance -> skip retraining and continue required analysis;
+- missing/mismatched protocol, dataset/core identity, seed/case, or source provenance -> do not silently reuse the artifact.
+
+The finalizer requires all six U-history runs to be complete and all three I_REF diagnostics to exist. It aggregates artifacts only; it must not retrain or silently regenerate missing work.
