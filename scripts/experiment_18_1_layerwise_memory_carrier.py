@@ -552,8 +552,13 @@ def finalize(config: Config) -> dict[str, Any]:
                     raise FileNotFoundError(f"Missing complete hybrid run: {case} seed {seed}")
             else:
                 ref = protocol["references"][case][str(seed)]
-                for name in ("checkpoint", "native", "probes"):
-                    if file_hash(directory / f"{name}.json") != ref[f"{name}_hash"] if name != "checkpoint" else file_hash(directory / "checkpoint.pt") != ref["checkpoint_hash"]:
+                actual = {
+                    "checkpoint_hash": file_hash(directory / "checkpoint.pt"),
+                    "native_hash": file_hash(directory / "native.json"),
+                    "probes_hash": file_hash(directory / "probes.json"),
+                }
+                for name, digest in actual.items():
+                    if digest != ref[name]:
                         raise ValueError(f"Changed reference artifact: {case} seed {seed} {name}")
             native = _read_json(directory / "native.json")
             probe = _primary_probe(directory)
