@@ -105,16 +105,18 @@ Required defaults:
 
 * Prefer Slurm arrays for independent experiment runs.
 * Use one CPU core per independent run unless profiling shows the run materially benefits from more cores.
-* Cap array concurrency at 50 tasks by default, e.g. `#SBATCH --array=0-N%50`.
+* Treat 50 concurrent CPU tasks as a repository ceiling, not a target. Each experiment README must declare a recommended concurrency based on run cost and scheduler/fairshare behavior.
 * Never request more than 50 simultaneously running experiment CPU tasks without explicit user approval.
 * Split sweeps across seeds, objectives, architectures, configurations, or other independent conditions instead of running them sequentially in one process.
-* When a run's evaluation depends only on its own checkpoint, perform `train -> evaluate -> save artifacts` in the same Slurm task rather than creating a barrier followed by a second full evaluation array.
-* Keep training and evaluation as separate Python functions/modules even when the Slurm task executes them consecutively, so evaluation can be rerun without retraining.
+* When required per-run post-training work depends only on that run, is lightweight relative to training, and is resource-compatible with training, keep it in the same Slurm task: `train -> select checkpoint -> evaluate -> required per-run analysis -> complete.json`. Do not create separate CPU stages merely for organizational convenience.
+* Separate post-training jobs are appropriate for cross-run aggregation, reused references without a training task, materially different resource requirements, or independently expensive diagnostics. Every deviation must be stated in the experiment README.
+* Keep training and evaluation/analysis as separate Python functions/modules even when one Slurm task executes them consecutively, so valid checkpoints can be re-analyzed without retraining.
 * Reused/frozen baselines that require no training may be evaluated by a small separate job; use one CPU sequentially when the baseline set is small unless there is a measured reason to parallelize it.
 * Use Slurm `afterok` dependencies for finalizers that require multiple job groups to complete.
 * Finalizers should aggregate existing per-run artifacts only; they should not retrain models or silently regenerate missing runs.
 * Experiment notebooks should be analysis-only whenever practical: read finalized CSV/JSON artifacts, aggregate, rank, and plot. Do not make the notebook the primary training or multiprocessing driver.
-* Every Slurm compute node/job must initialize Conda locally before running experiment code. Batch scripts should run `module load conda/latest`, then `eval "$(conda shell.bash hook)"`, then activate `writingring-gpu`; fall back to `writingring-viz` only if `writingring-gpu` is unavailable.
+* Every Slurm compute node/job must initialize its environment locally. For CPU experiment jobs, use the repository's validated `scripts/bash_script/SNN_Bash/slurm_cpu_env.bash` bootstrap when available; it initializes only the required Lmod pieces, loads `conda/latest`, activates `writingring-gpu` with documented fallback to `writingring-viz`, and sets one-core thread limits.
+* Do not `source /etc/profile` wholesale in Slurm experiment jobs. Unity's `/etc/profile.d/z05-lmod-purge.sh` reads `LMOD_DO_PURGE` unsafely under some batch environments and has caused immediate array-wide bootstrap failures. If a different bootstrap is required, document and smoke-test it.
 * Do not rely on Conda activation inherited from the login/submit shell, and do not pass the submit shell's absolute Python executable path to compute nodes as the environment contract.
 * Do not place comma-separated values such as label lists directly inside `sbatch --export=...`, because Slurm uses commas as variable separators. Export the complete value in the submit shell first, then submit with `--export=ALL` so the value is inherited intact.
 * Set CPU thread environment variables such as `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` for one-core-per-task jobs to avoid hidden oversubscription.
@@ -123,6 +125,42 @@ Required defaults:
 Valid reasons to deviate include a workload that is demonstrably GPU-bound, requires materially more memory per run, has unavoidable shared mutable state, has a true serial dependency between runs, cannot safely write independent artifacts, or has benchmark evidence that another execution model is better. Document the reason for the deviation in the experiment README or runner comments.
 
 For new experiment implementations, treat this multi-CPU pattern as the repository default rather than an experiment-specific optimization.
+
+### Required execution contract for every experiment README
+
+Every newly implemented experiment must contain an explicit execution contract in its README before formal Slurm submission. At minimum it must declare:
+
+* required per-run artifacts/analyses that gate completion;
+* optional/exploratory artifacts that do not gate completion;
+* the exact Slurm DAG and which steps are co-located in one task;
+* any heavy diagnostic that is intentionally split into a separate job, with the reason;
+* whether reused/reference artifacts require a separate evaluation/diagnostic job;
+* the files/coordinates the finalizer requires;
+* recommended array concurrency;
+* the compute-node environment/bootstrap contract;
+* the environment smoke command/job and experiment smoke command/job;
+* resume/skip behavior and provenance checks used before reusing checkpoints or completed runs.
+
+A Slurm job reaching `COMPLETED` is not the experiment-level completion criterion. A run is complete only when its README-declared required artifacts have been produced and a valid `complete.json` (or an explicitly documented equivalent) verifies them. Finalizers must fail closed on missing required artifacts.
+
+Runs should be restartable from artifacts rather than from manually maintained workflow-state markers:
+
+```text
+valid complete.json + matching provenance -> skip the run
+valid checkpoint + matching provenance    -> skip training, continue required analysis
+missing or mismatched provenance          -> do not silently reuse artifacts
+```
+
+Artifact provenance should include enough information to reject stale results after meaningful implementation changes (experiment/protocol version, seed/case identity, dataset/core-protocol identity, and source/hash or equivalent repository revision).
+
+### Mandatory preflight before formal experiment arrays
+
+Formal Slurm arrays for a new or materially changed experiment must be gated by two cheap checks:
+
+1. **Environment smoke on a compute node:** initialize the exact environment bootstrap used by formal jobs, activate the intended Conda environment, import critical dependencies, and verify the expected Python/runtime.
+2. **Experiment smoke:** load the real locked protocol/data path, construct each materially distinct model case, run at least one small forward/loss/backward/optimizer step, exercise checkpoint save/load, and run a minimal evaluation/probe path when those components are part of the formal run.
+
+The smoke path must use the same bootstrap and core code paths as the formal tasks. Do not replace it with a login-node-only import test. If smoke fails, do not submit the formal array until the failure is understood or the user explicitly requests a bypass.
 
 # Agent execution model
 
