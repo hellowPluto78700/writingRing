@@ -10,8 +10,13 @@ import argparse
 import csv
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
+
+# The evaluator is intentionally single-CPU and sequential across checkpoints.
+for _thread_env in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ[_thread_env] = "1"
 
 import matplotlib
 matplotlib.use("Agg")
@@ -19,9 +24,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from .model import BenchmarkNet, lif_step
-from .protocol import Protocol, Run
-from .storage import load_torch
+torch.set_num_threads(1)
+try:
+    torch.set_num_interop_threads(1)
+except RuntimeError:
+    pass
+
+from ..model import BenchmarkNet, lif_step
+from ..protocol import Protocol, Run
+from ..storage import load_torch
 
 SEEDS = (11, 23, 37)
 CASE = "O0"
