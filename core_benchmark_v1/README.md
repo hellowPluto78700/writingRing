@@ -214,3 +214,22 @@ Optional studies that reuse the locked CoreBenchmark data/model/probe contract w
 - `extensions/output_residual_leakage/`: 11-point output beta sweep under WCCE/TSCE with endpoint residual correction, full Core probes, firing/persistence diagnostics, high/low-rate group probes, pruning controls, and a separate Slurm pipeline. It is not part of the canonical 36-run CoreBenchmark v1.1 manifest.
 - `extensions/output_spike_drain/`: 11-point beta sweep for end-to-end WCCE with positive-only cap-1 output spikes and output-only full endpoint drain (`beta_drain=1`, zero new evidence), reporting drained vs valid-only BA, drain-capacity diagnostics, standard Core probes, and a separate 33-run Slurm pipeline. It is not part of the canonical CoreBenchmark v1.1 manifest.
 - `extensions/output_spike_tsce_beta/`: paired 11-point beta sweep for end-to-end spike-only TSCE, with separate valid-only and fully-drained modes. Training loss, checkpoint selection, and native inference use output spikes only; analog `Wz` is diagnostic-only. Drain spikes are attached to the final valid TSCE timestep without increasing the valid-length denominator. The 66-run Slurm pipeline includes a compute-node preflight smoke and is not part of the canonical CoreBenchmark v1.1 manifest.
+
+## Baseline model evaluation (read-only)
+
+`analysis_tools/baseline_evaluation.py` dissects the finalized two-layer O0 WCCE + bias-free accumulator baseline without training or modifying checkpoints. It is intentionally compatible with the historical results/main v1.0 artifacts: it checks the locked geometry and checkpoint case/seed/objective, then loads checkpoint weights into the unchanged two-layer model.
+
+Run:
+
+    python -m core_benchmark_v1.analysis_tools.baseline_evaluation --root core_benchmark_v1/results/main
+
+The default output is <root>/baseline_evaluation/. The evaluator uses O0 seeds 11/23/37. It computes train and test confusion matrices separately for every checkpoint. The three display classes are selected once from the mean of the three row-normalized test confusion matrices: highest recall, lower-median recall (6th of 12), and lowest recall.
+
+For each selected class and checkpoint it chooses one train and one test exemplar with valid length nearest the preferred cohort median. Highest/middle exemplars prefer correctly classified samples; the lowest-class test exemplar prefers a misclassified sample when one exists. Each exemplar exports:
+
+- one 4x1 panel: input raster, L1 spike raster, L2 spike raster, and instantaneous output evidence e(t)=W_out z_L2(t); the accumulator baseline has no output spike neuron;
+- one 2x1 L1/L2 synaptic-current I(t) heatmap;
+- one 2x1 L1/L2 post-reset membrane U(t) heatmap;
+- CSV matrices for input, spikes, I, U, output evidence, and cumulative accumulator state.
+
+Each checkpoint also exports the input-to-L1, L1-to-L2, and L2-to-output weight matrices, overall weight histograms, tau-group histograms, and a 3x3 L1-to-L2 source/destination tau-block summary. Neuron axes retain the benchmark tau-group ordering and group boundaries. sample_manifest.csv, class_selection.json, and manifest.json record all deterministic selection decisions and provenance.

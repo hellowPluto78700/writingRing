@@ -6,6 +6,7 @@ on:
     paths:
       - 'core_benchmark_v1/**'
       - 'tests/test_core_benchmark_v1_contract.py'
+      - 'tests/test_core_baseline_evaluation_contract.py'
       - 'tests/test_core_output_spike_tsce_beta_extension_contract.py'
       - '.github/workflows/ci-core-benchmark-v1.yml'
       - 'snn/accel_reconstruction_eval/datasets.py'
@@ -55,4 +56,4 @@ jobs:
           python -m pip install -e '.[test,snn]' scikit-learn==1.6.1 nbformat nbclient ipykernel
       - name: Check source syntax, focused contracts, and notebook execution
         run: |
-          python -m pytest -q tests/test_repository_source_syntax.py tests/test_core_benchmark_v1_contract.py tests/test_core_output_spike_tsce_beta_extension_contract.py
+          python -m pytest -q tests/test_repository_source_syntax.py tests/test_core_benchmark_v1_contract.py tests/test_core_baseline_evaluation_contract.py tests/test_core_output_spike_tsce_beta_extension_contract.py
