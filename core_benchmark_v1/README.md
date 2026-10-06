@@ -217,11 +217,11 @@ Optional studies that reuse the locked CoreBenchmark data/model/probe contract w
 
 ## Baseline model evaluation (read-only)
 
-The baseline evaluator dissects the finalized two-layer O0 WCCE + bias-free accumulator baseline without training or modifying checkpoints. It is intentionally compatible with the historical results/main v1.0 artifacts: it checks the locked geometry and checkpoint case/seed/objective, then loads checkpoint weights into the unchanged two-layer model.
+`analysis_tools/baseline_evaluation.py` dissects the finalized two-layer O0 WCCE + bias-free accumulator baseline without training or modifying checkpoints. It is intentionally compatible with the historical results/main v1.0 artifacts: it checks the locked geometry and checkpoint case/seed/objective, then loads checkpoint weights into the unchanged two-layer model.
 
 Run:
 
-    python -m core_benchmark_v1.baseline_evaluation --root core_benchmark_v1/results/main
+    python -m core_benchmark_v1.analysis_tools.baseline_evaluation --root core_benchmark_v1/results/main
 
 The default output is <root>/baseline_evaluation/. The evaluator uses O0 seeds 11/23/37. It computes train and test confusion matrices separately for every checkpoint. The three display classes are selected once from the mean of the three row-normalized test confusion matrices: highest recall, lower-median recall (6th of 12), and lowest recall.
 
