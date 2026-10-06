@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import numpy as np
 import torch
-from core_benchmark_v1.baseline_evaluation import SEEDS, _representative_index, confusion, select_classes, trace_one
+from core_benchmark_v1.analysis_tools.baseline_evaluation import SEEDS, _representative_index, confusion, select_classes, trace_one
 from core_benchmark_v1.model import BenchmarkNet
 from core_benchmark_v1.protocol import Protocol, Run
 
