@@ -14,5 +14,3 @@ import torch
 print({"python": sys.version.split()[0], "numpy": numpy.__version__, "torch": torch.__version__})
 PY
 python -m scripts.experiment_19_cross_user_generalization smoke
-
-[executed on device: acd20ea31325 (425a23ad-a806-44e3-abed-ce7b563d3969)]

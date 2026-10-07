@@ -12,5 +12,3 @@ aggregate_job=$(sbatch --parsable --dependency=afterok:"$final_job" --export=ALL
 
 printf 'smoke=%s prepare=%s calibration=%s select=%s final=%s finalize=%s\n' \
   "$smoke_job" "$prepare_job" "$cal_job" "$select_job" "$final_job" "$aggregate_job"
-
-[executed on device: acd20ea31325 (425a23ad-a806-44e3-abed-ce7b563d3969)]

@@ -64,5 +64,3 @@ Formal submit:
 Focused validation:
 
     python -m pytest -q tests/test_repository_source_syntax.py tests/test_experiment_19_cross_user_generalization_contract.py
-
-[executed on device: acd20ea31325 (425a23ad-a806-44e3-abed-ce7b563d3969)]

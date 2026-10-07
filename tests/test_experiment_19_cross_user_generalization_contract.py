@@ -139,5 +139,3 @@ def test_style_mix_requires_same_class_different_user_partner():
     out = exp.style_mix(x, y, users, lengths, 1.0, torch.Generator().manual_seed(3))
     assert out.shape == x.shape
     assert torch.isfinite(out).all()
-
-[executed on device: acd20ea31325 (425a23ad-a806-44e3-abed-ce7b563d3969)]
